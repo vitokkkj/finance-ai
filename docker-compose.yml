@@ -1,0 +1,157 @@
+name: finance-ai
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB no arquivo .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Defina POSTGRES_USER no arquivo .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - data
+
+  ollama:
+    profiles: ["local-ai"]
+    image: ollama/ollama
+    environment:
+      OLLAMA_NO_CLOUD: "1"
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - app
+
+  ollama-model-init:
+    profiles: ["local-ai"]
+    image: ollama/ollama
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        ollama show "$${OLLAMA_MODEL}" >/dev/null 2>&1 ||
+        ollama pull "$${OLLAMA_MODEL}"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_NO_CLOUD: "1"
+      OLLAMA_MODEL: ${OLLAMA_MODEL_LOCAL:-qwen3:1.7b}
+    volumes:
+      - ollama_data:/root/.ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - app
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+      LOGIN_RATE_LIMIT_ATTEMPTS: ${LOGIN_RATE_LIMIT_ATTEMPTS:-5}
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:-300}
+      AI_PROVIDER: ${AI_PROVIDER:-chatgpt_plan}
+      AI_MODEL_FAST: ${AI_MODEL_FAST:-gpt-6-luna}
+      AI_MODEL_SMART: ${AI_MODEL_SMART:-gpt-6.1-sol}
+      CHATGPT_AUTH_DIR: /home/app/.config/sophia
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-4096}
+      PYTHONPATH: /workspace/apps/api:/workspace
+    volumes:
+      - ./apps/api:/workspace/apps/api
+      - chatgpt_auth_data:/home/app/.config/sophia
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - app
+      - data
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-m", "worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PYTHONPATH: /workspace/worker:/workspace/apps/api:/workspace
+    volumes:
+      - ./worker:/workspace/worker
+      - ./apps/api:/workspace/apps/api:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - data
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    command: ["npm", "run", "dev", "--", "--hostname", "0.0.0.0"]
+    environment:
+      API_INTERNAL_URL: http://api:8000
+      WEB_ALLOWED_DEV_ORIGINS: ${WEB_ALLOWED_DEV_ORIGINS:-127.0.0.1}
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+    volumes:
+      - ./apps/web/src:/workspace/apps/web/src
+      - ./apps/web/public:/workspace/apps/web/public
+      - ./apps/web/next.config.ts:/workspace/apps/web/next.config.ts
+      - ./apps/web/postcss.config.mjs:/workspace/apps/web/postcss.config.mjs
+      - ./apps/web/tsconfig.json:/workspace/apps/web/tsconfig.json
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then((r) => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - app
+
+volumes:
+  postgres_data:
+  ollama_data:
+    name: ${OLLAMA_VOLUME_NAME:-finance-ai_ollama_data}
+
+  chatgpt_auth_data:
+
+networks:
+  app:
+  data:
+    internal: true

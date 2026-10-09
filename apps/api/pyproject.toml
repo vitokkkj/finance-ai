@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "."
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["migrations/versions"]
+
+[[tool.mypy.overrides]]
+module = ["argon2.*", "psycopg.*"]
+ignore_missing_imports = true
