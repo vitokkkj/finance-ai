@@ -542,6 +542,13 @@ export function AssistantWorkspace({
           } else if (eventName === "structured") {
             const items = Array.isArray(payload.items) ? (payload.items as StructuredItem[]) : [];
             updateAssistantMessage(assistantId, (message) => ({ ...message, structured_content: items }));
+          } else if (eventName === "conversation_title") {
+            const title = stringValue(payload.title);
+            if (title) {
+              setConversations((current) => current.map((item) =>
+                item.id === activeConversationId ? { ...item, title } : item,
+              ));
+            }
           } else if (eventName === "tool_status") {
             const name = stringValue(payload.name) ?? "uma ferramenta financeira";
             const toolStatus = stringValue(payload.status);

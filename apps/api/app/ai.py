@@ -11,11 +11,19 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.ai_chat import _assistant_message, _tool_message, stream_assistant_reply
+from app.ai_chat import (
+    _assistant_message,
+    _tool_message,
+    sse_event,
+    stream_assistant_reply,
+    suggest_conversation_title,
+)
 from app.ai_provider import (
     AIProvider,
+    AIProviderError,
     OllamaProvider,
     OpenAIResponsesProvider,
     ollama_models_available,
@@ -272,6 +280,7 @@ def send_message(
         )
         .limit(1)
     )
+    generate_title = has_user_message is None and conversation.title == "Nova conversa"
     message = AIMessage(
         user_id=user.id,
         conversation_id=conversation.id,
@@ -280,7 +289,7 @@ def send_message(
         created_at=datetime.now(UTC),
     )
     db.add(message)
-    if has_user_message is None and conversation.title == "Nova conversa":
+    if generate_title:
         conversation.title = _conversation_title_from_message(payload.content)
     conversation.updated_at = datetime.now(UTC)
     db.commit()
@@ -289,6 +298,48 @@ def send_message(
     async def events() -> AsyncIterator[str]:
         async for item in stream_assistant_reply(db, user, conversation, message, provider):
             yield item
+        if not generate_title:
+            return
+        assistant_message = db.scalar(
+            select(AIMessage)
+            .where(
+                AIMessage.user_id == user.id,
+                AIMessage.conversation_id == conversation.id,
+                AIMessage.role == "ASSISTANT",
+            )
+            .order_by(AIMessage.created_at.desc(), AIMessage.id.desc())
+            .limit(1)
+        )
+        if (
+            assistant_message is None
+            or assistant_message.diagnostic_status == "FAILED"
+            or (assistant_message.model or "").startswith("local-")
+        ):
+            return
+        try:
+            generated_title, title_input_tokens, title_output_tokens = (
+                await suggest_conversation_title(provider, payload.content)
+            )
+        except AIProviderError:
+            return
+        if generated_title is None:
+            return
+        conversation.title = generated_title
+        conversation.updated_at = datetime.now(UTC)
+        if title_input_tokens is not None:
+            assistant_message.input_tokens = (
+                (assistant_message.input_tokens or 0) + title_input_tokens
+            )
+        if title_output_tokens is not None:
+            assistant_message.output_tokens = (
+                (assistant_message.output_tokens or 0) + title_output_tokens
+            )
+        try:
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
+            return
+        yield sse_event("conversation_title", {"title": generated_title})
 
     return StreamingResponse(
         events(),

@@ -39,9 +39,23 @@ class FakeAIProvider:
 
     def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderEvent]:
         self.requests.append(request)
+        if any(tool.get("name") == "suggest_conversation_title" for tool in request.tools):
+            response = [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_title",
+                        "suggest_conversation_title",
+                        json.dumps({"title": "Resumo financeiro"}),
+                    ),
+                ),
+                _completed(3, 2),
+            ]
+        else:
+            response = self.responses.pop(0)
 
         async def generate() -> AsyncIterator[ProviderEvent]:
-            for event in self.responses.pop(0):
+            for event in response:
                 yield event
 
         return generate()
@@ -510,7 +524,7 @@ def test_sse_response_persists_messages_context_and_usage(client: TestClient) ->
     assert "event: text_delta" in first.text
     assert 'event: done\ndata: {"status": "ok"}' in first.text
     detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
-    assert detail["title"] == "Oi"
+    assert detail["title"] == "Resumo financeiro"
     messages = detail["messages"]
     assert [(item["role"], item["content"]) for item in messages] == [
         ("USER", "Oi"),
@@ -518,14 +532,19 @@ def test_sse_response_persists_messages_context_and_usage(client: TestClient) ->
         ("USER", "O que pode fazer?"),
         ("ASSISTANT", "Posso ajudar."),
     ]
-    assert any(item == {"role": "user", "content": "Oi"} for item in fake.requests[1].input_items)
+    assert any(
+        item == {"role": "user", "content": "Oi"}
+        for request in fake.requests
+        if not any(tool.get("name") == "suggest_conversation_title" for tool in request.tools)
+        for item in request.input_items
+    )
     assert all(
         "user_id" not in json.dumps(tool) for request in fake.requests for tool in request.tools
     )
     usage = client.get("/api/ai/usage").json()
     assert usage["calls_today"] == 2
-    assert usage["input_tokens_today"] == 34
-    assert usage["output_tokens_today"] == 17
+    assert usage["input_tokens_today"] == 37
+    assert usage["output_tokens_today"] == 19
 
 
 def test_month_summary_uses_finance_engine_and_returns_structured_card(client: TestClient) -> None:
@@ -1544,9 +1563,9 @@ def test_development_diagnostics_show_usage_without_messages_or_secrets(
     assert row["model"] == settings.ai_model_fast
     assert row["status"] == "SUCCEEDED"
     assert row["duration_ms"] >= 0
-    assert row["input_tokens"] == 30
+    assert row["input_tokens"] == 33
     assert row["cached_input_tokens"] == 0
-    assert row["output_tokens"] == 6
+    assert row["output_tokens"] == 8
     assert row["estimated_cost_usd"] is None
     assert secret not in diagnostics.text
     assert client.cookies.get("finance_ai_session") not in diagnostics.text

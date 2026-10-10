@@ -6,7 +6,7 @@ O assistente é a entrada principal da aplicação. Ele mantém conversas privad
 
 O provider padrão usa OAuth Sign in with ChatGPT e chamadas a ferramentas validadas pela API. O histórico próprio da SophIA fica no PostgreSQL; o OAuth não dá acesso às conversas ou memórias do ChatGPT. O adapter fica em `apps/api/app/ai_provider.py`; o armazenamento e a renovação OAuth ficam em `apps/api/app/chatgpt_plan.py`; conversas e o ciclo de chamadas ficam em `ai.py` e `ai_chat.py`; as ferramentas autorizadas estão em `ai_tools.py`. Não se usa chave da API nem há fallback para cobrança da API.
 
-O título inicial de cada conversa é resumido localmente a partir da primeira mensagem, sem uma chamada extra ao modelo ou consumo adicional do plano. O usuário pode editar o título depois; a sidebar mostra os nomes longos com reticências.
+O título da primeira mensagem recebe uma sugestão curta do modelo pela mesma conexão ChatGPT quando o modelo já é necessário para responder. Essa solicitação breve usa o limite compartilhado do plano Plus e não usa uma chave da API nem gera cobrança da API. Quando o parser determinístico resolve a mensagem sem modelo, ele gera um título local. O usuário pode editar o título; a sidebar mostra nomes longos com reticências e tooltip.
 
 ## Fonte dos dados e ferramentas
 
