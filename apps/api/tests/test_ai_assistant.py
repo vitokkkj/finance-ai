@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.ai import get_ai_provider
+from app.ai import _conversation_title_from_message, get_ai_provider
 from app.ai_chat import choose_model
 from app.ai_pricing import estimated_cost
 from app.ai_provider import (
@@ -48,6 +48,31 @@ class FakeAIProvider:
 
     async def close(self) -> None:
         return None
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (
+            "crie a categoria Educação, e registre um gasto fixo, começando por 11/26 "
+            "e finalizando até 04/28",
+            "Gasto fixo · Educação",
+        ),
+        ("gastei 7,70 com croissant", "Gasto · Croissant"),
+        ("cadastre faturas no cartão do Sicredi: novembro/26 654,63", "Faturas · Sicredi"),
+    ],
+)
+def test_first_message_gets_a_compact_conversation_title(content: str, expected: str) -> None:
+    assert _conversation_title_from_message(content) == expected
+
+
+def test_long_conversation_title_stays_within_sidebar_limit() -> None:
+    title = _conversation_title_from_message(
+        "Quero comparar todas as despesas e entender detalhadamente o que mudou nos últimos meses"
+    )
+
+    assert len(title) <= 60
+    assert title.endswith("…")
 
 
 def _sign_up(client: TestClient) -> None:
@@ -484,7 +509,9 @@ def test_sse_response_persists_messages_context_and_usage(client: TestClient) ->
     assert first.headers["content-type"].startswith("text/event-stream")
     assert "event: text_delta" in first.text
     assert 'event: done\ndata: {"status": "ok"}' in first.text
-    messages = client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"]
+    detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    assert detail["title"] == "Oi"
+    messages = detail["messages"]
     assert [(item["role"], item["content"]) for item in messages] == [
         ("USER", "Oi"),
         ("ASSISTANT", "Olá, Pessoa."),

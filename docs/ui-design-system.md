@@ -11,7 +11,7 @@ A visão geral financeira permanece como uma área própria. Na conversa, o pain
 
 Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta.
 
-A Visão Geral destaca o saldo total e agrupa receitas, despesas e resultado no fluxo mensal. Conversas recentes podem ser renomeadas ou arquivadas pela sidebar.
+A Visão Geral destaca o saldo total e agrupa receitas, despesas e resultado no fluxo mensal. Conversas recentes recebem um título curto derivado da primeira mensagem, sem chamada adicional ao provedor de IA; o usuário pode renomeá-las ou arquivá-las pela sidebar. Títulos longos aparecem com reticências, sem cortar o texto sem indicação.
 
 ## Componentes de resposta
 

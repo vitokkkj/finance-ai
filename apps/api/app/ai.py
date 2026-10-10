@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -68,6 +69,56 @@ def _conversation_response(conversation: AIConversation) -> ConversationResponse
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
     )
+
+
+def _conversation_title_from_message(content: str) -> str:
+    """Create a compact, readable label from the first message without another model call."""
+    clean = " ".join(content.split()).strip(" .,!?:;\t\r\n")
+    if not clean:
+        return "Nova conversa"
+
+    category = re.search(
+        r"\bcategoria\s+(?P<name>[\wÀ-ÿ][\wÀ-ÿ&'’-]*(?:\s+(?!e\b|ou\b)[\wÀ-ÿ&'’-]+){0,2})",
+        clean,
+        re.IGNORECASE,
+    )
+    if category is not None:
+        name = category.group("name").strip(" .,!?:;\t\r\n")
+        if re.search(r"\b(gasto fixo|despesa fixa|recorrente|programad[oa])\b", clean, re.I):
+            return f"Gasto fixo · {name}"[:60]
+        if re.search(r"\b(crie|criar|cadastre|cadastrar|nova categoria)\b", clean, re.I):
+            return f"Categoria · {name}"[:60]
+
+    card = re.search(
+        r"\b(?:cart[aã]o|fatura)\s+(?:do\s+)?(?P<name>Gold|Sicredi|Visa|Mastercard)\b",
+        clean,
+        re.I,
+    )
+    if re.search(r"\bfaturas?\b", clean, re.I) and card is not None:
+        return f"Faturas · {card.group('name')}"[:60]
+
+    item = re.search(
+        r"\b(?:gastei|paguei|comprei)\b.{0,35}?"
+        r"\b(?:com|em|no|na)\s+(?P<name>[\wÀ-ÿ][\wÀ-ÿ &'’-]{0,34})",
+        clean,
+        re.I,
+    )
+    if item is not None:
+        name = item.group("name").strip(" .,!?:;\t\r\n")
+        name = name[0].upper() + name[1:] if name else name
+        return f"Gasto · {name}"[:60]
+
+    clean = re.sub(
+        r"^(?:(?:por favor|pode|quero|gostaria de|me ajude a|me ajuda a|"
+        r"registre|registrar|crie|criar)\s+)+",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    ).strip()
+    if len(clean) <= 60:
+        return clean[0].upper() + clean[1:]
+    shortened = clean[:57].rsplit(" ", 1)[0].rstrip(" .,!?:;")
+    return f"{shortened}…" if shortened else clean[:60]
 
 
 def _get_conversation(db: Session, user: User, conversation_id: UUID) -> AIConversation:
@@ -230,9 +281,7 @@ def send_message(
     )
     db.add(message)
     if has_user_message is None and conversation.title == "Nova conversa":
-        conversation.title = (
-            " ".join(payload.content.split())[:80].rstrip(" .,!?:;") or "Nova conversa"
-        )
+        conversation.title = _conversation_title_from_message(payload.content)
     conversation.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(message)

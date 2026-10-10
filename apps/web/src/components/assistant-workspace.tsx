@@ -835,7 +835,8 @@ export function AssistantWorkspace({
                   title={conversation.title}
                   type="button"
                 >
-                  <span className="history-marker" aria-hidden="true" />{conversation.title}
+                  <span className="history-marker" aria-hidden="true" />
+                  <span className="history-title">{conversation.title}</span>
                 </button>
                 <div className="history-actions">
                   <button aria-expanded={conversationMenuId === conversation.id} aria-label={`Ações da conversa ${conversation.title}`} className="history-action-toggle" disabled={busyConversationId === conversation.id} onClick={() => setConversationMenuId((current) => current === conversation.id ? null : conversation.id)} title="Ações da conversa" type="button"><MoreHorizontal aria-hidden="true" size={17} /></button>

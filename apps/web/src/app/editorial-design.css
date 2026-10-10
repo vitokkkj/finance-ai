@@ -3335,6 +3335,22 @@ textarea:focus-visible {
   text-align: left;
 }
 
+.assistant-history {
+  padding-top: 16px;
+}
+
+.assistant-history > p {
+  margin-bottom: 12px;
+}
+
+.history-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .opening-invoice-form .transaction-form-grid {
   align-items: start;
 }
