@@ -427,6 +427,7 @@ class CardInvoiceResponse(BaseModel):
     period_end: date
     closing_date: date
     due_date: date
+    opening_balance: Decimal
     total: Decimal
     paid_amount: Decimal
     outstanding: Decimal
@@ -434,9 +435,21 @@ class CardInvoiceResponse(BaseModel):
     purchases: list[TransactionResponse]
     payments: list[TransactionResponse]
 
-    @field_serializer("total", "paid_amount", "outstanding")
+    @field_serializer("opening_balance", "total", "paid_amount", "outstanding")
     def serialize_money(self, value: Decimal) -> str:
         return format(value, ".2f")
+
+
+class CardInvoiceOpeningBalanceSet(BaseModel):
+    closing_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    amount: Decimal = Field(ge=Decimal("0"), max_digits=14, decimal_places=2)
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def require_exact_money_string(cls, value: object) -> object:
+        if not isinstance(value, (str, Decimal)):
+            raise ValueError("Informe o valor da fatura como texto decimal.")
+        return value
 
 
 class RecurrenceCreate(BaseModel):

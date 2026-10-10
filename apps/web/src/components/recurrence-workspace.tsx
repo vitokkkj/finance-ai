@@ -6,6 +6,8 @@ import { CalendarClock, Check, CircleOff, Pencil, Plus, Repeat2, X } from "lucid
 import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
+import { HelpTip } from "@/components/help-tip";
+import { CalendarDateInput } from "@/components/calendar-date-input";
 
 type MovementType = "INCOME" | "EXPENSE";
 type Frequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
@@ -313,7 +315,7 @@ export function RecurrenceWorkspace() {
     <div className="recurrence-workspace">
       <div className="recurrence-intro">
         <span className="recurrence-intro-mark"><Repeat2 aria-hidden="true" size={18} /></span>
-        <p>Compromissos previstos não alteram seu saldo. Uma transação só é criada quando você registra um pagamento.</p>
+        <p>Uma regra prevê as próximas datas e valores. Elas aparecem como ocorrências abaixo; seu saldo só muda quando você registra o pagamento ou recebimento.</p>
       </div>
 
       {notice && (
@@ -333,13 +335,13 @@ export function RecurrenceWorkspace() {
             <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setRuleForm({ ...ruleForm, description: event.target.value })} required value={ruleForm.description} /></label>
             <label className="field-label">Tipo<select onChange={(event) => setRuleForm({ ...ruleForm, type: event.target.value as MovementType, category_id: "" })} value={ruleForm.type}><option value="EXPENSE">Despesa</option><option value="INCOME">Receita</option></select></label>
             <div className="field-label"><label htmlFor="recurrence-amount">Valor</label><CurrencyInput id="recurrence-amount" onChange={(value) => setRuleForm({ ...ruleForm, amount: value })} placeholder="0,00" required value={ruleForm.amount} /></div>
-            <label className="field-label">Conta<select onChange={(event) => setRuleForm({ ...ruleForm, account_id: event.target.value })} required value={ruleForm.account_id}><option value="">Selecione</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-            <label className="field-label">Categoria<select onChange={(event) => setRuleForm({ ...ruleForm, category_id: event.target.value })} required value={ruleForm.category_id}><option value="">Selecione</option>{currentCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-            <label className="field-label">Frequência<select onChange={(event) => setRuleForm({ ...ruleForm, frequency: event.target.value as Frequency })} value={ruleForm.frequency}><option value="DAILY">Diária</option><option value="WEEKLY">Semanal</option><option value="MONTHLY">Mensal</option><option value="YEARLY">Anual</option></select></label>
-            <label className="field-label">A cada<input max="365" min="1" onChange={(event) => setRuleForm({ ...ruleForm, interval: event.target.value })} required type="number" value={ruleForm.interval} /></label>
-            <label className="field-label">Começa em<input onChange={(event) => setRuleForm({ ...ruleForm, starts_on: event.target.value })} required type="date" value={ruleForm.starts_on} /></label>
-            <label className="field-label">Termina em (opcional)<input onChange={(event) => setRuleForm({ ...ruleForm, ends_on: event.target.value })} type="date" value={ruleForm.ends_on} /></label>
-            <label className="field-label recurrence-notes">Observações<textarea maxLength={2000} onChange={(event) => setRuleForm({ ...ruleForm, notes: event.target.value })} rows={2} value={ruleForm.notes} /></label>
+            <label className="field-label">Conta<select onChange={(event) => setRuleForm({ ...ruleForm, account_id: event.target.value })} required value={ruleForm.account_id}><option value="">Selecione</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select><small>Conta que será afetada quando você registrar a ocorrência.</small></label>
+            <label className="field-label">Categoria<select onChange={(event) => setRuleForm({ ...ruleForm, category_id: event.target.value })} required value={ruleForm.category_id}><option value="">Selecione</option>{currentCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><small>Classificação do lançamento criado ao registrar o pagamento ou recebimento.</small></label>
+            <label className="field-label"><span className="field-label-heading">Frequência <HelpTip label="Frequência">Escolha a unidade usada para repetir este compromisso: dia, semana, mês ou ano.</HelpTip></span><select onChange={(event) => setRuleForm({ ...ruleForm, frequency: event.target.value as Frequency })} value={ruleForm.frequency}><option value="DAILY">Diária</option><option value="WEEKLY">Semanal</option><option value="MONTHLY">Mensal</option><option value="YEARLY">Anual</option></select><small>Exemplo: Mensal significa uma previsão por mês.</small></label>
+            <label className="field-label"><span className="field-label-heading">Repetir a cada <HelpTip label="Intervalo da repetição">Usa a frequência escolhida ao lado. Ex.: Mensal + 1 mês repete todo mês; 2 meses cria uma previsão a cada dois meses.</HelpTip></span><span className="recurrence-interval-field"><input max="365" min="1" onChange={(event) => setRuleForm({ ...ruleForm, interval: event.target.value })} required type="number" value={ruleForm.interval} /><span>{frequencyUnit(ruleForm.frequency)}</span></span></label>
+            <div className="field-label"><span className="field-label-heading"><label htmlFor="recurrence-start-date">Começa em</label><HelpTip label="Data de início">A primeira data em que esta regra pode gerar uma ocorrência prevista.</HelpTip></span><CalendarDateInput id="recurrence-start-date" onChange={(value) => setRuleForm({ ...ruleForm, starts_on: value })} required value={ruleForm.starts_on} /></div>
+            <div className="field-label"><span className="field-label-heading"><label htmlFor="recurrence-end-date">Termina em (opcional)</label><HelpTip label="Data final">Depois desta data, a regra não gera novas ocorrências. Deixe em branco para manter a regra ativa até você encerrá-la.</HelpTip></span><CalendarDateInput id="recurrence-end-date" onChange={(value) => setRuleForm({ ...ruleForm, ends_on: value })} value={ruleForm.ends_on} /></div>
+            <label className="field-label recurrence-notes">Observações<textarea maxLength={2000} onChange={(event) => setRuleForm({ ...ruleForm, notes: event.target.value })} rows={2} value={ruleForm.notes} /><small>Detalhes que também aparecerão no lançamento quando você registrar uma ocorrência.</small></label>
           </div>
           {(activeAccounts.length === 0 || currentCategories.length === 0) && <p className="form-note">Cadastre uma conta ativa e uma categoria do tipo escolhido antes de criar a recorrência.</p>}
           <div className="recurrence-form-actions"><button className="secondary-button compact-button" onClick={() => setRuleFormOpen(false)} type="button">Cancelar</button><button className="primary-button compact-button" disabled={busy || activeAccounts.length === 0 || currentCategories.length === 0} type="submit">{busy ? "Salvando…" : "Salvar recorrência"}</button></div>
@@ -390,7 +392,7 @@ export function RecurrenceWorkspace() {
 
           <section className="surface-card data-card recurrence-occurrences-card">
             <div className="surface-heading">
-              <div><p className="eyebrow">Próximos 90 dias</p><h2>Ocorrências</h2></div>
+              <div><p className="eyebrow">Próximos 90 dias</p><h2>Ocorrências <HelpTip label="Ocorrências programadas">Cada ocorrência é uma data e um valor previstos pela regra acima. Ainda não afeta o saldo. Ao marcar como pago ou recebido, a SophIA cria um único lançamento com a data de hoje.</HelpTip></h2></div>
               <label className="recurrence-history-toggle"><input checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)} type="checkbox" /> Mostrar histórico</label>
             </div>
             {visibleOccurrences.length === 0 ? (
@@ -406,7 +408,7 @@ export function RecurrenceWorkspace() {
                       <div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account}{item.type === "INCOME" ? " · Receita" : " · Despesa"}</span></div>
                       <strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong>
                       <span className={`recurrence-status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span>
-                      {canAct && <div className="recurrence-actions"><button className="table-action" disabled={busy} onClick={() => openOccurrenceEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeOccurrence(item, "pay")} type="button"><Check size={15} /><span>Registrar hoje</span></button><button aria-label={`Ignorar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeOccurrence(item, "skip")} type="button">Ignorar</button></div>}
+                      {canAct && <div className="recurrence-actions"><button className="table-action" disabled={busy} onClick={() => openOccurrenceEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeOccurrence(item, "pay")} type="button"><Check size={15} /><span>{item.type === "INCOME" ? "Marcar como recebido" : "Marcar como pago"}</span></button><button aria-label={`Ignorar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeOccurrence(item, "skip")} type="button">Ignorar</button></div>}
                     </article>
                   );
                 })}
@@ -418,4 +420,14 @@ export function RecurrenceWorkspace() {
       )}
     </div>
   );
+}
+
+function frequencyUnit(frequency: Frequency): string {
+  const units: Record<Frequency, string> = {
+    DAILY: "dia(s)",
+    WEEKLY: "semana(s)",
+    MONTHLY: "mês(es)",
+    YEARLY: "ano(s)",
+  };
+  return units[frequency];
 }

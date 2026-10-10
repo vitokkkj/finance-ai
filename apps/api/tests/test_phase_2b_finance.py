@@ -227,6 +227,52 @@ def test_partial_payment_leaves_invoice_partially_paid_and_limit_used(client: Te
     assert client.get("/api/cards").json()[0]["used_limit"] == "0.00"
 
 
+def test_existing_invoice_balance_can_be_imported_and_paid_without_creating_expense(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "2000.00")
+    card = create_card(client)
+
+    imported = client.put(
+        f"/api/cards/{card['id']}/invoices/opening-balance",
+        json={"closing_month": "2026-11", "amount": "654.63"},
+    )
+
+    assert imported.status_code == 200
+    invoice = imported.json()
+    assert invoice["opening_balance"] == "654.63"
+    assert invoice["total"] == "654.63"
+    assert invoice["outstanding"] == "654.63"
+    assert invoice["purchases"] == []
+    assert invoice["closing_date"] == "2026-11-13"
+    assert invoice["due_date"] == "2026-11-20"
+    assert client.get("/api/cards").json()[0]["used_limit"] == "654.63"
+    summary = client.get("/api/dashboard/summary?year=2026&month=10").json()
+    assert summary["monthly_expenses"] == "0.00"
+
+    payment = client.post(
+        f"/api/invoices/{invoice['id']}/payments",
+        json={"account_id": account["id"], "amount": "654.63", "occurred_at": TODAY},
+    )
+
+    assert payment.status_code == 201
+    paid_invoice = client.get(f"/api/invoices/{invoice['id']}").json()
+    assert paid_invoice["paid_amount"] == "654.63"
+    assert paid_invoice["outstanding"] == "0.00"
+    assert paid_invoice["status"] == "PAID"
+    assert client.get("/api/accounts").json()[0]["balance"] == "1345.37"
+    summary = client.get("/api/dashboard/summary?year=2026&month=10").json()
+    assert summary["monthly_expenses"] == "0.00"
+
+    repeated = client.put(
+        f"/api/cards/{card['id']}/invoices/opening-balance",
+        json={"closing_month": "2026-11", "amount": "654.63"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["total"] == "654.63"
+
+
 def test_card_closing_is_inclusive_and_next_day_moves_to_next_invoice(client: TestClient) -> None:
     setup_user(client)
     card = create_card(client)

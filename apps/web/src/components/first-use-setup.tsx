@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 import { apiRequest } from "@/lib/api";
 import { toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
+import { CalendarDateInput } from "@/components/calendar-date-input";
 
 type AccountType = "CHECKING" | "SAVINGS" | "CASH" | "OTHER";
 
@@ -105,16 +106,16 @@ export function FirstUseSetup({
                 value={openingBalance}
               />
             </div>
-            <label className="field-label">
-              Data desse saldo
-              <input
+            <div className="field-label">
+              <label htmlFor="first-use-opening-balance-date">Data desse saldo</label>
+              <CalendarDateInput
+                id="first-use-opening-balance-date"
                 disabled={!openingBalance.trim()}
-                onChange={(event) => setOpeningBalanceDate(event.target.value)}
+                onChange={setOpeningBalanceDate}
                 required={Boolean(openingBalance.trim())}
-                type="date"
                 value={openingBalanceDate}
               />
-            </label>
+            </div>
             <p className="first-use-note">
               Sem valor e data, sua conta fica cadastrada, mas a SophIA não calcula nem exibe um saldo
               como se fosse conhecido. Você pode completar isso depois.

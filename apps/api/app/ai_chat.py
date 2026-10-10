@@ -5,7 +5,7 @@ import re
 import time
 import unicodedata
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
@@ -17,9 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.ai_intents import (
     ExpenseDecision,
+    RecurrenceDecision,
     format_brl,
     is_manual_expense_candidate,
     parse_manual_expense,
+    parse_manual_recurrence,
     suggest_expense_category_name,
 )
 from app.ai_pricing import estimated_cost
@@ -49,6 +51,7 @@ CONTEXT_MESSAGE_LIMIT = 24
 FINANCIAL_ZONE = ZoneInfo("America/Sao_Paulo")
 PROMPT_PATH = Path(__file__).parent / "prompts" / "assistant_v1.md"
 LOCAL_EXPENSE_MODEL = "local-expense-parser-v1"
+LOCAL_RECURRENCE_MODEL = "local-recurrence-parser-v1"
 PENDING_EXPENSE_CLARIFICATION_TYPE = "pending_expense_clarification"
 
 
@@ -90,9 +93,27 @@ def choose_model(content: str) -> str:
         "explique em detalhes",
         "explicacao detalhada",
     )
+    financial_actions = (
+        "crie uma categoria",
+        "crie a categoria",
+        "criar categoria",
+        "registre um gasto",
+        "registrar um gasto",
+        "programe",
+        "programar",
+        "gasto fixo",
+        "despesa fixa",
+        "recorrencia",
+        "recorrente",
+        "agende",
+        "agendar",
+        "cadastre uma fatura",
+        "cadastre as faturas",
+        "registrar fatura",
+    )
     return (
         settings.ai_model_smart
-        if any(term in normalized for term in complex_queries)
+        if any(term in normalized for term in (*complex_queries, *financial_actions))
         else settings.ai_model_fast
     )
 
@@ -196,6 +217,20 @@ def _assistant_message(
     diagnostic_status: str = "SUCCEEDED",
     diagnostic_error: str | None = None,
 ) -> AIMessage:
+    previous_created_at = db.scalar(
+        select(AIMessage.created_at)
+        .where(
+            AIMessage.user_id == user.id,
+            AIMessage.conversation_id == conversation.id,
+        )
+        .order_by(AIMessage.created_at.desc(), AIMessage.id.desc())
+        .limit(1)
+    )
+    created_at = datetime.now(UTC)
+    if previous_created_at is not None:
+        if previous_created_at.tzinfo is None:
+            previous_created_at = previous_created_at.replace(tzinfo=UTC)
+        created_at = max(created_at, previous_created_at + timedelta(microseconds=1))
     message = AIMessage(
         user_id=user.id,
         conversation_id=conversation.id,
@@ -217,7 +252,7 @@ def _assistant_message(
         duration_ms=duration_ms,
         diagnostic_status=diagnostic_status,
         diagnostic_error=diagnostic_error,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
     )
     db.add(message)
     conversation.updated_at = datetime.now(UTC)
@@ -415,6 +450,29 @@ def _manual_expense_decision(
             "Se foi uma nova compra, me diga um detalhe do local ou da descrição.",
         )
     return decision
+
+
+def _manual_recurrence_decision(
+    db: Session,
+    user: User,
+    content: str,
+) -> RecurrenceDecision | None:
+    accounts = db.scalars(
+        select(Account)
+        .where(Account.user_id == user.id, Account.is_active.is_(True))
+        .order_by(Account.name, Account.id)
+    ).all()
+    categories = db.scalars(
+        select(Category)
+        .where(Category.user_id == user.id, Category.type == "EXPENSE")
+        .order_by(Category.name, Category.id)
+    ).all()
+    return parse_manual_recurrence(
+        content,
+        accounts,
+        categories,
+        current_financial_date(),
+    )
 
 
 def _normalize_short_reply(content: str) -> str:
@@ -779,13 +837,25 @@ async def stream_assistant_reply(
         )
         expense_decision = _unresolved_category_decision(expense_decision, pending_suggestion)
 
+    recurrence_decision = (
+        _manual_recurrence_decision(db, user, user_message.content)
+        if category_source is None and expense_decision is None
+        else None
+    )
     direct_expense = expense_decision is not None and expense_decision.kind == "READY"
+    direct_recurrence_call: FunctionCall | None = None
+    recurrence_category_created = False
+    recurrence_category_name: str | None = None
     model = (
-        LOCAL_EXPENSE_MODEL
-        if expense_decision is not None or category_source is not None
+        LOCAL_EXPENSE_MODEL if expense_decision is not None or category_source is not None
+        else LOCAL_RECURRENCE_MODEL if recurrence_decision is not None
         else choose_model(user_message.content)
     )
-    instructions = _instructions(db, user.id) if expense_decision is None else ""
+    instructions = (
+        _instructions(db, user.id)
+        if expense_decision is None and recurrence_decision is None
+        else ""
+    )
     cards: list[dict[str, object]] = []
     text_parts: list[str] = []
     input_items = conversation_input(db, user.id, conversation.id)
@@ -923,6 +993,103 @@ async def stream_assistant_reply(
             )
         direct_expense = expense_decision is not None and expense_decision.kind == "READY"
 
+    if recurrence_decision is not None:
+        recurrence_arguments = dict(recurrence_decision.arguments)
+        recurrence_category_name = recurrence_decision.category_to_create
+        if recurrence_category_name is not None:
+            category_call = FunctionCall(
+                call_id=uuid4().hex,
+                name="create_category",
+                arguments=json.dumps(
+                    {"name": recurrence_category_name, "category_type": "EXPENSE"},
+                    ensure_ascii=False,
+                ),
+            )
+            yield sse_event("tool_status", {"name": category_call.name, "status": "running"})
+            category_result = execute_finance_tool(
+                category_call.name,
+                _decode_arguments(category_call.arguments),
+                user,
+                db,
+            )
+            audit = _record_tool_call(
+                db,
+                user,
+                conversation,
+                user_message.id,
+                category_call,
+                category_result,
+                model,
+                None,
+                None,
+                max(0, int((time.monotonic() - turn_started) * 1000)),
+            )
+            if category_result.status == "FAILED":
+                content = (
+                    f"Não consegui criar a categoria “{recurrence_category_name}”. "
+                    "Ainda não programei o gasto."
+                )
+                recurrence_failure_cards = category_result.cards or [
+                    {"type": "error", "data": {"message": content}}
+                ]
+                _assistant_message(
+                    db,
+                    conversation,
+                    user,
+                    content,
+                    recurrence_failure_cards,
+                    model,
+                    None,
+                    None,
+                    duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                    diagnostic_status="FAILED",
+                    diagnostic_error="Falha ao criar categoria para um compromisso explícito.",
+                )
+                yield sse_event("replace", {"text": content})
+                yield sse_event("structured", {"items": recurrence_failure_cards})
+                yield sse_event("tool_status", {"name": category_call.name, "status": "failed"})
+                yield sse_event("done", {"status": "error", "tool_call_id": str(audit.id)})
+                return
+            category_id = db.scalar(
+                select(Category.id).where(
+                    Category.user_id == user.id,
+                    Category.type == "EXPENSE",
+                    Category.archived_at.is_(None),
+                    Category.name == recurrence_category_name,
+                )
+            )
+            if category_id is None:
+                content = (
+                    f"Não consegui confirmar a categoria “{recurrence_category_name}”. "
+                    "Ainda não programei o gasto."
+                )
+                _assistant_message(
+                    db,
+                    conversation,
+                    user,
+                    content,
+                    [],
+                    model,
+                    None,
+                    None,
+                    duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                    diagnostic_status="FAILED",
+                    diagnostic_error="Categoria explícita ausente após criação.",
+                )
+                yield sse_event("text_delta", {"text": content})
+                yield sse_event("done", {"status": "error"})
+                return
+            recurrence_arguments["category_id"] = str(category_id)
+            recurrence_arguments["description"] = f"Gasto fixo de {recurrence_category_name}"
+            recurrence_category_created = True
+            yield sse_event("tool_status", {"name": category_call.name, "status": "succeeded"})
+
+        direct_recurrence_call = FunctionCall(
+            call_id=uuid4().hex,
+            name="create_recurrence",
+            arguments=json.dumps(recurrence_arguments, ensure_ascii=False),
+        )
+
     if expense_decision is not None and expense_decision.kind == "CLARIFY":
         content = expense_decision.message or "Qual detalhe falta para registrar esse gasto?"
         if category_was_created and category_creation_name:
@@ -969,6 +1136,8 @@ async def stream_assistant_reply(
                         arguments=json.dumps(expense_decision.arguments, ensure_ascii=False),
                     )
                 )
+            elif direct_recurrence_call is not None:
+                calls.append(direct_recurrence_call)
             else:
                 request = ProviderRequest(
                     model=model,
@@ -1131,10 +1300,21 @@ async def stream_assistant_reply(
                 )
                 confirmation["tool_call_id"] = str(audit.id)
                 confirmation["status"] = "pending"
-                content = (
-                    "Esta alteração precisa da sua confirmação. "
-                    "Revise os campos antes de continuar."
-                )
+                if call.name == "create_recurrence":
+                    content = (
+                        "Montei a prévia do gasto programado. Confira os dados; nada será lançado "
+                        "como despesa até você confirmar e marcar cada ocorrência como paga."
+                    )
+                    if recurrence_category_created and recurrence_category_name:
+                        content = (
+                            f"Criei a categoria “{recurrence_category_name}” e montei a prévia. "
+                            "Confira os dados antes de confirmar."
+                        )
+                else:
+                    content = (
+                        "Esta alteração precisa da sua confirmação. "
+                        "Revise os campos antes de continuar."
+                    )
                 cards.append(confirmation)
                 _assistant_message(
                     db,

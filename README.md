@@ -2,7 +2,7 @@
 
 Aplicação financeira pessoal, privada e inicialmente de usuário único. O Finance Engine calcula saldos, faturas e resumos no backend. A SophIA é a interface principal: conversa com você e consulta ou registra operações financeiras por ferramentas explícitas.
 
-O código é distribuído sob a licença MIT; consulte o arquivo [LICENSE](LICENSE). A instância da SophIA, as credenciais e os dados financeiros do proprietário continuam privados e ficam fora deste repositório.
+O código está publicado em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai) sob a licença MIT; consulte [LICENSE](LICENSE). A instância da SophIA, as credenciais e os dados financeiros do proprietário continuam privados e ficam fora deste repositório.
 
 ## Iniciar o ambiente local
 
@@ -36,9 +36,9 @@ Use `docker compose up --build` quando alterar dependências ou Dockerfiles.
 
 O frontend, API, worker e PostgreSQL permanecem em serviços separados. A API não publica porta no host. O banco participa somente da rede Docker interna e nunca é publicado externamente.
 
-O padrão usa a conexão OAuth do plano ChatGPT, sem chave de API, sem cobrança de API e sem fallback pago. Antes de ativar o uso real, publique o código como open source sob uma licença escolhida; a OpenAI documenta o uso do plano em apps open source e em VMs próprias. O app continua privado na VM. A franquia de uso é compartilhada com ChatGPT e Codex e não inclui o histórico de conversas do ChatGPT: a SophIA usa o próprio histórico no PostgreSQL. Para evitar uso de créditos adicionais, confira as opções e limites por aplicativo em ChatGPT → Configurações → Uso.
+O padrão usa OAuth do plano ChatGPT, sem chave da API e sem fallback para chamadas pagas da API. O repositório já é público sob MIT; a instância, as credenciais OAuth e os dados financeiros continuam privados. O uso feito pela SophIA entra nos limites do próprio plano autorizado e não dá acesso ao histórico ou às memórias do ChatGPT. Confira as permissões e os limites do aplicativo em ChatGPT → Configurações → Uso. Consulte a [documentação oficial de Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) e o guia para [VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
 
-Depois de publicar o código, autorize a conta uma vez neste computador com Python 3.10+ e SSH configurado. O script abre o login oficial, recebe o retorno somente em 127.0.0.1, valida e transfere as credenciais à VM por SSH; a VM guarda os tokens em volume privado com permissão restrita e os renova sozinha:
+Para autorizar uma VM, conclua o OAuth neste computador com Python 3.10+ e SSH configurado. O script abre o login oficial, recebe o retorno somente em 127.0.0.1, valida e transfere as credenciais à VM por SSH; a VM guarda os tokens em volume privado com permissão restrita e os renova sozinha:
 
 ```powershell
 py -3 .\scripts\connect-chatgpt-plan.py --ssh-target <usuario>@<ip-tailscale> --project-dir <diretorio-do-compose> --identity <caminho-da-chave>
@@ -60,6 +60,7 @@ O Ollama continua disponível como alternativa local explicitamente iniciada com
 - Cartões com limite, dia de fechamento e vencimento, além de ciclos de fatura explícitos.
 - Compras no cartão associadas a uma fatura. A compra conta como despesa na data da compra e não movimenta uma conta bancária.
 - Pagamentos integrais ou parciais associados à fatura e à conta pagadora. Cada pagamento reduz essa conta e o saldo aberto da fatura sem repetir a despesa.
+- Importação pelo chat do total de uma ou mais faturas existentes, com confirmação. Compras já cadastradas no ciclo são abatidas do total e somente o saldo restante vira dívida inicial; não são criadas despesas históricas. O pagamento segue o fluxo normal.
 - Dashboard com limite usado e disponível e próximo vencimento de cada cartão ativo.
 - Conversas privadas persistidas, com histórico, streaming SSE e preferências salvas explicitamente pelo usuário.
 - Preferências explícitas do assistente podem ser criadas, editadas e removidas em Preferências; não há aprendizado automático de hábitos.
@@ -68,11 +69,11 @@ O Ollama continua disponível como alternativa local explicitamente iniciada com
 - Alterações em lançamentos existentes ficam pendentes até confirmação explícita. Falhas de ferramentas não são apresentadas como operações concluídas.
 - Regras de receita/despesa recorrentes com ocorrências previstas até 90 dias à frente, incluindo frequências diária, semanal, mensal e anual.
 - Ocorrências não afetam saldos até serem registradas; registrar cria uma única transação confirmada, e ignorar ou encerrar preserva o histórico sem criar movimento.
-- O fluxo padrão usa o token OAuth da sua conta ChatGPT Plus exclusivamente no backend e o endpoint público Responses API; nenhuma chave de API é configurada. AI_MODEL_FAST e AI_MODEL_SMART são configuráveis por ambiente. O Ollama só inicia com o perfil local-ai e não é fallback automático. Os testes automatizados usam providers e transportes simulados.
+- O fluxo padrão usa OAuth do ChatGPT exclusivamente no backend e o endpoint Responses API; nenhuma chave da API é configurada. AI_MODEL_FAST e AI_MODEL_SMART são configuráveis por ambiente. O Ollama só inicia com o perfil local-ai e não é fallback automático. Pedidos inequívocos de despesas e recorrências mensais podem ser interpretados por regras determinísticas; pedidos ambíguos seguem para o modelo SMART, que deve sugerir e perguntar antes de executar. Os testes automatizados usam providers e transportes simulados.
 
 Saldo de uma conta ativa é calculado como saldo inicial, mais receitas e transferências recebidas, menos despesas, transferências enviadas e pagamentos de fatura, considerando somente movimentos a partir da data-base. Compras no cartão não movimentam contas. O Finance Engine calcula esses valores no backend. PostgreSQL usa `NUMERIC(14,2)`, Python usa `Decimal` e a API transmite valores monetários em texto decimal. O navegador apenas formata esses textos; não soma valores financeiros.
 
-A tabela `transactions` guarda cada evento uma única vez. Uma transferência é um registro `TRANSFER` com conta de origem e de destino. Uma compra é `CARD_PURCHASE`, com categoria de despesa e vínculo com uma fatura. Um pagamento é `CARD_PAYMENT`, com a conta pagadora e a fatura. O total e os pagamentos da fatura são agregados desses registros; não há valores totais mutáveis duplicados na tabela de faturas.
+A tabela `transactions` guarda cada evento uma única vez. Uma transferência é um registro `TRANSFER` com conta de origem e de destino. Uma compra é `CARD_PURCHASE`, com categoria de despesa e vínculo com uma fatura. Um pagamento é `CARD_PAYMENT`, com a conta pagadora e a fatura. Para faturas anteriores ao uso da SophIA, `card_invoices.opening_balance` registra somente a dívida já aberta; o total é esse saldo mais as compras associadas, e o saldo aberto desconta os pagamentos. Esse saldo inicial não é despesa histórica.
 
 O dia de fechamento é inclusivo: uma compra no próprio dia entra na fatura que fecha naquele dia; uma compra no dia seguinte entra no ciclo seguinte. Quando o dia não existe no mês (por exemplo, fechamento 31 em fevereiro), o fechamento usa o último dia do mês. O vencimento usa o dia configurado no mesmo mês apenas se for posterior ao fechamento; caso contrário, fica no mês seguinte, também ajustado ao último dia existente. Ciclos e datas são datas civis em `America/Sao_Paulo`.
 
@@ -123,6 +124,7 @@ Não aponte `TEST_DATABASE_URL` para o banco de desenvolvimento: os fixtures dos
 - `GET/POST /api/transactions`, `PATCH/DELETE /api/transactions/{id}`
 - `GET/POST /api/transfers`
 - `GET/POST /api/cards`, `PATCH /api/cards/{id}`, `POST /api/cards/{id}/archive`
+- `PUT /api/cards/{id}/invoices/opening-balance` para registrar o saldo de uma fatura já existente
 - `GET /api/cards/{id}/invoices`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/payments`
 - `POST /api/card-purchases`, `POST /api/invoices/{id}/payments`
 - `GET /api/dashboard/summary?year=2026&month=10`
@@ -153,8 +155,16 @@ AGENTS.md
 
 Depois do cadastro privado, a SophIA pede uma conta para acompanhar. O saldo inicial e sua data podem ficar em branco; nesse caso, o saldo consolidado permanece indisponível até que todas as contas ativas tenham uma base conhecida. O cartão é opcional. Para registrar a primeira receita ou despesa pela interface, será necessário criar uma categoria; o formulário oferece um caminho para criá-la e voltar ao lançamento. Veja [docs/first-use-and-manual-records.md](docs/first-use-and-manual-records.md).
 
+Na VM de teste, use o override para iniciar o frontend sem a barra Next.js Dev Tools e sem autoreload da API:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build
+```
+
+O `docker compose up` simples continua reservado ao ambiente local de desenvolvimento.
+
 ## Limites desta fase e próximos passos
 
-Pluggy, parcelamentos, financiamentos, investimentos, previsões e notificações ainda não foram implementados. Recorrências cobrem apenas regras e ocorrências previstas; não há antecipação financeira nem integração de recorrências com a SophIA. O uso do plano ChatGPT via OAuth é o provider padrão, sem API key nem fallback pago; o Ollama é uma alternativa local opcional. O parser local cobre frases simples e inequívocas de despesas. Entidades de fases futuras continuam apenas documentadas.
+Pluggy, parcelamentos, financiamentos, investimentos, previsões e notificações ainda não foram implementados. Recorrências cobrem regras e ocorrências previstas; as despesas recorrentes completas podem ser programadas pelo chat com prévia e confirmação, e não alteram saldos até a ocorrência ser marcada como paga. O uso do plano ChatGPT via OAuth é o provider padrão, sem chave da API nem fallback pago; o Ollama é uma alternativa local opcional. O parser determinístico cobre frases inequívocas de despesas e programação mensal; pedidos incompletos ou ambíguos seguem para o modelo, com instruções para sugerir e perguntar. Entidades de fases futuras continuam apenas documentadas.
 
-A VM Debian hospeda um ambiente de testes privado, acessível diretamente pelo tailnet; o web fica vinculado ao IP Tailscale e API/PostgreSQL permanecem privados. A publicação em [sophia.matheus.inf.br](https://sophia.matheus.inf.br) via Cloudflare Tunnel continua futura. O teste usa banco vazio e não deve receber dados reais. Topologia, estado atual e requisitos para produção estão em [docs/deployment.md](docs/deployment.md). O lançamento iOS/Android também fica para o futuro.
+Uma VM Debian pode hospedar uma instância privada de teste com o Compose de runtime; publique somente o código, nunca `.env`, credenciais, endereços privados ou dados financeiros. API e PostgreSQL permanecem sem portas públicas. Topologia, requisitos de backup/restauração e itens pendentes antes de produção estão em [docs/deployment.md](docs/deployment.md). O lançamento iOS/Android também fica para o futuro.

@@ -6,7 +6,12 @@ from uuid import uuid4
 
 import pytest
 
-from app.ai_intents import format_brl, parse_manual_expense
+from app.ai_intents import (
+    format_brl,
+    parse_manual_expense,
+    parse_manual_recurrence,
+    suggest_expense_category_name,
+)
 from app.models import Account, Category
 
 
@@ -136,3 +141,88 @@ def test_archived_categories_are_not_selected() -> None:
 
     assert result.kind == "CLARIFY"
     assert "categoria" in (result.message or "").casefold()
+
+
+def test_education_expense_terms_match_or_suggest_existing_category_name() -> None:
+    account = _account()
+    category = _category("Educação")
+    result = parse_manual_expense(
+        "Gastei R$ 80 no curso de inglês.",
+        [account],
+        [category],
+        date(2026, 10, 9),
+    )
+
+    assert result.kind == "READY"
+    assert result.arguments is not None
+    assert result.arguments["category_id"] == str(category.id)
+    assert suggest_expense_category_name("Gastei R$ 80 no curso de inglês") == "Educação"
+
+
+def test_clear_fixed_expense_request_parses_month_year_and_payment_notes() -> None:
+    account = _account()
+    category = _category("Educação")
+    message = (
+        "Crie a categoria Educação, e registre um gasto fixo, começando por 11/26 "
+        "e finalizando até 04/28, gasto fixo programado de 282 reais, que é pago via pix, "
+        "vencimento dia 08 de todo mês."
+    )
+
+    result = parse_manual_recurrence(
+        message,
+        [account],
+        [category],
+        date(2026, 10, 10),
+    )
+
+    assert result is not None
+    assert result.category_to_create is None
+    assert result.arguments == {
+        "account_id": str(account.id),
+        "category_id": str(category.id),
+        "movement_type": "EXPENSE",
+        "description": "Gasto fixo de Educação",
+        "amount": "282.00",
+        "frequency": "MONTHLY",
+        "interval": 1,
+        "starts_on": "2026-11-08",
+        "ends_on": "2028-04-08",
+        "notes": "Pago via Pix; Vencimento dia 08",
+    }
+
+
+def test_explicit_new_recurrence_category_is_returned_for_creation() -> None:
+    message = (
+        "Crie a categoria Educação, e programe um gasto fixo de 282 reais "
+        "começando por 11/26 e finalizando até 04/28, vencimento dia 08 todo mês."
+    )
+
+    result = parse_manual_recurrence(message, [_account()], [], date(2026, 10, 10))
+
+    assert result is not None
+    assert result.category_to_create == "Educação"
+    assert result.arguments["category_id"] == ""
+    assert result.arguments["description"] == "Gasto fixo de Educação"
+
+
+def test_recurrence_parser_does_not_guess_ambiguous_account_or_missing_category() -> None:
+    message = (
+        "Programe um gasto fixo de R$ 282 por mês, começando em 11/26, "
+        "todo dia 08."
+    )
+
+    ambiguous_account = parse_manual_recurrence(
+        message,
+        [_account("Sicredi"), _account("Inter")],
+        [_category("Educação")],
+        date(2026, 10, 10),
+    )
+    missing_category = parse_manual_recurrence(
+        message,
+        [_account()],
+        [_category("Alimentação")],
+        date(2026, 10, 10),
+    )
+
+    assert ambiguous_account is None
+    assert missing_category is None

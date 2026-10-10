@@ -76,7 +76,7 @@ def _validate_references(
     movement_type: str,
     reference_date: date,
     db: Session,
-) -> None:
+) -> tuple[Account, Category]:
     account = db.scalar(
         select(Account).where(
             Account.id == account_id,
@@ -104,6 +104,7 @@ def _validate_references(
             status_code=422,
             detail="O tipo da categoria precisa corresponder ao tipo da recorrência.",
         )
+    return account, category
 
 
 def _rule_response(rule: RecurrenceRule) -> RecurrenceResponse:
@@ -261,6 +262,74 @@ def _validate_rule_schedule(starts_on: date, ends_on: date | None) -> None:
         )
 
 
+def validate_recurrence(
+    payload: RecurrenceCreate, user: User, db: Session
+) -> tuple[Account, Category]:
+    """Validate a proposed rule without writing it, for both API and chat previews."""
+    _validate_rule_schedule(payload.starts_on, payload.ends_on)
+    account, category = _validate_references(
+        user_id=user.id,
+        account_id=payload.account_id,
+        category_id=payload.category_id,
+        movement_type=payload.type,
+        reference_date=payload.starts_on,
+        db=db,
+    )
+    candidates = db.scalars(
+        select(RecurrenceRule).where(
+            RecurrenceRule.user_id == user.id,
+            RecurrenceRule.account_id == payload.account_id,
+            RecurrenceRule.category_id == payload.category_id,
+            RecurrenceRule.type == payload.type,
+            RecurrenceRule.amount == payload.amount,
+            RecurrenceRule.frequency == payload.frequency,
+            RecurrenceRule.interval == payload.interval,
+            RecurrenceRule.starts_on == payload.starts_on,
+            RecurrenceRule.ends_on == payload.ends_on,
+            RecurrenceRule.is_active.is_(True),
+        )
+    ).all()
+    normalized_description = payload.description.strip().casefold()
+    normalized_notes = (payload.notes or "").strip().casefold()
+    if any(
+        rule.description.strip().casefold() == normalized_description
+        and (rule.notes or "").strip().casefold() == normalized_notes
+        for rule in candidates
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um compromisso igual para esta conta e período.",
+        )
+    return account, category
+
+
+def create_recurrence_for_user(
+    payload: RecurrenceCreate, user: User, db: Session
+) -> RecurrenceResponse:
+    validate_recurrence(payload, user, db)
+    rule = RecurrenceRule(
+        user_id=user.id,
+        account_id=payload.account_id,
+        category_id=payload.category_id,
+        type=payload.type,
+        description=payload.description,
+        amount=payload.amount,
+        frequency=payload.frequency,
+        interval=payload.interval,
+        starts_on=payload.starts_on,
+        ends_on=payload.ends_on,
+        notes=payload.notes,
+    )
+    db.add(rule)
+    db.flush()
+    ensure_occurrences(
+        rule, current_financial_date() + timedelta(days=OCCURRENCE_HORIZON_DAYS), db
+    )
+    db.commit()
+    db.refresh(rule)
+    return _rule_response(rule)
+
+
 @router.get("", response_model=list[RecurrenceResponse])
 def list_recurrences(
     user: Annotated[User, Depends(get_current_user)],
@@ -304,34 +373,7 @@ def create_recurrence(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> RecurrenceResponse:
-    _validate_rule_schedule(payload.starts_on, payload.ends_on)
-    _validate_references(
-        user_id=user.id,
-        account_id=payload.account_id,
-        category_id=payload.category_id,
-        movement_type=payload.type,
-        reference_date=payload.starts_on,
-        db=db,
-    )
-    rule = RecurrenceRule(
-        user_id=user.id,
-        account_id=payload.account_id,
-        category_id=payload.category_id,
-        type=payload.type,
-        description=payload.description,
-        amount=payload.amount,
-        frequency=payload.frequency,
-        interval=payload.interval,
-        starts_on=payload.starts_on,
-        ends_on=payload.ends_on,
-        notes=payload.notes,
-    )
-    db.add(rule)
-    db.flush()
-    ensure_occurrences(rule, current_financial_date() + timedelta(days=OCCURRENCE_HORIZON_DAYS), db)
-    db.commit()
-    db.refresh(rule)
-    return _rule_response(rule)
+    return create_recurrence_for_user(payload, user, db)
 
 
 @router.patch("/{rule_id}", response_model=RecurrenceResponse)

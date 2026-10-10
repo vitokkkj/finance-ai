@@ -116,6 +116,14 @@ def billing_cycle_for_purchase(purchase_date: date, closing_day: int, due_day: i
     )
 
 
+def billing_cycle_for_closing_month(
+    year: int, month: int, closing_day: int, due_day: int
+) -> BillingCycle:
+    """Return the scheduled invoice cycle for a month in which the card closes."""
+    closing_date = _month_date(year, month, closing_day)
+    return billing_cycle_for_purchase(closing_date, closing_day, due_day)
+
+
 def calculate_account_balance(
     opening_balance: Decimal,
     opening_balance_date: date,
@@ -172,8 +180,9 @@ def calculate_invoice_amounts(
     closing_date: date,
     due_date: date,
     as_of: date,
+    opening_balance: Decimal = ZERO,
 ) -> InvoiceAmounts:
-    total = ZERO
+    total = opening_balance
     paid_amount = ZERO
     for movement in movements:
         if movement.status != "CONFIRMED" or movement.invoice_id != invoice_id:

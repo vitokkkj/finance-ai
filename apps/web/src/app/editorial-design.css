@@ -190,7 +190,7 @@ textarea:focus-visible {
 .assistant-history {
   min-height: 95px;
   flex: 0 1 36%;
-  padding: 0 0 18px;
+  padding: 12px 0 18px;
   overflow-y: auto;
 }
 
@@ -739,6 +739,30 @@ textarea:focus-visible {
 .assistant-confirmation {
   border-color: var(--color-warning);
   background: var(--color-warning-soft);
+}
+
+.assistant-confirmation ul {
+  padding: 8px 17px;
+}
+
+.assistant-confirmation li {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.34fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 16px;
+  padding-block: 6px;
+  line-height: 1.45;
+}
+
+.assistant-confirmation li strong {
+  max-width: none;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: inherit;
 }
 
 .assistant-confirm-button,
@@ -2365,5 +2389,1180 @@ textarea:focus-visible {
 
   .settings-memory-row > div {
     justify-content: flex-end;
+  }
+}
+
+/* Ajustes finais de consistência, orientação e movimento. */
+.assistant-layout {
+  grid-template-columns: 276px minmax(0, 1fr);
+  transition: grid-template-columns 220ms cubic-bezier(.2, .7, .2, 1);
+}
+
+.assistant-layout.sidebar-collapsed {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+.assistant-sidebar {
+  transition: padding 180ms ease, background-color 160ms ease, transform 220ms cubic-bezier(.2, .7, .2, 1);
+}
+
+.assistant-sidebar-toggle {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+
+.assistant-sidebar-toggle:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-soft);
+  color: var(--color-brand);
+}
+
+.sidebar-collapsed .assistant-sidebar {
+  align-items: center;
+  padding-inline: 10px;
+}
+
+.sidebar-collapsed .assistant-brand {
+  padding-inline: 0;
+}
+
+.sidebar-collapsed .assistant-brand-name,
+.sidebar-collapsed .assistant-new-chat > span,
+.sidebar-collapsed .assistant-history,
+.sidebar-collapsed .assistant-nav-label,
+.sidebar-collapsed .assistant-nav-item-label,
+.sidebar-collapsed .assistant-account-name {
+  display: none;
+}
+
+.sidebar-collapsed .assistant-new-chat {
+  width: 44px;
+  min-height: 44px;
+  margin: 21px 0 22px;
+  padding: 0;
+  justify-content: center;
+}
+
+.sidebar-collapsed .assistant-nav,
+.sidebar-collapsed .assistant-nav-group {
+  width: 100%;
+}
+
+.sidebar-collapsed .assistant-nav-item {
+  justify-content: center;
+  padding: 0;
+  border-left-color: transparent;
+  border-radius: 6px;
+}
+
+.sidebar-collapsed .assistant-nav-item.selected {
+  border-left-color: var(--color-brand);
+}
+
+.sidebar-collapsed .assistant-account {
+  width: 100%;
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.sidebar-collapsed .assistant-logout {
+  position: absolute;
+  right: 7px;
+  bottom: 8px;
+  width: 25px;
+  height: 25px;
+}
+
+.assistant-chat-layout,
+.assistant-context-panel,
+.assistant-composer,
+.assistant-settings-card,
+.surface-card,
+.editor-form {
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.assistant-context-panel {
+  border-left-color: var(--color-border);
+  background: var(--color-surface-soft);
+}
+
+.context-balance {
+  border-color: color-mix(in srgb, var(--color-brand) 26%, var(--color-border));
+  background: var(--color-balance-wash);
+}
+
+.context-balance span,
+.context-balance small,
+.context-metrics span,
+.context-card-row,
+.context-section-heading {
+  color: var(--color-muted);
+}
+
+.context-balance strong,
+.context-metrics strong,
+.context-card-row strong {
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.user-message .message-body {
+  max-width: min(600px, 82%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.user-message .message-text {
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 17%, var(--color-border));
+  background: color-mix(in srgb, var(--color-brand-soft) 88%, var(--color-surface));
+  color: var(--color-ink);
+  line-height: 1.6;
+}
+
+.model-message .message-text {
+  max-width: 76ch;
+}
+
+.assistant-settings-grid {
+  align-items: stretch;
+  gap: 14px;
+}
+
+.assistant-settings-card {
+  min-width: 0;
+  border-radius: var(--radius-card);
+}
+
+.assistant-settings-card h2 {
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+.assistant-settings-card > p:not(.settings-period-label),
+.settings-help {
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.settings-usage-grid > div {
+  background: var(--color-surface-soft);
+}
+
+.settings-usage-grid strong,
+.settings-diagnostic-heading,
+.settings-memory-row {
+  color: var(--color-ink-soft);
+}
+
+.field-label-heading {
+  min-height: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.help-tip > summary {
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--color-muted);
+  cursor: help;
+  list-style: none;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.help-tip > summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-tip > summary:hover,
+.help-tip[open] > summary,
+.help-tip:focus-within > summary {
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+}
+
+.help-tip-popover {
+  display: none;
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 7px);
+  left: 0;
+  width: min(280px, calc(100vw - 48px));
+  padding: 11px 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  color: var(--color-ink-soft);
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1.55;
+  text-transform: none;
+}
+
+.help-tip[open] .help-tip-popover,
+.help-tip:hover .help-tip-popover,
+.help-tip:focus-within .help-tip-popover {
+  display: block;
+  animation: sophia-enter 130ms ease-out both;
+}
+
+.recurrence-workspace .surface-heading h2 .help-tip {
+  vertical-align: middle;
+}
+
+.recurrence-form .field-label > small {
+  display: block;
+  margin-top: 5px;
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 1.45;
+}
+
+.recurrence-interval-field {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.recurrence-interval-field input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.recurrence-interval-field > span {
+  padding-inline: 11px;
+  color: var(--color-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.recurrence-interval-field:focus-within {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 16%, transparent);
+}
+
+.recurrence-occurrences-card .surface-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.invoice-heading-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.opening-invoice-form .editor-heading {
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.opening-invoice-form .editor-heading .form-note {
+  display: block;
+  max-width: 620px;
+  margin: 7px 0 0;
+  line-height: 1.5;
+}
+
+.invoice-opening-line {
+  color: var(--color-ink-soft);
+}
+
+.invoice-opening-line small {
+  color: var(--color-muted);
+}
+
+.workspace-heading-actions > button,
+.invoice-heading-actions > button {
+  justify-content: center;
+  text-align: center;
+}
+
+.workspace-heading-actions > button {
+  display: inline-flex;
+  align-items: center;
+  text-align: center;
+}
+
+.account-directory-copy {
+  max-width: 620px;
+  margin: 7px 0 0;
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.account-directory-summary {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-soft);
+}
+
+.account-directory-summary > div {
+  min-width: 120px;
+  display: grid;
+  gap: 5px;
+}
+
+.account-directory-summary span {
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
+.account-directory-summary strong {
+  color: var(--color-ink);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-directory-summary p {
+  flex: 1;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.field-label select,
+.month-picker select,
+.assistant-preference-field select,
+.field-label > input:not([type="checkbox"]):not([type="radio"]),
+.field-label > textarea,
+.filter-form input,
+.filter-form select {
+  border-color: var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.field-label select,
+.month-picker select,
+.assistant-preference-field select,
+.filter-form select {
+  appearance: none;
+  padding-right: 36px;
+  color-scheme: inherit;
+  accent-color: var(--color-brand);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23718075' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+  background-size: 14px;
+}
+
+:root[data-theme="dark"] .field-label select,
+:root[data-theme="dark"] .month-picker select,
+:root[data-theme="dark"] .assistant-preference-field select,
+:root[data-theme="dark"] .filter-form select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a5afa3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+.field-label input[type="date"],
+.field-label input[type="month"],
+.filter-form input[type="date"] {
+  color-scheme: inherit;
+  accent-color: var(--color-brand);
+}
+
+.sophia-date-input {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.sophia-date-input > input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 43px 0 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-numeric);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.sophia-date-input > input::placeholder {
+  color: var(--color-subtle);
+}
+
+.sophia-date-input > input:focus-visible {
+  border-color: var(--color-brand);
+  outline: 3px solid color-mix(in srgb, var(--color-focus) 16%, transparent);
+  outline-offset: 1px;
+}
+
+.sophia-date-input > input:disabled {
+  background: var(--color-surface-soft);
+  color: var(--color-subtle);
+  cursor: not-allowed;
+}
+
+.sophia-date-trigger {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.sophia-date-trigger:hover:not(:disabled) {
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+}
+
+.sophia-date-trigger:disabled {
+  color: var(--color-subtle);
+  cursor: not-allowed;
+}
+
+.sophia-calendar-popover {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 8px);
+  left: 0;
+  right: auto;
+  width: min(300px, calc(100vw - 36px));
+  max-width: none;
+  margin: 0;
+  padding: 12px;
+  display: block;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  color: var(--color-ink);
+  animation: sophia-enter 130ms ease-out both;
+}
+
+.sophia-calendar-heading {
+  min-height: 38px;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sophia-calendar-heading strong {
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.sophia-calendar-heading button,
+.sophia-calendar-grid button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.sophia-calendar-heading button:hover,
+.sophia-calendar-grid button:hover {
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+}
+
+.sophia-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.sophia-calendar-weekday {
+  height: 29px;
+  display: grid;
+  place-items: center;
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.sophia-calendar-blank {
+  min-height: 34px;
+}
+
+.sophia-calendar-grid button {
+  width: 100%;
+  height: 34px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sophia-calendar-grid button.today {
+  box-shadow: inset 0 0 0 1px var(--color-brand);
+  color: var(--color-brand);
+  font-weight: 700;
+}
+
+.sophia-calendar-grid button.selected {
+  background: var(--color-brand);
+  color: var(--color-surface);
+}
+
+.sophia-calendar-today {
+  min-height: 32px;
+  margin-top: 8px;
+  padding-inline: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.sophia-calendar-today:hover {
+  background: var(--color-surface-inset);
+}
+
+.field-label input[type="date"]::-webkit-calendar-picker-indicator,
+.field-label input[type="month"]::-webkit-calendar-picker-indicator,
+.filter-form input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: .72;
+  cursor: pointer;
+}
+
+.assistant-menu-toggle,
+.assistant-sidebar-toggle,
+.assistant-theme-toggle,
+.assistant-context-toggle,
+.primary-button,
+.secondary-button,
+.compact-button,
+.text-button,
+.table-action,
+.link-button,
+.empty-state-action,
+.assistant-confirm-button,
+.assistant-cancel-button {
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.assistant-sidebar-toggle:active,
+.assistant-theme-toggle:active,
+.assistant-context-toggle:active,
+.primary-button:active:not(:disabled),
+.secondary-button:active:not(:disabled),
+.empty-state-action:active {
+  transform: translateY(1px);
+}
+
+@keyframes sophia-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.assistant-context-panel.mobile-open {
+  animation: sophia-enter 180ms ease-out both;
+}
+
+.editor-form,
+.invoice-details,
+.assistant-data-card,
+.recurrence-empty,
+.empty-state {
+  animation: sophia-enter 160ms ease-out both;
+}
+
+.workspace-notice,
+.assistant-error {
+  animation: sophia-enter 160ms ease-out both;
+}
+
+@media (max-width: 720px) {
+  .assistant-layout,
+  .assistant-layout.sidebar-collapsed {
+    display: block;
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .assistant-sidebar-toggle {
+    display: none;
+  }
+
+  .assistant-menu-toggle {
+    display: grid;
+  }
+
+  .invoice-heading-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .invoice-heading-actions > * {
+    width: 100%;
+  }
+
+  .assistant-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar-collapsed .assistant-brand-name,
+  .sidebar-collapsed .assistant-new-chat > span,
+  .sidebar-collapsed .assistant-history,
+  .sidebar-collapsed .assistant-nav-label,
+  .sidebar-collapsed .assistant-nav-item-label,
+  .sidebar-collapsed .assistant-account-name {
+    display: initial;
+  }
+
+  .sidebar-collapsed .assistant-nav {
+    width: auto;
+  }
+
+  .sidebar-collapsed .assistant-nav-item {
+    justify-content: flex-start;
+    padding-inline: 10px;
+  }
+
+  .sidebar-collapsed .assistant-new-chat {
+    width: 100%;
+    min-height: 42px;
+    margin: 13px 0 18px;
+    padding: 0 12px;
+    justify-content: flex-start;
+  }
+
+  .sidebar-collapsed .assistant-account {
+    justify-content: flex-start;
+    padding-inline: 0 8px;
+  }
+
+  .sidebar-collapsed .assistant-logout {
+    position: static;
+    width: 34px;
+    height: 34px;
+  }
+
+  .assistant-confirmation ul {
+    padding-inline: 12px;
+  }
+
+  .assistant-confirmation li {
+    grid-template-columns: minmax(5.5rem, 0.38fr) minmax(0, 1fr);
+    gap: 6px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* Cartões: seletor legível e detalhes da fatura agrupados por função. */
+.invoice-heading-actions {
+  align-items: center;
+}
+
+.card-workspace .month-picker select {
+  box-sizing: border-box;
+  width: 132px;
+  min-width: 132px;
+  min-height: 40px;
+  padding: 0 35px 0 11px;
+  appearance: none;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--color-surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23718075' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 11px center;
+  background-repeat: no-repeat;
+  background-size: 14px;
+  color: var(--color-ink);
+  font-size: 11px;
+}
+
+:root[data-theme="dark"] .card-workspace .month-picker select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a5afa3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+.card-workspace .invoice-heading-actions > button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.invoice-details {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-soft);
+}
+
+.invoice-details > .invoice-details-heading {
+  min-height: 0;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.invoice-details-title {
+  min-width: 0;
+}
+
+.invoice-details-title .eyebrow {
+  margin-bottom: 5px;
+}
+
+.invoice-details .invoice-details-title h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.025em;
+}
+
+.invoice-details-meta {
+  margin: 5px 0 0;
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.invoice-details-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.invoice-summary-strip {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.invoice-summary-strip > div {
+  min-width: 0;
+  padding: 10px 12px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.invoice-summary-strip span {
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
+.invoice-summary-strip strong {
+  color: var(--color-ink);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-opening-summary {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 22%, var(--color-border));
+  border-radius: var(--radius-control);
+  background: var(--color-brand-soft);
+}
+
+.invoice-opening-summary > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.invoice-opening-summary > div strong,
+.invoice-opening-summary > strong {
+  color: var(--color-ink);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-opening-summary > div span {
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.invoice-columns {
+  margin-bottom: 14px;
+  gap: 12px;
+}
+
+.invoice-detail-group {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.invoice-detail-group h4 {
+  margin: 0 0 7px;
+  color: var(--color-ink-soft);
+  font-size: 11px;
+}
+
+.invoice-detail-empty {
+  margin: 0;
+  padding: 8px 0;
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.invoice-details .editor-form.invoice-payment-form {
+  margin: 0;
+  padding: 15px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.invoice-payment-form .editor-heading {
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.invoice-payment-form .editor-heading h3 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.invoice-payment-form .form-actions {
+  align-items: center;
+}
+
+/* Alinhamento e navegação das telas financeiras. */
+.assistant-brand {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.assistant-brand:focus-visible {
+  border-radius: var(--radius-control);
+  outline: 2px solid var(--color-brand);
+  outline-offset: 3px;
+}
+
+.assistant-nav-item > .assistant-nav-item-label {
+  width: auto;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.opening-invoice-form .transaction-form-grid {
+  align-items: start;
+}
+
+.opening-invoice-form .field-label > select,
+.opening-invoice-form .field-label > input[type="month"] {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+}
+
+.opening-invoice-form .currency-input {
+  height: 44px;
+  min-height: 44px;
+}
+
+.opening-invoice-form .field-label small {
+  min-height: 28px;
+  line-height: 1.4;
+}
+
+.filter-form {
+  align-items: end;
+}
+
+.filter-form .field-label {
+  min-width: 0;
+  align-content: start;
+  gap: 6px;
+}
+
+.filter-form .field-label input:not([type="checkbox"]),
+.filter-form .field-label select,
+.filter-form .sophia-date-input,
+.filter-form .sophia-date-input > input {
+  box-sizing: border-box;
+  height: 39px;
+  min-height: 39px;
+}
+
+.assistant-settings-grid {
+  align-items: start;
+}
+
+.settings-memory-form textarea {
+  min-height: 96px;
+}
+
+.month-picker {
+  align-items: center;
+}
+
+.sophia-month-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.sophia-month-trigger {
+  box-sizing: border-box;
+  min-width: 184px;
+  min-height: 38px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.sophia-month-trigger:hover,
+.sophia-month-trigger[aria-expanded="true"] {
+  border-color: var(--color-brand);
+  background: var(--color-surface-soft);
+}
+
+.sophia-month-trigger:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-focus) 18%, transparent);
+  outline-offset: 2px;
+}
+
+.sophia-month-trigger > svg:first-child {
+  flex: none;
+  color: var(--color-brand);
+}
+
+.sophia-month-trigger > span {
+  flex: 1;
+  color: var(--color-ink);
+  font-size: 11px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.month-trigger-chevron {
+  flex: none;
+  transform: rotate(90deg);
+  color: var(--color-muted);
+  transition: transform 140ms ease;
+}
+
+.month-trigger-chevron.is-open {
+  transform: rotate(-90deg);
+}
+
+.sophia-month-popover {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 8px);
+  left: auto;
+  right: 0;
+  box-sizing: border-box;
+  width: 248px;
+  max-width: calc(100vw - 36px);
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  color: var(--color-ink);
+  animation: sophia-enter 130ms ease-out both;
+}
+
+.sophia-month-heading {
+  min-height: 38px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sophia-month-heading strong {
+  color: var(--color-ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sophia-month-heading button,
+.sophia-month-grid button {
+  min-width: 34px;
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.sophia-month-heading button:hover,
+.sophia-month-grid button:hover {
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+}
+
+.sophia-month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.sophia-month-grid button {
+  text-transform: capitalize;
+}
+
+.sophia-month-grid button.selected {
+  background: var(--color-brand);
+  color: var(--color-surface);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .opening-invoice-form .transaction-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .opening-invoice-form .field-label small {
+    min-height: 0;
+  }
+
+  .sophia-month-popover {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .card-workspace .invoice-heading-actions {
+    align-items: stretch;
+  }
+
+  .card-workspace .month-picker select {
+    width: min(132px, 52vw);
+    min-width: 0;
+  }
+
+  .card-workspace .invoice-heading-actions > button {
+    width: 100%;
+  }
+
+  .invoice-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .invoice-details {
+    padding: 13px;
+  }
+
+  .invoice-details > .invoice-details-heading {
+    flex-wrap: wrap;
+  }
+
+  .invoice-details-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .invoice-opening-summary {
+    align-items: flex-start;
   }
 }

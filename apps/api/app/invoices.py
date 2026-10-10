@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -8,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.database import get_db
 from app.finance_engine import (
+    BillingCycle,
+    billing_cycle_for_closing_month,
     billing_cycle_for_purchase,
     current_financial_date,
     financial_day_start,
@@ -20,6 +23,7 @@ from app.finance_views import (
 )
 from app.models import Account, CardInvoice, Category, CreditCard, Transaction, User
 from app.schemas import (
+    CardInvoiceOpeningBalanceSet,
     CardInvoiceResponse,
     CardPaymentCreate,
     CardPurchaseCreate,
@@ -42,6 +46,108 @@ def _get_invoice(
     if invoice is None:
         raise HTTPException(status_code=404, detail="Fatura não encontrada.")
     return invoice
+
+
+def validate_invoice_opening_balance(
+    db: Session, invoice: CardInvoice, amount: Decimal
+) -> Decimal:
+    amounts = invoice_amounts(db, invoice)
+    purchase_total = amounts.total - invoice.opening_balance
+    if amounts.paid_amount > purchase_total + amount:
+        raise HTTPException(
+            status_code=409,
+            detail="O saldo inicial não pode ficar abaixo dos pagamentos já registrados.",
+        )
+    return purchase_total
+
+
+def invoice_opening_balance_from_total(
+    db: Session, invoice: CardInvoice, invoice_total: Decimal
+) -> tuple[Decimal, Decimal, Decimal]:
+    amounts = invoice_amounts(db, invoice)
+    purchase_total = amounts.total - invoice.opening_balance
+    opening_balance = invoice_total - purchase_total
+    if opening_balance < 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "O total informado é menor que as compras já registradas nessa fatura. "
+                "Confira o mês e o valor antes de importar."
+            ),
+        )
+    if amounts.paid_amount > invoice_total:
+        raise HTTPException(
+            status_code=409,
+            detail="O total informado é menor que os pagamentos já registrados nessa fatura.",
+        )
+    return purchase_total, opening_balance, amounts.paid_amount
+
+
+def set_invoice_opening_balances(
+    db: Session,
+    user: User,
+    card_id: UUID,
+    payloads: list[CardInvoiceOpeningBalanceSet],
+    *,
+    amounts_are_invoice_totals: bool = False,
+) -> tuple[CreditCard, list[CardInvoice]]:
+    """Apply one or more pre-existing invoice balances without creating purchases."""
+    card = db.scalar(
+        select(CreditCard)
+        .where(
+            CreditCard.id == card_id,
+            CreditCard.user_id == user.id,
+            CreditCard.is_active.is_(True),
+        )
+        .with_for_update()
+    )
+    if card is None:
+        raise HTTPException(status_code=404, detail="Cartão ativo não encontrado.")
+
+    prepared: list[
+        tuple[CardInvoiceOpeningBalanceSet, BillingCycle, CardInvoice | None, Decimal]
+    ] = []
+    for payload in sorted(payloads, key=lambda item: item.closing_month):
+        year, month = (int(part) for part in payload.closing_month.split("-"))
+        cycle = billing_cycle_for_closing_month(year, month, card.closing_day, card.due_day)
+        invoice = db.scalar(
+            select(CardInvoice)
+            .where(
+                CardInvoice.credit_card_id == card.id,
+                CardInvoice.user_id == user.id,
+                CardInvoice.closing_date == cycle.closing_date,
+            )
+            .with_for_update()
+        )
+        opening_balance = payload.amount
+        if invoice is not None:
+            if amounts_are_invoice_totals:
+                _, opening_balance, _ = invoice_opening_balance_from_total(
+                    db, invoice, payload.amount
+                )
+            else:
+                validate_invoice_opening_balance(db, invoice, opening_balance)
+        prepared.append((payload, cycle, invoice, opening_balance))
+
+    invoices: list[CardInvoice] = []
+    for _, cycle, invoice, opening_balance in prepared:
+        if invoice is None:
+            invoice = CardInvoice(
+                user_id=user.id,
+                credit_card_id=card.id,
+                period_start=cycle.period_start,
+                period_end=cycle.period_end,
+                closing_date=cycle.closing_date,
+                due_date=cycle.due_date,
+                opening_balance=opening_balance,
+            )
+            db.add(invoice)
+        else:
+            invoice.opening_balance = opening_balance
+        invoices.append(invoice)
+
+    db.flush()
+    return card, invoices
 
 
 @router.post(
@@ -113,6 +219,23 @@ def create_card_purchase(
     db.commit()
     db.refresh(purchase)
     return transaction_response(purchase, category.name, card.id, card.name)
+
+
+@router.put(
+    "/api/cards/{card_id}/invoices/opening-balance",
+    response_model=CardInvoiceResponse,
+)
+def set_invoice_opening_balance(
+    card_id: UUID,
+    payload: CardInvoiceOpeningBalanceSet,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CardInvoiceResponse:
+    _, invoices = set_invoice_opening_balances(db, user, card_id, [payload])
+    invoice = invoices[0]
+    db.commit()
+    db.refresh(invoice)
+    return card_invoice_response(db, invoice)
 
 
 @router.get("/api/invoices/{invoice_id}", response_model=CardInvoiceResponse)

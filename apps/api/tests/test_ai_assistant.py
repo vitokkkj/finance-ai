@@ -231,6 +231,7 @@ def test_model_router_replays_stateless_reasoning_items_with_tool_outputs(
         ("O que mudou nos meus gastos nos últimos 3 meses?", True),
         ("Faça uma análise detalhada dos últimos meses.", True),
         ("Me ajude com meu planejamento financeiro.", True),
+        ("Crie uma categoria Educação e programe um gasto fixo de R$ 282.", True),
     ],
 )
 def test_model_routing_uses_fast_by_default_and_smart_for_complex_analysis(
@@ -1185,6 +1186,282 @@ def test_update_tool_waits_for_explicit_confirmation(client: TestClient) -> None
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "SUCCEEDED", confirmed.json()
     assert client.get("/api/transactions").json()[0]["description"] == "Corrigido"
+
+
+def test_chat_schedules_future_recurrence_only_after_confirmation(client: TestClient) -> None:
+    _sign_up(client)
+    account_id, _ = _create_assistant_basics(client)
+    category = client.post("/api/categories", json={"name": "Educação", "type": "EXPENSE"})
+    assert category.status_code == 201
+
+    today = _today()
+    next_month_index = today.year * 12 + today.month
+    start_year, start_month_offset = divmod(next_month_index, 12)
+    starts_on = date(start_year, start_month_offset + 1, 8)
+    end_month_index = next_month_index + 2
+    end_year, end_month_offset = divmod(end_month_index, 12)
+    ends_on = date(end_year, end_month_offset + 1, 8)
+    middle_year, middle_month_offset = divmod(next_month_index + 1, 12)
+    middle_occurrence = date(middle_year, middle_month_offset + 1, 8)
+
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_create_recurrence",
+                        "create_recurrence",
+                        json.dumps(
+                            {
+                                "account_id": account_id,
+                                "category_id": category.json()["id"],
+                                "movement_type": "EXPENSE",
+                                "description": "Gasto fixo de Educação",
+                                "amount": "282,00",
+                                "frequency": "MONTHLY",
+                                "interval": 1,
+                                "starts_on": starts_on.isoformat(),
+                                "ends_on": ends_on.isoformat(),
+                                "notes": "Pago via Pix; vencimento dia 08",
+                            }
+                        ),
+                    ),
+                ),
+                _completed(),
+            ]
+        ]
+    )
+    _set_fake_provider(client, fake)
+
+    prepared = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={
+            "content": (
+                "Crie a categoria Educação e programe um gasto fixo de 282 reais por Pix, "
+                "todo dia 08, começando no próximo mês e terminando depois."
+            )
+        },
+    )
+    assert prepared.status_code == 200
+    assert "R$ 282,00" in prepared.text
+    assert starts_on.strftime("%d/%m/%Y") in prepared.text
+    assert ends_on.strftime("%d/%m/%Y") in prepared.text
+    assert "Pago via Pix" in prepared.text
+    assert client.get("/api/recurrences").json() == []
+    assert client.get("/api/transactions").json() == []
+
+    structured = next(
+        json.loads(line.removeprefix("data: "))["items"]
+        for line in prepared.text.splitlines()
+        if line.startswith("data: ") and '"tool_call_id"' in line
+    )
+    confirmation_id = structured[0]["tool_call_id"]
+    confirmed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/tool-calls/{confirmation_id}/confirm"
+    )
+
+    rules = client.get("/api/recurrences").json()
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "SUCCEEDED", confirmed.json()
+    assert len(rules) == 1
+    assert rules[0]["amount"] == "282.00"
+    assert rules[0]["starts_on"] == starts_on.isoformat()
+    assert rules[0]["ends_on"] == ends_on.isoformat()
+    assert client.get("/api/transactions").json() == []
+    occurrences = client.get(
+        "/api/recurrences/occurrences",
+        params={"start_date": starts_on.isoformat(), "end_date": ends_on.isoformat()},
+    ).json()
+    assert [item["due_date"] for item in occurrences] == [
+        starts_on.isoformat(),
+        middle_occurrence.isoformat(),
+        ends_on.isoformat(),
+    ]
+    assert all(item["status"] == "PLANNED" for item in occurrences)
+
+    duplicate = client.post(
+        "/api/recurrences",
+        json={
+            "account_id": account_id,
+            "category_id": category.json()["id"],
+            "type": "EXPENSE",
+            "description": "Gasto fixo de Educação",
+            "amount": "282.00",
+            "frequency": "MONTHLY",
+            "interval": 1,
+            "starts_on": starts_on.isoformat(),
+            "ends_on": ends_on.isoformat(),
+            "notes": "Pago via Pix; vencimento dia 08",
+        },
+    )
+    assert duplicate.status_code == 409
+    assert len(client.get("/api/recurrences").json()) == 1
+
+
+def test_chat_understands_complete_fixed_expense_without_model_tool_choice(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    _create_assistant_basics(client)
+    today = _today()
+    start_index = today.year * 12 + today.month
+    start_year, start_month_offset = divmod(start_index, 12)
+    end_year, end_month_offset = divmod(start_index + 2, 12)
+    starts_on = date(start_year, start_month_offset + 1, 8)
+    ends_on = date(end_year, end_month_offset + 1, 8)
+    first_month = f"{starts_on.month:02d}/{starts_on.year % 100:02d}"
+    final_month = f"{ends_on.month:02d}/{ends_on.year % 100:02d}"
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider([])
+    _set_fake_provider(client, fake)
+
+    prepared = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={
+            "content": (
+                "Crie a categoria Educação, e registre um gasto fixo, começando por "
+                f"{first_month} e finalizando até {final_month}, gasto fixo programado "
+                "de 282 reais, que é pago via pix, vencimento dia 08 de todo mês."
+            )
+        },
+    )
+
+    assert prepared.status_code == 200
+    assert fake.requests == []
+    assert "R$ 282,00" in prepared.text
+    assert starts_on.strftime("%d/%m/%Y") in prepared.text
+    assert ends_on.strftime("%d/%m/%Y") in prepared.text
+    assert "Pago via Pix" in prepared.text
+    assert client.get("/api/recurrences").json() == []
+    assert client.get("/api/transactions").json() == []
+    categories = client.get("/api/categories").json()
+    assert any(category["name"] == "Educação" for category in categories)
+
+    structured = next(
+        json.loads(line.removeprefix("data: "))["items"]
+        for line in prepared.text.splitlines()
+        if line.startswith("data: ") and '"tool_call_id"' in line
+    )
+    confirmation_id = structured[0]["tool_call_id"]
+    confirmed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/tool-calls/{confirmation_id}/confirm"
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "SUCCEEDED", confirmed.json()
+    rules = client.get("/api/recurrences").json()
+    assert len(rules) == 1
+    assert rules[0]["amount"] == "282.00"
+    assert rules[0]["starts_on"] == starts_on.isoformat()
+    assert rules[0]["ends_on"] == ends_on.isoformat()
+    assert rules[0]["notes"] == "Pago via Pix; Vencimento dia 08"
+    assert client.get("/api/transactions").json() == []
+
+
+def test_chat_imports_multiple_invoice_totals_with_confirmation_without_duplicate_purchases(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    _, category_id = _create_assistant_basics(client)
+    today = _today()
+    card = client.post(
+        "/api/cards",
+        json={
+            "name": "Gold",
+            "institution": "Sicredi",
+            "credit_limit": "5000.00",
+            "closing_day": 31,
+            "due_day": 10,
+        },
+    ).json()
+    assert card["name"] == "Gold"
+    existing_purchase = client.post(
+        "/api/card-purchases",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Compra já cadastrada",
+            "amount": "100.00",
+            "occurred_at": today.isoformat(),
+        },
+    )
+    assert existing_purchase.status_code == 201
+
+    next_year, next_month = (
+        (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+    )
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_import_invoices",
+                        "set_card_invoice_opening_balances",
+                        json.dumps(
+                            {
+                                "credit_card_id": card["id"],
+                                "invoices": [
+                                    {
+                                        "closing_month": f"{today.year}-{today.month:02d}",
+                                        "amount": "654,63",
+                                    },
+                                    {
+                                        "closing_month": f"{next_year}-{next_month:02d}",
+                                        "amount": "519.63",
+                                    },
+                                ],
+                            }
+                        ),
+                    ),
+                ),
+                _completed(),
+            ]
+        ]
+    )
+    _set_fake_provider(client, fake)
+
+    prepared = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Cadastre os totais atuais das faturas deste cartão."},
+    )
+    assert prepared.status_code == 200
+    assert "R$ 654,63" in prepared.text
+    assert "compras já lançadas R$ 100,00" in prepared.text
+    assert "R$ 554,63" in prepared.text
+    existing_invoices = client.get(f"/api/cards/{card['id']}/invoices").json()
+    assert len(existing_invoices) == 1
+    assert existing_invoices[0]["total"] == "100.00"
+
+    confirmation_id = next(
+        json.loads(line.removeprefix("data: "))["items"][0]["tool_call_id"]
+        for line in prepared.text.splitlines()
+        if line.startswith("data: ") and '"items"' in line and '"tool_call_id"' in line
+    )
+    confirmed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/tool-calls/{confirmation_id}/confirm"
+    )
+
+    invoices = client.get(f"/api/cards/{card['id']}/invoices").json()
+    by_month = {invoice["closing_date"][:7]: invoice for invoice in invoices}
+    current_invoice = by_month[f"{today.year}-{today.month:02d}"]
+    next_invoice = by_month[f"{next_year}-{next_month:02d}"]
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "SUCCEEDED"
+    assert current_invoice["opening_balance"] == "554.63"
+    assert current_invoice["total"] == "654.63"
+    assert len(current_invoice["purchases"]) == 1
+    assert next_invoice["opening_balance"] == "519.63"
+    assert next_invoice["total"] == "519.63"
+    assert next_invoice["purchases"] == []
+    assert len(client.get("/api/transactions").json()) == 1
+    summary = client.get(
+        f"/api/dashboard/summary?year={today.year}&month={today.month}"
+    ).json()
+    assert summary["monthly_expenses"] == "100.00"
 
 
 def test_ai_status_reports_plan_connection_without_returning_credentials(

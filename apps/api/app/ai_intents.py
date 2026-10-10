@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from calendar import monthrange
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -22,6 +23,7 @@ _MONEY = re.compile(
 )
 _EXPLICIT_DATE = re.compile(r"(?<!\d)(?P<day>\d{1,2})/(?P<month>\d{1,2})/(?P<year>\d{4})(?!\d)")
 _ISO_DATE = re.compile(r"(?<!\d)(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?!\d)")
+_MONTH_YEAR = re.compile(r"(?<!\d)(?P<month>0?[1-9]|1[0-2])/(?P<year>\d{2}|\d{4})(?!\d)")
 _CATEGORY_SYNONYMS = (
     frozenset({"combustivel", "gasolina", "abastecimento"}),
     frozenset(
@@ -61,6 +63,61 @@ _CATEGORY_SYNONYMS = (
         }
     ),
     frozenset({"transporte", "uber", "taxi", "onibus", "metro", "estacionamento", "pedagio"}),
+    frozenset(
+        {
+            "educacao",
+            "escola",
+            "curso",
+            "cursos",
+            "faculdade",
+            "universidade",
+            "matricula",
+        }
+    ),
+    frozenset(
+        {
+            "moradia",
+            "aluguel",
+            "condominio",
+            "iptu",
+            "energia",
+            "eletricidade",
+            "agua",
+            "internet",
+            "telefone",
+        }
+    ),
+    frozenset(
+        {
+            "assinaturas",
+            "assinatura",
+            "streaming",
+            "netflix",
+            "spotify",
+            "mensalidade streaming",
+        }
+    ),
+    frozenset(
+        {
+            "lazer",
+            "cinema",
+            "show",
+            "passeio",
+            "jogos",
+            "viagem",
+            "viagens",
+        }
+    ),
+    frozenset(
+        {
+            "compras",
+            "roupa",
+            "roupas",
+            "vestuario",
+            "calcado",
+            "calcados",
+        }
+    ),
 )
 _CATEGORY_SUGGESTIONS = (
     ("Combustível", frozenset({"combustivel", "gasolina", "abastecimento"})),
@@ -117,6 +174,57 @@ _CATEGORY_SUGGESTIONS = (
             {"transporte", "uber", "taxi", "onibus", "metro", "estacionamento", "pedagio"}
         ),
     ),
+    (
+        "Educação",
+        frozenset(
+            {
+                "educacao",
+                "escola",
+                "curso",
+                "cursos",
+                "faculdade",
+                "universidade",
+                "matricula",
+            }
+        ),
+    ),
+    (
+        "Moradia",
+        frozenset(
+            {
+                "moradia",
+                "aluguel",
+                "condominio",
+                "iptu",
+                "energia",
+                "eletricidade",
+                "agua",
+                "internet",
+                "telefone",
+            }
+        ),
+    ),
+    (
+        "Assinaturas",
+        frozenset(
+            {
+                "assinaturas",
+                "assinatura",
+                "streaming",
+                "netflix",
+                "spotify",
+                "mensalidade streaming",
+            }
+        ),
+    ),
+    (
+        "Lazer",
+        frozenset({"lazer", "cinema", "show", "passeio", "jogos", "viagem", "viagens"}),
+    ),
+    (
+        "Compras",
+        frozenset({"compras", "roupa", "roupas", "vestuario", "calcado", "calcados"}),
+    ),
 )
 
 
@@ -128,6 +236,12 @@ class ExpenseDecision:
     amount: Decimal | None = None
     description: str | None = None
     clarification_field: ExpenseClarificationField | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RecurrenceDecision:
+    arguments: dict[str, object]
+    category_to_create: str | None = None
 
 
 def is_manual_expense_candidate(content: str) -> bool:
@@ -266,6 +380,225 @@ def parse_manual_expense(
     return ExpenseDecision("READY", arguments=arguments, amount=amount, description=description)
 
 
+def parse_manual_recurrence(
+    content: str,
+    accounts: Sequence[Account],
+    categories: Sequence[Category],
+    today: date,
+) -> RecurrenceDecision | None:
+    """Parse only fully specified recurring expenses; ambiguous requests go to the AI."""
+    original = content.strip()
+    normalized = _normalize(original)
+    if not _contains_word(normalized, {"gasto", "despesa"}):
+        return None
+    if not any(
+        term in normalized
+        for term in ("fixo", "fixa", "recorrente", "programado", "programada", "todo mes", "mensal")
+    ):
+        return None
+
+    frequency: str | None = None
+    if any(term in normalized for term in ("todo mes", "todos os meses", "mensal")):
+        frequency = "MONTHLY"
+    elif any(term in normalized for term in ("toda semana", "todas as semanas", "semanal")):
+        frequency = "WEEKLY"
+    elif any(term in normalized for term in ("todo dia", "todos os dias", "diario")):
+        frequency = "DAILY"
+    elif any(term in normalized for term in ("todo ano", "todos os anos", "anual")):
+        frequency = "YEARLY"
+    interval_match = re.search(
+        r"\ba cada\s+(?P<interval>\d+)\s+(?P<unit>dias?|semanas?|meses?|anos?)\b",
+        normalized,
+    )
+    interval = 1
+    if interval_match is not None:
+        unit = interval_match.group("unit")
+        frequency = (
+            "DAILY" if unit.startswith("dia") else
+            "WEEKLY" if unit.startswith("semana") else
+            "MONTHLY" if unit.startswith("mes") else
+            "YEARLY"
+        )
+        interval = int(interval_match.group("interval"))
+    if frequency is None or interval < 1 or interval > 365:
+        return None
+
+    explicit_dates = list(_EXPLICIT_DATE.finditer(original))
+    month_years = list(_MONTH_YEAR.finditer(original)) if not explicit_dates else []
+    if explicit_dates:
+        if len(explicit_dates) > 2:
+            return None
+        try:
+            parsed_dates = [
+                date(
+                    int(match.group("year")),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                )
+                for match in explicit_dates
+            ]
+        except ValueError:
+            return None
+        starts_on = parsed_dates[0]
+        ends_on = parsed_dates[1] if len(parsed_dates) == 2 else None
+    elif month_years:
+        if len(month_years) > 2:
+            return None
+        parsed_months: list[tuple[int, int]] = []
+        for match in month_years:
+            year_text = match.group("year")
+            year = int(year_text)
+            if len(year_text) == 2:
+                year += 2000
+            parsed_months.append((year, int(match.group("month"))))
+        if len(parsed_months) == 1 and any(
+            term in normalized for term in ("ate", "finaliz", "termina")
+        ):
+            return None
+    else:
+        return None
+
+    day_matches = {
+        int(value)
+        for value in re.findall(r"\bdia\s+(\d{1,2})\b", normalized)
+    }
+    if len(day_matches) > 1:
+        return None
+    if explicit_dates:
+        due_day = next(iter(day_matches), starts_on.day)
+        if due_day != starts_on.day:
+            return None
+        if len(parsed_dates) == 2 and parsed_dates[1].day != due_day:
+            return None
+    else:
+        due_day = next(iter(day_matches), 0)
+        if due_day < 1 or due_day > 31:
+            return None
+        starts_on = _date_in_month(parsed_months[0][0], parsed_months[0][1], due_day)
+        ends_on = (
+            _date_in_month(parsed_months[1][0], parsed_months[1][1], due_day)
+            if len(parsed_months) == 2
+            else None
+        )
+    if starts_on < today or (ends_on is not None and ends_on < starts_on):
+        return None
+
+    amount_text = _EXPLICIT_DATE.sub(" ", original)
+    amount_text = _MONTH_YEAR.sub(" ", amount_text)
+    amount_text = re.sub(
+        r"\ba cada\s+\d+\s+(?:dias?|semanas?|meses?|anos?)\b",
+        " ",
+        amount_text,
+        flags=re.IGNORECASE,
+    )
+    amount_text = re.sub(r"\bdia\s+\d{1,2}\b", " ", amount_text, flags=re.IGNORECASE)
+    amount_matches: list[tuple[re.Match[str], str | None]] = []
+    for match in _MONEY.finditer(amount_text):
+        prefix = _normalize(amount_text[max(0, match.start() - 18) : match.start()])
+        has_currency = "r$" in amount_text[max(0, match.start() - 3) : match.start()].casefold()
+        has_amount_context = bool(re.search(r"\b(?:de|por|valor)\s*$", prefix))
+        has_unit = bool(re.match(r"\s*(?:reais|real)\b", amount_text[match.end() :], re.IGNORECASE))
+        if has_currency or has_amount_context or has_unit:
+            amount_matches.append((match, None))
+    if len(amount_matches) != 1:
+        return None
+    amount_match = amount_matches[0][0]
+    amount = _parse_amount(amount_match.group("value"), None)
+    if amount is None:
+        return None
+
+    active_accounts = [account for account in accounts if account.is_active]
+    mentioned_accounts = [
+        account for account in active_accounts
+        if _contains_phrase(normalized, _normalize(account.name))
+    ]
+    if len(mentioned_accounts) == 1:
+        account = mentioned_accounts[0]
+    elif len(mentioned_accounts) == 0 and len(active_accounts) == 1:
+        account = active_accounts[0]
+    else:
+        return None
+
+    active_categories = [
+        category for category in categories
+        if category.type == "EXPENSE" and category.archived_at is None
+    ]
+    category_to_create = _explicit_category_creation_name(original)
+    category = None
+    if category_to_create:
+        category = next(
+            (
+                item
+                for item in active_categories
+                if _normalize(item.name) == _normalize(category_to_create)
+            ),
+            None,
+        )
+        if category is None and any(
+            item.type == "EXPENSE" and _normalize(item.name) == _normalize(category_to_create)
+            for item in categories
+        ):
+            return None
+    else:
+        matches = [
+            item for item in active_categories
+            if _contains_phrase(normalized, _normalize(item.name))
+        ]
+        if len(matches) != 1:
+            return None
+        category = matches[0]
+
+    if category_to_create and len(category_to_create) > 100:
+        return None
+    if category is None and category_to_create is None:
+        return None
+
+    notes: list[str] = []
+    if _contains_word(normalized, {"pix"}):
+        notes.append("Pago via Pix")
+    notes.append(f"Vencimento dia {due_day:02d}")
+    arguments: dict[str, object] = {
+        "account_id": str(account.id),
+        "category_id": str(category.id) if category is not None else "",
+        "movement_type": "EXPENSE",
+        "description": (
+            f"Gasto fixo de {category.name if category is not None else category_to_create}"
+        ),
+        "amount": format(amount, ".2f"),
+        "frequency": frequency,
+        "interval": interval,
+        "starts_on": starts_on.isoformat(),
+        "ends_on": ends_on.isoformat() if ends_on is not None else None,
+        "notes": "; ".join(notes),
+    }
+    return RecurrenceDecision(
+        arguments=arguments,
+        category_to_create=category_to_create if category is None else None,
+    )
+
+
+def _date_in_month(year: int, month: int, day: int) -> date:
+    return date(year, month, min(day, monthrange(year, month)[1]))
+
+
+def _explicit_category_creation_name(content: str) -> str | None:
+    match = re.search(
+        r"\b(?:crie|criar|cadastre|cadastrar|adicione|adicionar)\s+(?:a\s+)?categoria\s+[\"“']?([^\"”',.;\n]+)",
+        content,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    name = re.split(
+        r"\s+e\s+(?=(?:registre|programe|lance|cadastre)\b)",
+        match.group(1),
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    name = name.strip().strip(" \t\r\n.,!?\"'“”‘’")
+    return name or None
+
+
 def format_brl(amount: Decimal) -> str:
     whole, cents = format(amount.quantize(Decimal("0.01")), ".2f").split(".")
     grouped = f"{int(whole):,}".replace(",", ".")
@@ -278,7 +611,7 @@ def suggest_expense_category_name(content: str) -> str | None:
     matches = [
         name
         for name, synonyms in _CATEGORY_SUGGESTIONS
-        if any(_contains_word(normalized, {synonym}) for synonym in synonyms)
+        if _contains_any_alias(normalized, synonyms)
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -355,9 +688,8 @@ def _match_category(
         if len(hinted_matches) > 1:
             return None
 
-        hint_words = set(normalized_hint.split())
         for synonyms in _CATEGORY_SYNONYMS:
-            if hint_words.intersection(synonyms):
+            if _contains_any_alias(normalized_hint, synonyms):
                 matches = [
                     category for category in categories if _normalize(category.name) in synonyms
                 ]
@@ -374,9 +706,8 @@ def _match_category(
     if len(direct_matches) > 1:
         return None
 
-    words = set(message.split())
     for synonyms in _CATEGORY_SYNONYMS:
-        if words.intersection(synonyms):
+        if _contains_any_alias(message, synonyms):
             matches = [category for category in categories if _normalize(category.name) in synonyms]
             if len(matches) == 1:
                 return matches[0]
@@ -412,6 +743,10 @@ def _contains_phrase(value: str, phrase: str) -> bool:
 
 def _contains_word(value: str, words: set[str]) -> bool:
     return bool(set(value.split()).intersection(words))
+
+
+def _contains_any_alias(value: str, aliases: Iterable[str]) -> bool:
+    return any(_contains_phrase(value, alias) for alias in aliases)
 
 
 def _list_names(names: Iterable[str]) -> str:

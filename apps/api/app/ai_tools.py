@@ -16,13 +16,21 @@ from sqlalchemy.orm import Session
 from app.accounts import list_accounts
 from app.cards import list_cards
 from app.categories import create_category, list_categories
-from app.finance_engine import current_financial_date
+from app.finance_engine import billing_cycle_for_closing_month, current_financial_date
 from app.finance_views import credit_card_response
-from app.invoices import create_card_purchase, get_invoice
+from app.invoices import (
+    create_card_purchase,
+    get_invoice,
+    invoice_opening_balance_from_total,
+    set_invoice_opening_balances,
+)
 from app.models import Account, AIMemory, CardInvoice, CreditCard, Transaction, User
+from app.recurrences import create_recurrence_for_user, validate_recurrence
 from app.schemas import (
+    CardInvoiceOpeningBalanceSet,
     CardPurchaseCreate,
     CategoryCreate,
+    RecurrenceCreate,
     TransactionCreate,
     TransactionUpdate,
     TransferCreate,
@@ -162,11 +170,53 @@ class CreateCardPurchaseInput(ToolInput):
         return normalize_money(value)
 
 
+class InvoiceOpeningBalanceInput(ToolInput):
+    closing_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    amount: str = Field(min_length=1, max_length=32)
+
+    @field_validator("amount")
+    @classmethod
+    def validate_money(cls, value: str) -> str:
+        normalized = normalize_money(value)
+        CardInvoiceOpeningBalanceSet(closing_month="2000-01", amount=normalized)
+        return normalized
+
+
+class SetInvoiceOpeningBalancesInput(ToolInput):
+    credit_card_id: UUID
+    invoices: list[InvoiceOpeningBalanceInput] = Field(min_length=1, max_length=24)
+
+    @model_validator(mode="after")
+    def validate_unique_cycles(self) -> SetInvoiceOpeningBalancesInput:
+        months = [item.closing_month for item in self.invoices]
+        if len(months) != len(set(months)):
+            raise ValueError("Cada mês de fechamento deve aparecer uma única vez.")
+        return self
+
+
 class CreateTransferInput(ToolInput):
     source_account_id: UUID
     destination_account_id: UUID
     amount: str
     occurred_at: date
+
+    @field_validator("amount")
+    @classmethod
+    def validate_money(cls, value: str) -> str:
+        return normalize_money(value)
+
+
+class CreateRecurrenceInput(ToolInput):
+    account_id: UUID
+    category_id: UUID
+    movement_type: Literal["INCOME", "EXPENSE"]
+    description: str = Field(min_length=1, max_length=200)
+    amount: str
+    frequency: Literal["DAILY", "WEEKLY", "MONTHLY", "YEARLY"]
+    interval: int = Field(ge=1, le=365)
+    starts_on: date
+    ends_on: date | None
+    notes: str | None
 
     @field_validator("amount")
     @classmethod
@@ -483,6 +533,185 @@ def _create_card_purchase(db: Session, user: User, args: BaseModel) -> tuple[obj
     return create_card_purchase(request, user, db), "transaction_card"
 
 
+def _card_invoice_opening_balance_preview(
+    db: Session, user: User, args: BaseModel
+) -> tuple[object, str]:
+    payload = cast(SetInvoiceOpeningBalancesInput, args)
+    card = db.scalar(
+        select(CreditCard).where(
+            CreditCard.id == payload.credit_card_id,
+            CreditCard.user_id == user.id,
+            CreditCard.is_active.is_(True),
+        )
+    )
+    if card is None:
+        raise HTTPException(status_code=404, detail="Cartão ativo não encontrado.")
+
+    changes: dict[str, str] = {
+        "Cartão": " · ".join(part for part in (card.name, card.institution) if part)
+    }
+    month_names = (
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    )
+    for item in sorted(payload.invoices, key=lambda value: value.closing_month):
+        year, month = (int(part) for part in item.closing_month.split("-"))
+        cycle = billing_cycle_for_closing_month(year, month, card.closing_day, card.due_day)
+        invoice = db.scalar(
+            select(CardInvoice).where(
+                CardInvoice.credit_card_id == card.id,
+                CardInvoice.user_id == user.id,
+                CardInvoice.closing_date == cycle.closing_date,
+            )
+        )
+        amount = Decimal(item.amount)
+        current_opening = Decimal("0.00")
+        purchase_total = Decimal("0.00")
+        paid_amount = Decimal("0.00")
+        opening_balance = amount
+        if invoice is not None:
+            purchase_total, opening_balance, paid_amount = invoice_opening_balance_from_total(
+                db, invoice, amount
+            )
+            current_opening = invoice.opening_balance
+
+        label = f"{month_names[month - 1].capitalize()}/{year}"
+        summary = (
+            f"fatura informada {format_brl(amount)} · "
+            f"compras já lançadas {format_brl(purchase_total)} · "
+            f"dívida inicial a registrar {format_brl(opening_balance)} · "
+            f"total previsto {format_brl(amount)}"
+        )
+        if paid_amount > 0:
+            summary += f" · {format_brl(paid_amount)} já pago"
+        if current_opening > 0:
+            summary += f" · saldo inicial atual: {format_brl(current_opening)}"
+        changes[label] = summary
+
+    return {
+        "changes": changes,
+        "message": (
+            "O valor informado é o total atual da fatura. Compras já lançadas são descontadas "
+            "desse total para evitar duplicidade; o restante entra como dívida existente, sem "
+            "criar compras nem despesas históricas."
+        ),
+    }, "confirmation"
+
+
+def _set_card_invoice_opening_balances(
+    db: Session, user: User, args: BaseModel
+) -> tuple[object, str]:
+    payload = cast(SetInvoiceOpeningBalancesInput, args)
+    requests = [
+        CardInvoiceOpeningBalanceSet(
+            closing_month=item.closing_month,
+            amount=item.amount,
+        )
+        for item in payload.invoices
+    ]
+    card, invoices = set_invoice_opening_balances(
+        db,
+        user,
+        payload.credit_card_id,
+        requests,
+        amounts_are_invoice_totals=True,
+    )
+    db.commit()
+    months = ", ".join(
+        f"{int(item.closing_month[5:]):02d}/{item.closing_month[:4]}"
+        for item in payload.invoices
+    )
+    return {
+        "message": (
+            f"Registrei os saldos iniciais das faturas de {months} no cartão {card.name}. "
+            "Eles representam dívidas existentes e não criaram compras ou despesas históricas."
+        ),
+        "invoice_count": len(invoices),
+    }, "success"
+
+
+def _recurrence_request(payload: CreateRecurrenceInput) -> RecurrenceCreate:
+    return RecurrenceCreate(
+        account_id=payload.account_id,
+        category_id=payload.category_id,
+        type=payload.movement_type,
+        description=payload.description,
+        amount=Decimal(payload.amount),
+        frequency=payload.frequency,
+        interval=payload.interval,
+        starts_on=payload.starts_on,
+        ends_on=payload.ends_on,
+        notes=payload.notes,
+    )
+
+
+def _recurrence_preview(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+    payload = cast(CreateRecurrenceInput, args)
+    request = _recurrence_request(payload)
+    account, category = validate_recurrence(request, user, db)
+    frequency_labels = {
+        "DAILY": ("dia", "dias"),
+        "WEEKLY": ("semana", "semanas"),
+        "MONTHLY": ("mês", "meses"),
+        "YEARLY": ("ano", "anos"),
+    }
+    cadence = (
+        f"A cada {request.interval} {frequency_labels[request.frequency][1]}"
+        if request.interval > 1
+        else {
+            "DAILY": "Diária",
+            "WEEKLY": "Semanal",
+            "MONTHLY": "Mensal",
+            "YEARLY": "Anual",
+        }[request.frequency]
+    )
+    changes: dict[str, str] = {
+        "Descrição": request.description,
+        "Tipo": "Despesa" if request.type == "EXPENSE" else "Receita",
+        "Valor": format_brl(request.amount),
+        "Conta": account.name,
+        "Categoria": category.name,
+        "Frequência": cadence,
+        "Primeira ocorrência": request.starts_on.strftime("%d/%m/%Y"),
+        "Última ocorrência": (
+            request.ends_on.strftime("%d/%m/%Y")
+            if request.ends_on is not None
+            else "Sem data final"
+        ),
+        "Observação": request.notes or "—",
+    }
+    return {
+        "title": "Confirmar compromisso",
+        "changes": changes,
+        "message": (
+            "Este compromisso ficará em Programados. O saldo não muda. "
+            "Nenhuma despesa é registrada até que você marque uma ocorrência como paga."
+        ),
+    }, "confirmation"
+
+
+def _create_recurrence(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+    payload = cast(CreateRecurrenceInput, args)
+    rule = create_recurrence_for_user(_recurrence_request(payload), user, db)
+    end_description = (
+        f" até {rule.ends_on.strftime('%d/%m/%Y')}" if rule.ends_on is not None else ""
+    )
+    return {
+        "title": "Programado",
+        "message": (
+            f"Agendei “{rule.description}” por {format_brl(rule.amount)}, com primeira ocorrência "
+            f"em {rule.starts_on.strftime('%d/%m/%Y')}{end_description}. "
+            "O saldo só muda quando você marcar uma ocorrência como paga."
+        ),
+    }, "success"
+
+
+def format_brl(amount: Decimal) -> str:
+    whole, fraction = f"{amount:.2f}".split(".")
+    grouped = f"{int(whole):,}".replace(",", ".")
+    return f"R$ {grouped},{fraction}"
+
+
 def _create_transfer(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
     payload = cast(CreateTransferInput, args)
     request = TransferCreate(
@@ -610,6 +839,36 @@ TOOL_DEFINITIONS = (
         "Registra uma compra já feita em cartão de crédito.",
         CreateCardPurchaseInput,
         _create_card_purchase,
+    ),
+    ToolDefinition(
+        "set_card_invoice_opening_balances",
+        (
+            "Importa o total atual de uma ou mais faturas que já existem. Converte o total em "
+            "saldo inicial da dívida, descontando compras daquela fatura que já estejam "
+            "registradas para evitar duplicá-las. Não gera compras nem despesas históricas. "
+            "Use os valores totais e meses exatos informados; sempre exige confirmação. "
+            "Não use para registrar compras novas já feitas."
+        ),
+        SetInvoiceOpeningBalancesInput,
+        _card_invoice_opening_balance_preview,
+        requires_confirmation=True,
+        confirmed_handler=_set_card_invoice_opening_balances,
+    ),
+    ToolDefinition(
+        "create_recurrence",
+        (
+            "Agenda um compromisso financeiro FUTURO, nunca um movimento já pago. "
+            "Sempre apresenta prévia e exige confirmação explícita. Use para programar um gasto "
+            "fixo/recorrente com datas e frequência. Escolha conta e categoria retornadas por "
+            "get_accounts/get_categories; se houver mais de uma conta compatível, pergunte. "
+            "Pix é a forma de pagamento, não uma conta; anote em notes. Envie amount como texto "
+            "decimal exato e starts_on/ends_on como datas YYYY-MM-DD; o fim é inclusivo. "
+            "Ocorrências previstas não alteram saldo ou despesas até serem marcadas como pagas."
+        ),
+        CreateRecurrenceInput,
+        _recurrence_preview,
+        requires_confirmation=True,
+        confirmed_handler=_create_recurrence,
     ),
     ToolDefinition(
         "create_transfer",

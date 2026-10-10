@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Numeric,
     String,
     Text,
@@ -152,6 +153,7 @@ class CreditCard(Base):
 class CardInvoice(Base):
     __tablename__ = "card_invoices"
     __table_args__ = (
+        Index("ix_card_invoices_user_due_date", "user_id", "due_date"),
         UniqueConstraint("id", "user_id", name="uq_card_invoices_id_user_id"),
         UniqueConstraint(
             "credit_card_id", "user_id", "closing_date", name="uq_card_invoice_card_cycle"
@@ -165,6 +167,10 @@ class CardInvoice(Base):
         CheckConstraint("period_start <= period_end", name="ck_card_invoices_period_order"),
         CheckConstraint("period_end = closing_date", name="ck_card_invoices_closing_period_end"),
         CheckConstraint("due_date > closing_date", name="ck_card_invoices_due_after_close"),
+        CheckConstraint(
+            "opening_balance >= 0",
+            name="ck_card_invoices_opening_balance_nonnegative",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -176,6 +182,9 @@ class CardInvoice(Base):
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     closing_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    opening_balance: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00"), server_default="0.00"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -348,6 +357,16 @@ class AIMemory(Base):
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
+        Index("ix_transactions_user_occurred_at", "user_id", "occurred_at"),
+        Index("ix_transactions_account_occurred_at", "account_id", "occurred_at"),
+        Index("ix_transactions_category_id", "category_id"),
+        Index("ix_transactions_source_account_occurred_at", "source_account_id", "occurred_at"),
+        Index(
+            "ix_transactions_destination_account_occurred_at",
+            "destination_account_id",
+            "occurred_at",
+        ),
+        Index("ix_transactions_user_invoice_type", "user_id", "card_invoice_id", "type"),
         UniqueConstraint("id", "user_id", name="uq_transactions_id_user_id"),
         CheckConstraint(
             "type IN ('INCOME', 'EXPENSE', 'TRANSFER', 'CARD_PURCHASE', 'CARD_PAYMENT')",

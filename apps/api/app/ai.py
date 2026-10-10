@@ -289,7 +289,15 @@ def confirm_tool_call(
             call.input_sanitized,
             result,
         )
-        text = "Lançamento atualizado."
+        if call.tool_name == "set_card_invoice_opening_balances":
+            text = "Faturas registradas."
+        elif call.tool_name == "create_recurrence":
+            text = (
+                "Compromisso programado. "
+                "O saldo só muda quando você marcar uma ocorrência como paga."
+            )
+        else:
+            text = "Lançamento atualizado."
         cards = result.cards
     else:
         text = f"Não consegui concluir a alteração: {result.error_message or 'verifique os dados.'}"

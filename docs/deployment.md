@@ -1,53 +1,50 @@
-# Implantação planejada
-
-Este documento registra a topologia de produção planejada e o ambiente de testes atual. O domínio disponível é `matheus.inf.br`, e o subdomínio planejado para a aplicação é `sophia.matheus.inf.br`. A VM de teste já executa a SophIA via Docker Compose; **DNS, Cloudflare Tunnel e publicação de produção ainda não foram configurados.** O ambiente de desenvolvimento local continua sendo iniciado por `docker compose up`.
+# Implantação e operação
 
 ## Topologia
 
-```text
-Internet
-   ↓
-sophia.matheus.inf.br
-   ↓
-Cloudflare (DNS e HTTPS)
-   ↓
-Cloudflare Tunnel
-   ↓
-VM Debian (administração por SSH)
-   ↓
-Docker Compose
-   ├── web
-   ├── api
-   ├── worker
-   └── postgres
+O projeto separa frontend, API, worker e PostgreSQL em serviços Docker Compose. Em produção, somente o frontend deve receber tráfego externo; API e banco ficam em redes internas. O PostgreSQL não publica porta no host. Credenciais de OAuth ficam em um volume privado montado apenas na API.
+
+O código aberto fica no [repositório GitHub](https://github.com/vitokkkj/finance-ai), sob licença MIT. Endereços privados, domínios de teste, credenciais, arquivos `.env` e dados financeiros não pertencem à documentação pública nem ao repositório.
+
+## Desenvolvimento e VM privada
+
+- Desenvolvimento local: `docker compose up`.
+- Runtime para uma VM privada: `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build`.
+- A VM é um ambiente auto-hospedado privado. Registre hostnames, IPs e detalhes da rede somente no inventário operacional privado do proprietário.
+- A configuração de runtime inicia o frontend com o servidor Next.js de produção e a API sem autoreload. API e PostgreSQL permanecem na rede interna do Compose.
+- O arquivo `.env` é exclusivo do ambiente e não entra no Git. `OPENAI_API_KEY` não é necessário no fluxo Sign in with ChatGPT. Os tokens OAuth ficam no volume privado da API, com permissões restritas.
+- A situação atual da autorização deve ser consultada em Preferências ou em `GET /api/ai/status`; não deduza que uma cópia do repositório tem credenciais configuradas.
+
+O OAuth para uma VM é concluído no computador que tem o navegador. Depois, as credenciais protegidas são transferidas por SSH e a própria VM renova os tokens. O host da VM precisa manter o seu identificador estável. Consulte o fluxo oficial de [Sign in with ChatGPT para VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
+
+## Dados e recuperação
+
+O Compose não agenda nem executa backups do PostgreSQL. Este repositório não comprova a existência de snapshots, retenção ou restauração testada na plataforma que hospeda a VM; configure e valide esses itens antes de tratar o ambiente como protegido. Não considere um deploy bem-sucedido como prova de backup.
+
+Antes de uma migration ou atualização que possa afetar dados:
+
+1. Confira o estado do banco e a revisão atual com `docker compose exec api alembic current`.
+2. Faça um backup do PostgreSQL para armazenamento privado, fora do volume em uso.
+3. Valide que o arquivo existe, tem acesso restrito e pode ser restaurado em uma instância descartável.
+4. Atualize os serviços e verifique `/api/health/live`, `/api/health/ready`, migrations e login.
+5. Preserve o backup e a imagem anterior até confirmar a operação; tenha um procedimento de retorno que não reverta migrations destrutivas automaticamente.
+
+Os backups podem conter informações financeiras pessoais: não os envie para o GitHub, logs, tickets ou serviços sem autorização.
+
+## Antes de disponibilizar para acesso externo
+
+- Use HTTPS e cookie de sessão `Secure`.
+- Mantenha o cadastro público desabilitado; a criação inicial da conta é controlada pela aplicação.
+- Restrinja a rede ao frontend e mantenha API/PostgreSQL sem portas públicas.
+- Valide login, recuperação de acesso, limite de tentativas, logs sem segredos, health checks, backup e restauração.
+- Confirme que o provedor OAuth está conectado e que o usuário autorizou o uso do plano ChatGPT. Não configure fallback para API paga sem decisão explícita.
+- Faça a atualização primeiro em uma cópia de teste do banco e confira os efeitos financeiros no Finance Engine.
+
+## Comandos de operação
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vm.yml ps
+docker compose -f docker-compose.yml -f docker-compose.vm.yml logs --tail=100 web api worker postgres
+docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic current
+docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic upgrade head
 ```
-
-O túnel será iniciado de dentro da VM e encaminhará somente para o serviço web. Não se planeja abrir portas de entrada no roteador ou publicar diretamente a API.
-
-## Ambiente de testes atual
-
-- Debian 13 na VM, com Docker Engine e plugin Docker Compose instalados pelo repositório oficial.
-- O ambiente de teste usa um projeto Docker Compose e um volume PostgreSQL dedicados. Nenhum dado financeiro local foi copiado.
-- A migration aplicada está em `0009_optional_opening_balance` (`head`). API, web e PostgreSQL passam seus health checks; o worker está em execução.
-- O web escuta em `IP-TAILSCALE-DA-VM:80`, endereço da interface Tailscale da VM. Acesse diretamente `http://IP-TAILSCALE-DA-VM` com o Tailscale ativo no dispositivo. Não é necessário abrir um túnel SSH.
-- `WEB_ALLOWED_DEV_ORIGINS=IP-TAILSCALE-DA-VM` autoriza o Next.js em modo desenvolvimento a servir os recursos de desenvolvimento para esse hostname Tailscale; a lista é configurável por ambiente.
-- A porta 80 é vinculada especificamente ao IP Tailscale; não fica publicada no IP da interface LAN da VM. API e PostgreSQL não publicam portas; o banco fica na rede interna do Compose.
-- O `.env` de teste fica somente na VM, com permissão `0600`, e não contém chave de API. A autorização OAuth do ChatGPT fica em volume privado montado somente na API; tokens não são enviados ao frontend nem ao worker. A conexão OAuth real ainda depende da autorização do proprietário no navegador e do fluxo open source documentado.
-- Esta implantação continua em modo de desenvolvimento (Next.js dev server e API com reload) e deve receber somente dados de teste. Antes de usar dados reais, preparar imagens de produção, sessão com cookie `Secure` atrás de HTTPS, backups e teste de restauração, monitoramento e plano de atualização/rollback.
-- Os backups ficarão sob responsabilidade do proprietário da VM, por snapshots diários da VM Debian no Proxmox, com retenção planejada de 30 dias. A aplicação não criará uma rotina própria de backup. Antes de usar dados reais, validar a restauração de um snapshot e criar um snapshot adicional antes de migrations ou atualizações de risco.
-
-O endereço de teste não é público e não usa `sophia.matheus.inf.br`; o acesso depende do dispositivo estar conectado ao tailnet. O tráfego de teste usa HTTP na interface Tailscale. A publicação futura pelo domínio usará HTTPS via Cloudflare Tunnel.
-
-## Limites de segurança
-
-- PostgreSQL permanece na rede interna do Compose, sem porta publicada no host ou acesso pela internet.
-- O acesso ao domínio usa HTTPS. A autenticação privada da SophIA continua obrigatória.
-- Cloudflare Access será exigido para o acesso externo e funcionará antes do login da SophIA; não substitui a autenticação da aplicação.
-- Chaves, tokens e senhas ficam em variáveis de ambiente ou em mecanismo local de secrets na VM; arquivos `.env` não entram no Git.
-- Chaves de provedor, cookies de sessão e outros segredos nunca são enviados ao frontend.
-- A criação inicial da conta permanece controlada pela aplicação; não haverá cadastro público.
-- A VM é administrada por SSH. A configuração de firewall, atualizações e procedimento de recuperação serão validados durante a etapa de produção; os snapshots diários no Proxmox são responsabilidade do proprietário.
-
-## Preparação antes da publicação
-
-Antes de apontar `sophia.matheus.inf.br` para a VM, validar autenticação e recuperação de acesso, restauração de um snapshot do Proxmox, atualização e rollback de imagens, rotação de secrets, logs sem dados sensíveis e health checks. Cloudflare Access ficará ativo antes do login da aplicação, com acesso restrito à identidade autorizada.

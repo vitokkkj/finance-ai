@@ -1,15 +1,23 @@
-# Integrações — plano futuro
+# Integrações
 
-Nenhuma integração externa é chamada na Fase 1.
+## Sign in with ChatGPT
+
+A SophIA usa OAuth Sign in with ChatGPT para enviar pedidos elegíveis à Responses API com autorização do plano ChatGPT. O fluxo não usa uma chave da API nem precisa de `OPENAI_API_KEY`, segredo de cliente ou fallback pago. O código público está no [repositório finance-ai](https://github.com/vitokkkj/finance-ai), sob MIT.
+
+O uso não compartilha o histórico ou as memórias do ChatGPT com a SophIA. Em contas Plus, o limite de cinco horas é compartilhado entre os aplicativos que usam o plano; a SophIA não recebe uma franquia separada. A pessoa pode consultar e limitar o uso por aplicativo em ChatGPT → Configurações → Uso. As condições de elegibilidade e os modelos permitidos dependem da conta e do consentimento atual.
+
+Na VM auto-hospedada, o navegador usado para concluir OAuth precisa estar no computador local. A credencial protegida é então transferida à VM por canal seguro; a VM mantém um `ext_agent_host_id` persistente e atualiza seus tokens. O frontend e o worker não recebem tokens. Se a sessão for revogada ou expirar sem renovação, a integração para com uma mensagem de erro e não muda para chamadas pagas.
+
+Referências oficiais:
+
+- [Visão geral de Sign in with ChatGPT e uso do plano](https://developers.openai.com/siwc/token-sharing-open-source)
+- [Procedimento oficial para VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms)
+- [Contas, sessões, limites e segurança de credenciais](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)
 
 ## Open Finance
 
-A integração planejada é Pluggy/MeuPluggy, inicialmente somente leitura para as próprias contas. A implementação consultará a documentação oficial atual antes de definir endpoints ou formatos. Senhas bancárias não serão armazenadas. DTOs de integração e idempotência serão definidos junto com a fase de sincronização.
-
-## ChatGPT Plus (Sign in with ChatGPT)
-
-O provider preparado para a SophIA usa OAuth da conta ChatGPT do proprietário, sem API key e sem cobrança de API. O fluxo oficial atende aplicativos open source hospedados pelo próprio usuário, inclusive em VM remota: o código é publicado sob uma licença escolhida, o usuário autoriza pelo navegador e as credenciais protegidas são transferidas por SSH para um volume privado acessível somente pela API. A conexão real ainda não foi autorizada. A franquia é compartilhada com o uso do ChatGPT/Codex, sujeita aos limites da conta e do aplicativo; isso não compartilha histórico ou memórias do ChatGPT com a SophIA. Não há fallback automático para API paga. Consulte [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) e [self-hosted VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
+Pluggy/MeuPluggy permanece uma candidata futura, não uma integração implementada. Antes de começar, consulte a documentação oficial atual, defina escopos de leitura, idempotência e reconciliação, e minimize os dados enviados. A SophIA nunca armazena senhas bancárias nem inicia pagamentos.
 
 ## Implantação
 
-O alvo de publicação planejado é `sophia.matheus.inf.br`, com DNS no Cloudflare e tráfego encaminhado por Cloudflare Tunnel a uma VM Debian acessada por SSH. HTTPS será mantido, PostgreSQL permanecerá privado sem portas publicadas, e a autenticação da SophIA continuará obrigatória; Cloudflare Access poderá ser acrescentado como proteção adicional. O deploy ainda não está implementado. Consulte [deployment.md](deployment.md) para os limites e a topologia planejada.
+A instância permanece privada e auto-hospedada. O repositório público documenta a arquitetura sem publicar endereço de VM, domínio privado, tokens ou dados financeiros. Consulte [deployment.md](deployment.md) para procedimentos e requisitos de operação.

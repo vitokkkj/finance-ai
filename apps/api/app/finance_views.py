@@ -110,6 +110,7 @@ def invoice_amounts(db: Session, invoice: CardInvoice, as_of: date | None = None
         invoice.closing_date,
         invoice.due_date,
         as_of or current_financial_date(),
+        invoice.opening_balance,
     )
 
 
@@ -131,6 +132,7 @@ def card_limit_summary(
                 invoice.closing_date,
                 invoice.due_date,
                 as_of or current_financial_date(),
+                invoice.opening_balance,
             ),
         )
         for invoice in invoices
@@ -181,6 +183,7 @@ def card_invoice_response(
         invoice.closing_date,
         invoice.due_date,
         as_of or current_financial_date(),
+        invoice.opening_balance,
     )
     return CardInvoiceResponse(
         id=invoice.id,
@@ -190,6 +193,7 @@ def card_invoice_response(
         period_end=invoice.period_end,
         closing_date=invoice.closing_date,
         due_date=invoice.due_date,
+        opening_balance=invoice.opening_balance,
         total=amounts.total,
         paid_amount=amounts.paid_amount,
         outstanding=amounts.outstanding,

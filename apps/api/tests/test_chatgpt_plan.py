@@ -23,6 +23,7 @@ def _credentials(store: ChatGPTCredentialStore) -> dict[str, object]:
     }
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Permissões POSIX são verificadas no host Linux.")
 def test_host_id_is_stable_and_opaque(tmp_path: Path) -> None:
     store = ChatGPTCredentialStore(tmp_path)
 
@@ -35,6 +36,7 @@ def test_host_id_is_stable_and_opaque(tmp_path: Path) -> None:
     assert os.stat(store.host_id_path).st_mode & 0o777 == 0o600
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Permissões POSIX são verificadas no host Linux.")
 def test_import_validates_scope_and_stores_tokens_with_private_permissions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

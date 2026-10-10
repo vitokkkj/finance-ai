@@ -29,12 +29,14 @@ O schema usa restrições para limitar moeda a BRL, os tipos aceitos, origem/est
 ### Fase 2B — transferências próprias e cartões
 
 - `credit_cards`: UUID, `user_id`, nome, instituição opcional, limite `NUMERIC(14,2)`, BRL, dia de fechamento, dia de vencimento, estado ativo e timestamps. Restrições validam moeda, limite não negativo e dias entre 1 e 31.
-- `card_invoices`: UUID, `user_id`, cartão, início/fim do ciclo, data de fechamento, vencimento e criação. O par cartão/usuário/data de fechamento é único. A chave composta `(credit_card_id, user_id)` exige que cartão e fatura tenham o mesmo proprietário.
+- `card_invoices`: UUID, `user_id`, cartão, início/fim do ciclo, data de fechamento, vencimento, saldo inicial `opening_balance NUMERIC(14,2)` e criação. O saldo inicial começa em zero e pode representar dívida de uma fatura que já existia antes do uso da SophIA; ele não é uma despesa. O par cartão/usuário/data de fechamento é único. A chave composta `(credit_card_id, user_id)` exige que cartão e fatura tenham o mesmo proprietário.
 - `transactions`: preserva os dados existentes da Fase 2A. `type` aceita `INCOME`, `EXPENSE`, `TRANSFER`, `CARD_PURCHASE` e `CARD_PAYMENT`. `account_id` e `category_id` tornam-se anuláveis somente para acomodar movimentos com referências próprias. Novos campos `source_account_id` e `destination_account_id` representam as duas pernas de uma transferência em uma linha; `card_invoice_id` conecta compras e pagamentos a uma única fatura.
 
 Uma compra no cartão continua sendo uma única linha `CARD_PURCHASE` em `transactions`, com categoria e fatura. A fatura não duplica a compra: não guarda uma cópia ou o total acumulado. `total` deriva das compras com aquele `card_invoice_id`; `paid_amount` deriva dos pagamentos; `outstanding` é a diferença não negativa. Uma linha `CARD_PAYMENT` também guarda a conta que pagou, e pode haver várias por fatura.
 
 O banco aplica chaves estrangeiras compostas para que contas, categorias e faturas referenciadas pertençam ao mesmo `user_id`. Restrições condicionais de tipo exigem as referências corretas para cada movimento e impedem uma transferência para a mesma conta. A migration incremental `0005_transfers_cards` não apaga nem reescreve transações anteriores. Seu downgrade é bloqueado quando já existem movimentos 2B, para não perder dados ao remover o schema que os representa.
+
+O saldo inicial de fatura é adicionado de forma incremental por `0010_card_invoice_open_balance`, com valor padrão zero e restrição não negativa. A migration impede downgrade quando há saldo inicial positivo, para não descartar dívida importada.
 
 ## Convenções financeiras
 

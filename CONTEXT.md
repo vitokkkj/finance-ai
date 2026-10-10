@@ -26,6 +26,14 @@ _Evite_: série, transação.
 Uma ocorrência que foi deliberadamente pulada e não deve criar transação.
 _Evite_: despesa zero, pagamento cancelado.
 
+**Sugestão de categoria**:
+Uma opção inferida a partir da descrição do movimento. Não é uma categoria escolhida nem criada até o usuário confirmar ou pedir explicitamente.
+_Evite_: classificação confirmada, aprendizagem automática.
+
+**Prévia de compromisso**:
+Resumo de uma regra futura antes de gravá-la. Exige confirmação e não altera saldo ou valores realizados.
+_Evite_: pagamento, transação futura.
+
 ## Fontes de dados
 
 **Registro manual**:

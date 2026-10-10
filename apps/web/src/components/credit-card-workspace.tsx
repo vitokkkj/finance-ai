@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
+import { CalendarDateInput } from "@/components/calendar-date-input";
 
 type Account = { id: string; name: string; is_active: boolean };
 type Category = { id: string; name: string; type: "INCOME" | "EXPENSE"; is_archived: boolean };
@@ -35,6 +36,7 @@ type CardInvoice = {
   period_end: string;
   closing_date: string;
   due_date: string;
+  opening_balance: string;
   total: string;
   paid_amount: string;
   outstanding: string;
@@ -60,6 +62,10 @@ function localDate(): string {
   }).formatToParts(new Date());
   const part = (key: string) => pieces.find((item) => item.type === key)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function localMonth(): string {
+  return localDate().slice(0, 7);
 }
 
 function displayDate(value: string): string {
@@ -108,6 +114,8 @@ export function CreditCardWorkspace({
     notes: "",
   });
   const [paymentForm, setPaymentForm] = useState({ account_id: "", amount: "", occurred_at: localDate() });
+  const [openingInvoiceFormOpen, setOpeningInvoiceFormOpen] = useState(false);
+  const [openingInvoiceForm, setOpeningInvoiceForm] = useState({ closing_month: localMonth(), amount: "" });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -255,6 +263,35 @@ export function CreditCardWorkspace({
     }
   }
 
+  async function saveOpeningInvoice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selectedCard = activeCards.find((card) => card.id === selectedCardId) ?? activeCards[0];
+    if (!selectedCard) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const invoice = await apiRequest<CardInvoice>(
+        `/api/cards/${selectedCard.id}/invoices/opening-balance`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            closing_month: openingInvoiceForm.closing_month,
+            amount: toDecimalString(openingInvoiceForm.amount),
+          }),
+        },
+      );
+      setSelectedCardId(selectedCard.id);
+      setSelectedInvoiceId(invoice.id);
+      setOpeningInvoiceForm({ closing_month: openingInvoiceForm.closing_month, amount: "" });
+      setOpeningInvoiceFormOpen(false);
+      await refresh("Saldo da fatura importado. Ele não foi lançado como despesa.");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível registrar a fatura existente." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="card-workspace">
       {notice && <div className={`workspace-notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.message}</div>}
@@ -294,7 +331,7 @@ export function CreditCardWorkspace({
             <div className="editor-heading"><h3>Registrar compra</h3><button className="text-button" onClick={() => setPurchaseFormOpen(false)} type="button">Fechar</button></div>
             <div className="form-grid transaction-form-grid">
               <label className="field-label">Cartão<select onChange={(event) => setPurchaseForm({ ...purchaseForm, credit_card_id: event.target.value })} required value={purchaseForm.credit_card_id}><option value="">Selecione</option>{activeCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></label>
-              <label className="field-label">Data<input onChange={(event) => setPurchaseForm({ ...purchaseForm, occurred_at: event.target.value })} required type="date" value={purchaseForm.occurred_at} /></label>
+              <div className="field-label"><label htmlFor="card-purchase-date">Data</label><CalendarDateInput id="card-purchase-date" onChange={(value) => setPurchaseForm({ ...purchaseForm, occurred_at: value })} required value={purchaseForm.occurred_at} /></div>
               <label className="field-label">Categoria<select onChange={(event) => setPurchaseForm({ ...purchaseForm, category_id: event.target.value })} required value={purchaseForm.category_id}><option value="">Selecione</option>{expenseCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
               <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setPurchaseForm({ ...purchaseForm, description: event.target.value })} required value={purchaseForm.description} /></label>
               <div className="field-label"><label htmlFor="card-purchase-amount">Valor</label><CurrencyInput id="card-purchase-amount" onChange={(value) => setPurchaseForm({ ...purchaseForm, amount: value })} placeholder="0,00" required value={purchaseForm.amount} /></div>
@@ -307,15 +344,27 @@ export function CreditCardWorkspace({
       </section>
 
       <section className="surface-card data-card">
-        <div className="surface-heading"><div><p className="eyebrow">Ciclos mensais</p><h2>Faturas</h2></div><label className="month-picker">Cartão<select onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label></div>
-        {invoices.length === 0 ? <EmptyState actionLabel={cards.length === 0 ? "Cadastrar cartão" : "Registrar primeira compra"} message={cards.length === 0 ? "Cadastre um cartão para acompanhar suas faturas." : "As faturas aparecem após a primeira compra no cartão."} onAction={() => {
+        <div className="surface-heading"><div><p className="eyebrow">Ciclos mensais</p><h2>Faturas</h2></div><div className="invoice-heading-actions"><label className="month-picker">Cartão<select onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label><button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceFormOpen(true); }} type="button">＋ Registrar fatura existente</button></div></div>
+        {openingInvoiceFormOpen && (
+          <form className="editor-form opening-invoice-form" onSubmit={(event) => void saveOpeningInvoice(event)}>
+            <div className="editor-heading"><div><h3>Saldo de uma fatura existente</h3><p className="form-note">Registre o total que já deve ao cartão. Isso aumenta o valor em aberto, sem criar uma despesa histórica.</p></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setOpeningInvoiceFormOpen(false)} type="button">Fechar</button></div>
+            <div className="form-grid transaction-form-grid">
+              <label className="field-label">Cartão<select onChange={(event) => setSelectedCardId(event.target.value)} required value={selectedCardId}><option value="">Selecione</option>{activeCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></label>
+              <label className="field-label">Mês de fechamento<input onChange={(event) => setOpeningInvoiceForm({ ...openingInvoiceForm, closing_month: event.target.value })} required type="month" value={openingInvoiceForm.closing_month} /><small>O vencimento é calculado pelos dias de fechamento e vencimento deste cartão.</small></label>
+              <div className="field-label"><label htmlFor="invoice-opening-amount">Saldo da fatura</label><CurrencyInput id="invoice-opening-amount" onChange={(value) => setOpeningInvoiceForm({ ...openingInvoiceForm, amount: value })} placeholder="0,00" required value={openingInvoiceForm.amount} /></div>
+            </div>
+            <div className="form-actions"><button className="primary-button compact-button" disabled={busy || !selectedCardId} type="submit">{busy ? "Salvando…" : "Registrar saldo"}</button><span className="form-note">O pagamento poderá ser registrado depois e reduzirá o saldo da conta selecionada.</span></div>
+          </form>
+        )}
+        {invoices.length === 0 ? <EmptyState actionLabel={cards.length === 0 ? "Cadastrar cartão" : "Registrar fatura existente"} message={cards.length === 0 ? "Cadastre um cartão para acompanhar suas faturas." : "Informe o saldo de uma fatura que já existe ou registre a primeira compra no cartão."} onAction={() => {
           if (cards.length === 0) {
             setCardEditingId(null);
             setCardForm(emptyCard());
             setCardFormOpen(true);
           } else {
-            setPurchaseForm({ ...purchaseForm, credit_card_id: purchaseForm.credit_card_id || (activeCards.length === 1 ? activeCards[0]?.id ?? "" : ""), category_id: purchaseForm.category_id || (expenseCategories.length === 1 ? expenseCategories[0]?.id ?? "" : "") });
-            setPurchaseFormOpen(true);
+            const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0];
+            if (card) setSelectedCardId(card.id);
+            setOpeningInvoiceFormOpen(true);
           }
         }} /> : (
           <div className="table-wrap"><table className="data-table"><thead><tr><th>Ciclo</th><th>Fechamento</th><th>Vencimento</th><th>Total</th><th>Pago</th><th>Em aberto</th><th>Status</th><th /></tr></thead><tbody>
@@ -324,18 +373,49 @@ export function CreditCardWorkspace({
         )}
         {selectedInvoice && (
           <div className="invoice-details">
-            <div className="surface-heading"><div><p className="eyebrow">{selectedInvoice.credit_card_name}</p><h3>Fatura com vencimento em {displayDate(selectedInvoice.due_date)}</h3></div><button className="text-button" onClick={() => setSelectedInvoiceId("")} type="button">Fechar</button></div>
+            <div className="surface-heading invoice-details-heading">
+              <div className="invoice-details-title">
+                <p className="eyebrow">{selectedInvoice.credit_card_name}</p>
+                <h3>Detalhes da fatura</h3>
+                <p className="invoice-details-meta">Ciclo {displayDate(selectedInvoice.period_start)} a {displayDate(selectedInvoice.period_end)} · vence em {displayDate(selectedInvoice.due_date)}</p>
+              </div>
+              <div className="invoice-details-actions">
+                <span className={`state-pill ${selectedInvoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(selectedInvoice.status)}</span>
+                <button className="text-button" onClick={() => setSelectedInvoiceId("")} type="button">Fechar</button>
+              </div>
+            </div>
+            <section aria-label="Resumo da fatura" className="invoice-summary-strip">
+              <div><span>Total da fatura</span><strong>{formatCurrency(selectedInvoice.total)}</strong></div>
+              <div><span>Já pago</span><strong>{formatCurrency(selectedInvoice.paid_amount)}</strong></div>
+              <div><span>Em aberto</span><strong>{formatCurrency(selectedInvoice.outstanding)}</strong></div>
+            </section>
+            {selectedInvoice.opening_balance !== "0.00" && (
+              <div className="invoice-opening-summary">
+                <div><strong>Saldo inicial informado</strong><span>Dívida que já existia ao começar a usar a SophIA; não representa uma compra nem uma despesa histórica.</span></div>
+                <strong>{formatCurrency(selectedInvoice.opening_balance)}</strong>
+              </div>
+            )}
             <div className="invoice-columns">
-              <div><h4>Compras</h4>{selectedInvoice.purchases.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)}</div>
-              <div><h4>Pagamentos</h4>{selectedInvoice.payments.length === 0 ? <p className="form-note">Nenhum pagamento registrado.</p> : selectedInvoice.payments.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)}</div>
+              <section className="invoice-detail-group">
+                <h4>Compras registradas</h4>
+                {selectedInvoice.purchases.length > 0
+                  ? selectedInvoice.purchases.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)
+                  : <p className="invoice-detail-empty">Nenhuma compra detalhada neste ciclo.</p>}
+              </section>
+              <section className="invoice-detail-group">
+                <h4>Pagamentos registrados</h4>
+                {selectedInvoice.payments.length > 0
+                  ? selectedInvoice.payments.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)
+                  : <p className="invoice-detail-empty">Nenhum pagamento registrado neste ciclo.</p>}
+              </section>
             </div>
             {selectedInvoice.outstanding !== "0.00" && (
-              <form className="editor-form" onSubmit={payInvoice}>
+              <form className="editor-form invoice-payment-form" onSubmit={payInvoice}>
                 <div className="editor-heading"><h3>Registrar pagamento</h3><span className="form-note">Em aberto: {formatCurrency(selectedInvoice.outstanding)}</span></div>
                 <div className="form-grid transaction-form-grid">
                   <label className="field-label">Conta pagadora<select onChange={(event) => setPaymentForm({ ...paymentForm, account_id: event.target.value })} required value={paymentForm.account_id}><option value="">Selecione</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
                   <div className="field-label"><label htmlFor="invoice-payment-amount">Valor</label><CurrencyInput id="invoice-payment-amount" onChange={(value) => setPaymentForm({ ...paymentForm, amount: value })} placeholder="0,00" required value={paymentForm.amount} /></div>
-                  <label className="field-label">Data<input onChange={(event) => setPaymentForm({ ...paymentForm, occurred_at: event.target.value })} required type="date" value={paymentForm.occurred_at} /></label>
+                  <div className="field-label"><label htmlFor="invoice-payment-date">Data</label><CalendarDateInput id="invoice-payment-date" onChange={(value) => setPaymentForm({ ...paymentForm, occurred_at: value })} required value={paymentForm.occurred_at} /></div>
                 </div>
                 <div className="form-actions"><button className="primary-button compact-button" disabled={busy || activeAccounts.length === 0} type="submit">{busy ? "Salvando…" : "Registrar pagamento"}</button><span className="form-note">O pagamento reduz o saldo da conta sem repetir a despesa.</span></div>
               </form>

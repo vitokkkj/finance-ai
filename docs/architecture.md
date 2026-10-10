@@ -13,7 +13,7 @@ Next.js (web) ── proxy same-origin /api/* ──► FastAPI (api) ── OAu
                                                    ├── Finance Engine e ferramentas explícitas da IA
                                                    └── PostgreSQL 17
 
-Worker Python (processo independente, sem jobs nesta fase)
+Worker Python (processo independente; estende ocorrências previstas)
 ```
 
 - `web` atende a interface e encaminha chamadas `/api/*` para a API. Apenas a porta do frontend é publicada no host.
@@ -26,7 +26,7 @@ Worker Python (processo independente, sem jobs nesta fase)
 - `ai.py`, `ai_chat.py`, `ai_provider.py` e `ai_tools.py` isolam endpoints e persistência, o loop de streaming, o adaptador do provider e as operações financeiras permitidas. O provider padrão usa OAuth ChatGPT no backend (`store=false`); tokens ficam em volume privado montado somente na API. A chamada de ferramenta recebe o usuário da sessão autenticada e chama módulos financeiros existentes.
 - Respostas chegam à web por Server-Sent Events. O backend persiste mensagens e auditoria, e transmite texto incremental e cartões estruturados sem expor chaves ao navegador.
 
-O Compose usa dependências `service_healthy` para aguardar o PostgreSQL antes das migrations, e a API antes do frontend e do worker. O ambiente atual de testes roda numa VM Debian com web vinculado ao IP Tailscale e acesso direto pelo tailnet; API e PostgreSQL não publicam portas. A publicação futura em `sophia.matheus.inf.br` está em [deployment.md](deployment.md).
+O Compose usa dependências `service_healthy` para aguardar o PostgreSQL antes das migrations, e a API antes do frontend e do worker. A implantação de teste é auto-hospedada e privada; endereços de rede ficam em configuração privada fora do repositório. API e PostgreSQL não publicam portas. Requisitos e estado operacional estão em [deployment.md](deployment.md).
 
 ## Núcleo financeiro manual — Fase 2A
 
@@ -40,7 +40,7 @@ O dashboard solicita saldos e resumos calculados pela API. O frontend recebe val
 
 `transactions` continua sendo o registro financeiro único. `TRANSFER` contém origem e destino na mesma linha. `CARD_PURCHASE` contém categoria e fatura; `CARD_PAYMENT` contém a conta pagadora e a mesma fatura. A migration `0005_transfers_cards` cria `credit_cards` e `card_invoices` e amplia o schema de movimentos de forma incremental.
 
-O total, os pagamentos, o saldo aberto e o status das faturas são derivados das transações relacionadas. Assim, a compra conta como despesa uma vez e o pagamento não cria uma segunda. Saldos de conta consideram as duas pernas das transferências e o dinheiro usado nos pagamentos. O limite utilizado soma saldos abertos de faturas. O frontend apenas envia operações para a API e exibe valores já calculados.
+O total, os pagamentos, o saldo aberto e o status das faturas são derivados das transações relacionadas e do saldo inicial importado. `card_invoices.opening_balance` registra uma dívida que já existia antes do uso da SophIA; ela não cria uma compra nem uma despesa histórica. Assim, a compra conta como despesa uma vez e o pagamento não cria uma segunda. Saldos de conta consideram as duas pernas das transferências e o dinheiro usado nos pagamentos. O limite utilizado soma saldos abertos de faturas. O frontend apenas envia operações para a API e exibe valores já calculados.
 
 O fechamento é inclusivo por data local: compra no dia configurado entra no ciclo que fecha naquele dia; depois dele, entra no ciclo seguinte. Em meses sem aquele dia, o fechamento é ajustado ao último dia do mês. O vencimento é o dia configurado posterior ao fechamento, no mesmo mês se possível; caso contrário, cai no mês seguinte. Faturas novas são materializadas quando surge a primeira compra do ciclo, evitando meses vazios sem atividade.
 
@@ -58,13 +58,17 @@ A interface permite a criação da primeira conta enquanto não existe usuário.
 
 MFA/TOTP e trilha persistente de auditoria ainda não fazem parte desta fundação local; devem ser concluídos antes de expor a aplicação remotamente.
 
+## Assistente conversacional
+
+Mensagens financeiras simples e inequívocas podem ser interpretadas por parser determinístico. Um pedido completo de despesa fixa mensal cria uma prévia pela mesma ferramenta `create_recurrence` usada pelo modelo; a regra só é salva após confirmação. Se conta, categoria, valor, frequência ou período forem ambíguos, a mensagem vai ao modelo SMART para sugestão e esclarecimento. Categorias inferidas não são criadas sem autorização.
+
 ## Segurança de rede
 
-O navegador acessa a aplicação pelo frontend. A API e o banco não têm portas publicadas. PostgreSQL e worker compartilham apenas a rede de dados interna; a API participa das redes de aplicação e de dados para atender o frontend e consultar o banco. A chave do provider é injetada somente no serviço da API.
+O navegador acessa a aplicação pelo frontend. A API e o banco não têm portas publicadas. PostgreSQL e worker compartilham apenas a rede de dados interna; a API participa das redes de aplicação e de dados para atender o frontend e consultar o banco. Credenciais OAuth do provider ficam em volume privado disponível somente à API; não há chave de API no fluxo padrão.
 
 ## Evolução planejada
 
-Parcelamentos, financiamentos, investimentos reais, previsões, notificações e Pluggy continuam futuros. Agentes, embeddings e provedores de mensagem não fazem parte do assistente atual. O ambiente de testes não é adequado a dados reais; o Cloudflare Tunnel e o modo de produção seguem pendentes.
+Parcelamentos, financiamentos, investimentos reais, previsões, notificações e Pluggy continuam futuros. Agentes, embeddings e provedores de mensagem não fazem parte do assistente atual. Requisitos de produção, backup e restauração estão em [deployment.md](deployment.md); este documento público não registra endereços privados.
 
 
 ## Credenciais da IA no ambiente de desenvolvimento

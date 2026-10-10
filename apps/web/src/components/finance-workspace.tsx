@@ -18,6 +18,8 @@ import {
 import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
+import { CalendarDateInput } from "@/components/calendar-date-input";
+import { CalendarMonthInput } from "@/components/calendar-month-input";
 import { CreditCardWorkspace } from "@/components/credit-card-workspace";
 import { RecurrenceWorkspace } from "@/components/recurrence-workspace";
 
@@ -679,9 +681,9 @@ export function FinanceWorkspace({
                 <>
                   <div className="overview-period-row">
                     <p>Resumo atualizado em {displayDate(dashboard.as_of)}</p>
-                    <label className="month-picker">Período
-                      <input aria-label="Mês do resumo" onChange={(event) => setMonth(event.target.value)} type="month" value={month} />
-                    </label>
+                    <div className="month-picker"><span>Período</span>
+                      <CalendarMonthInput aria-label="Mês do resumo" onChange={setMonth} value={month} />
+                    </div>
                   </div>
                   <section aria-label="Saldo e fluxo do período" className="overview-primary-grid">
                     <article className="overview-balance-card">
@@ -756,7 +758,12 @@ export function FinanceWorkspace({
 
               {section === "accounts" && (
                 <section className="surface-card data-card">
-                  <div className="surface-heading"><div><p className="eyebrow">Patrimônio</p><h2>Suas contas</h2></div><span className="record-count">{accounts.length} {accounts.length === 1 ? "conta" : "contas"}</span></div>
+                  <div className="surface-heading"><div><p className="eyebrow">Patrimônio</p><h2>Central de contas</h2><p className="account-directory-copy">Contas que você autorizou a SophIA a acompanhar. Uma conta só é cadastrada quando você inicia e salva o formulário.</p></div><span className="record-count">{accounts.length} {accounts.length === 1 ? "conta" : "contas"}</span></div>
+                  <div className="account-directory-summary">
+                    <div><span>Saldo consolidado</span><strong>{dashboard?.total_balance === null || !dashboard ? "Indisponível" : formatCurrency(dashboard.total_balance)}</strong></div>
+                    <div><span>Contas ativas</span><strong>{activeAccounts.length}</strong></div>
+                    {dashboard && dashboard.total_balance === null && dashboard.incomplete_account_count > 0 && <p>Informe o saldo inicial e a data-base das contas pendentes para calcular o total.</p>}
+                  </div>
                   {accountFormOpen && (
                     <form className="editor-form" onSubmit={saveAccount}>
                       <div className="editor-heading"><h3>{accountEditingId ? "Editar conta" : "Adicionar conta"}</h3><button className="text-button" onClick={() => { setAccountFormOpen(false); setReturnToTransactionsAfterAccount(false); }} type="button">Fechar</button></div>
@@ -764,7 +771,7 @@ export function FinanceWorkspace({
                         <label className="field-label">Nome<input maxLength={100} onChange={(event) => setAccountForm({ ...accountForm, name: event.target.value })} required value={accountForm.name} /></label>
                         <label className="field-label">Tipo<select onChange={(event) => setAccountForm({ ...accountForm, type: event.target.value as AccountType })} value={accountForm.type}><option value="CHECKING">Conta corrente</option><option value="SAVINGS">Poupança</option><option value="CASH">Dinheiro</option><option value="OTHER">Outra</option></select></label>
                         <div className="field-label"><label htmlFor="account-opening-balance">Saldo inicial (opcional)</label><CurrencyInput id="account-opening-balance" onChange={(value) => setAccountForm({ ...accountForm, opening_balance: value })} placeholder="0,00" value={accountForm.opening_balance} /></div>
-                        <label className="field-label">Data do saldo inicial<input disabled={!accountForm.opening_balance.trim()} onChange={(event) => setAccountForm({ ...accountForm, opening_balance_date: event.target.value })} required={Boolean(accountForm.opening_balance.trim())} type="date" value={accountForm.opening_balance_date} /></label>
+                        <div className="field-label"><label htmlFor="account-opening-balance-date">Data do saldo inicial</label><CalendarDateInput id="account-opening-balance-date" disabled={!accountForm.opening_balance.trim()} onChange={(value) => setAccountForm({ ...accountForm, opening_balance_date: value })} required={Boolean(accountForm.opening_balance.trim())} value={accountForm.opening_balance_date} /></div>
                       </div>
                       <div className="form-actions"><button className="primary-button compact-button" disabled={busy} type="submit">{busy ? "Salvando…" : "Salvar conta"}</button><span className="form-note">Deixe saldo e data em branco se ainda não souber. O saldo consolidado ficará indisponível até preencher os dois.</span></div>
                     </form>
@@ -807,7 +814,7 @@ export function FinanceWorkspace({
                       <div className="form-grid transaction-form-grid">
                         <label className="field-label">Tipo<select onChange={(event) => setTransactionForm({ ...transactionForm, type: event.target.value as MovementType, category_id: "" })} value={transactionForm.type}><option value="EXPENSE">Despesa</option><option value="INCOME">Receita</option></select></label>
                         <label className="field-label">Conta<select onChange={(event) => setTransactionForm({ ...transactionForm, account_id: event.target.value })} required value={transactionForm.account_id}><option value="">Selecione</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-                        <label className="field-label">Data<input onChange={(event) => setTransactionForm({ ...transactionForm, occurred_at: event.target.value })} required type="date" value={transactionForm.occurred_at} /></label>
+                        <div className="field-label"><label htmlFor="transaction-date">Data</label><CalendarDateInput id="transaction-date" onChange={(value) => setTransactionForm({ ...transactionForm, occurred_at: value })} required value={transactionForm.occurred_at} /></div>
                         <div className="field-label"><label htmlFor="transaction-amount">Valor</label><CurrencyInput id="transaction-amount" onChange={(value) => setTransactionForm({ ...transactionForm, amount: value })} placeholder="0,00" required value={transactionForm.amount} /></div>
                         <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setTransactionForm({ ...transactionForm, description: event.target.value })} required value={transactionForm.description} /></label>
                         <label className="field-label">Categoria<select onChange={(event) => setTransactionForm({ ...transactionForm, category_id: event.target.value })} required value={transactionForm.category_id}><option value="">Selecione</option>{transactionCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
@@ -825,7 +832,7 @@ export function FinanceWorkspace({
                         <label className="field-label">Conta de origem<select onChange={(event) => setTransferForm({ ...transferForm, source_account_id: event.target.value, destination_account_id: transferForm.destination_account_id === event.target.value ? "" : transferForm.destination_account_id })} required value={transferForm.source_account_id}><option value="">Selecione</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
                         <label className="field-label">Conta de destino<select onChange={(event) => setTransferForm({ ...transferForm, destination_account_id: event.target.value })} required value={transferForm.destination_account_id}><option value="">Selecione</option>{activeAccounts.filter((account) => account.id !== transferForm.source_account_id).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
                         <div className="field-label"><label htmlFor="transfer-amount">Valor</label><CurrencyInput id="transfer-amount" onChange={(value) => setTransferForm({ ...transferForm, amount: value })} placeholder="0,00" required value={transferForm.amount} /></div>
-                        <label className="field-label">Data<input onChange={(event) => setTransferForm({ ...transferForm, occurred_at: event.target.value })} required type="date" value={transferForm.occurred_at} /></label>
+                        <div className="field-label"><label htmlFor="transfer-date">Data</label><CalendarDateInput id="transfer-date" onChange={(value) => setTransferForm({ ...transferForm, occurred_at: value })} required value={transferForm.occurred_at} /></div>
                         <label className="field-label full-width-field">Observações<textarea maxLength={2000} onChange={(event) => setTransferForm({ ...transferForm, notes: event.target.value })} rows={2} value={transferForm.notes} /></label>
                       </div>
                       {activeAccounts.length < 2 && <p className="form-helper">Cadastre duas contas ativas antes de registrar uma transferência.</p>}
@@ -833,8 +840,8 @@ export function FinanceWorkspace({
                     </form>
                   )}
                   <form className="filter-form" onSubmit={applyTransactionFilters}>
-                    <label className="field-label">De<input onChange={(event) => setFilters({ ...filters, start_date: event.target.value })} type="date" value={filters.start_date} /></label>
-                    <label className="field-label">Até<input onChange={(event) => setFilters({ ...filters, end_date: event.target.value })} type="date" value={filters.end_date} /></label>
+                    <div className="field-label"><label htmlFor="transaction-filter-start-date">De</label><CalendarDateInput id="transaction-filter-start-date" onChange={(value) => setFilters({ ...filters, start_date: value })} value={filters.start_date} /></div>
+                    <div className="field-label"><label htmlFor="transaction-filter-end-date">Até</label><CalendarDateInput id="transaction-filter-end-date" onChange={(value) => setFilters({ ...filters, end_date: value })} value={filters.end_date} /></div>
                     <label className="field-label">Conta<select onChange={(event) => setFilters({ ...filters, account_id: event.target.value })} value={filters.account_id}><option value="">Todas</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
                     <label className="field-label">Categoria<select onChange={(event) => setFilters({ ...filters, category_id: event.target.value })} value={filters.category_id}><option value="">Todas</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
                     <label className="field-label">Tipo<select onChange={(event) => setFilters({ ...filters, type: event.target.value as TransactionFilters["type"] })} value={filters.type}><option value="">Todos</option><option value="INCOME">Receita</option><option value="EXPENSE">Despesa</option><option value="TRANSFER">Transferência</option><option value="CARD_PURCHASE">Compra no cartão</option><option value="CARD_PAYMENT">Pagamento de fatura</option></select></label>

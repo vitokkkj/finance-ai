@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import {
   Archive,
   ArrowDownLeft,
@@ -15,6 +15,8 @@ import {
   Menu,
   MoreHorizontal,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightOpen,
   Plus,
   Pencil,
@@ -192,12 +194,38 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function renderAssistantText(value: string) {
+  const parts: ReactNode[] = [];
+  const emphasis = /\*\*([^*\n]+)\*\*/g;
+  let cursor = 0;
+
+  for (const match of value.matchAll(emphasis)) {
+    const start = match.index ?? 0;
+    if (start > cursor) parts.push(value.slice(cursor, start));
+    parts.push(<strong key={`${start}-${match[1]}`}>{match[1]}</strong>);
+    cursor = start + match[0].length;
+  }
+
+  if (cursor < value.length) parts.push(value.slice(cursor));
+  return parts;
+}
+
 function displayDate(value: string): string {
   const parsed = new Date(`${value.slice(0, 10)}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return value;
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "short",
+    timeZone: "America/Sao_Paulo",
+  }).format(parsed);
+}
+
+function displayMonth(value: string): string {
+  const parsed = new Date(`${value.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "Este mês";
+  return new Intl.DateTimeFormat("pt-BR", {
+    month: "long",
+    year: "numeric",
     timeZone: "America/Sao_Paulo",
   }).format(parsed);
 }
@@ -308,6 +336,7 @@ export function AssistantWorkspace({
   const [error, setError] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [conversationTitleDraft, setConversationTitleDraft] = useState("");
@@ -679,9 +708,16 @@ export function AssistantWorkspace({
     message.role === "USER" && contextMode(message.content, contextCards, contextAccounts) !== "overview",
   )?.content ?? latestUserMessage;
   const hasUsefulContext = Boolean(contextMessage && contextMode(contextMessage, contextCards, contextAccounts) !== "overview");
+  const showWelcome = messages.length === 0 && !loading;
+  const hasHomeSummary = Boolean(dashboard && (
+    contextAccounts.length > 0 ||
+    dashboard.monthly_expenses !== "0.00" ||
+    dashboard.recent_transactions.length > 0
+  ));
+  const contextPanelAvailable = hasUsefulContext || (showWelcome && hasHomeSummary);
   useEffect(() => {
-    setContextPanelOpen(Boolean(contextMessage && contextMode(contextMessage, contextCards, contextAccounts) !== "overview"));
-  }, [contextMessage, contextCards, contextAccounts]);
+    setContextPanelOpen(Boolean(contextPanelAvailable && (showWelcome || hasUsefulContext)));
+  }, [contextPanelAvailable, showWelcome, hasUsefulContext]);
   const contextSuggestions = [
     {
       title: "Meu mês",
@@ -708,7 +744,6 @@ export function AssistantWorkspace({
       icon: ReceiptText,
     },
   ].filter((suggestion): suggestion is NonNullable<typeof suggestion> => Boolean(suggestion)).slice(0, 3);
-  const showWelcome = messages.length === 0 && !loading;
   const aiAvailable = status?.configured === true;
   const providerPausedNotice = status?.configured === false ? (
     <aside aria-label="Assistente pausado" className="assistant-provider-note">
@@ -740,6 +775,18 @@ export function AssistantWorkspace({
     </form>
   ) : null;
 
+  function toggleDesktopSidebar() {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem("sophia-sidebar-collapsed", String(next));
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    setSidebarCollapsed(window.localStorage.getItem("sophia-sidebar-collapsed") === "true");
+  }, []);
+
   if (firstUseRequired === true) {
     return (
       <div data-theme={theme}>
@@ -757,16 +804,16 @@ export function AssistantWorkspace({
   }
 
   return (
-    <div className="assistant-layout" data-theme={theme}>
+    <div className={sidebarCollapsed ? "assistant-layout sidebar-collapsed" : "assistant-layout"} data-theme={theme}>
       {mobileMenuOpen && <button aria-label="Fechar menu" className="assistant-backdrop" onClick={() => setMobileMenuOpen(false)} type="button" />}
-      {contextPanelOpen && hasUsefulContext && <button aria-label="Fechar contexto" className="assistant-context-backdrop" onClick={() => setContextPanelOpen(false)} type="button" />}
+      {contextPanelOpen && contextPanelAvailable && <button aria-label="Fechar contexto" className="assistant-context-backdrop" onClick={() => setContextPanelOpen(false)} type="button" />}
       <aside className={mobileMenuOpen ? "assistant-sidebar mobile-open" : "assistant-sidebar"}>
-        <div className="assistant-brand">
+        <button aria-label="Ir para a visão geral" className="assistant-brand" onClick={() => chooseNavigation(NAV_ITEMS[0])} type="button">
           <span className="assistant-brand-mark" aria-hidden="true">S</span>
-          <span>SophIA</span>
-        </div>
+          <span className="assistant-brand-name">SophIA</span>
+        </button>
         <button className="assistant-new-chat" onClick={startConversation} type="button">
-          <Plus aria-hidden="true" size={17} strokeWidth={2} /> Nova conversa
+          <Plus aria-hidden="true" size={17} strokeWidth={2} /><span>Nova conversa</span>
         </button>
         <div className="assistant-history">
           <p>Conversas recentes</p>
@@ -811,9 +858,10 @@ export function AssistantWorkspace({
                   className={currentNav === key ? "assistant-nav-item selected" : "assistant-nav-item"}
                   key={key}
                   onClick={() => chooseNavigation(item)}
+                    title={item.label}
                   type="button"
                 >
-                  <item.icon aria-hidden="true" size={17} strokeWidth={1.8} />{item.label}
+                  <item.icon aria-hidden="true" size={17} strokeWidth={1.8} /><span className="assistant-nav-item-label">{item.label}</span>
                 </button>
               );
             })}
@@ -827,9 +875,10 @@ export function AssistantWorkspace({
                 className={currentNav === key ? "assistant-nav-item selected" : "assistant-nav-item"}
                 key={key}
                 onClick={() => chooseNavigation(item)}
+                title={item.label}
                 type="button"
               >
-                <item.icon aria-hidden="true" size={17} strokeWidth={1.8} />{item.label}
+                <item.icon aria-hidden="true" size={17} strokeWidth={1.8} /><span className="assistant-nav-item-label">{item.label}</span>
               </button>
             );
             })}
@@ -844,13 +893,14 @@ export function AssistantWorkspace({
 
       <main className="assistant-main">
         <header className="assistant-topbar">
+          <button aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"} aria-pressed={sidebarCollapsed} className="assistant-sidebar-toggle" onClick={toggleDesktopSidebar} title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} type="button">{sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" size={18} /> : <PanelLeftClose aria-hidden="true" size={18} />}</button>
           <button aria-label="Abrir menu" className="assistant-menu-toggle" onClick={() => setMobileMenuOpen(true)} type="button"><Menu aria-hidden="true" size={20} /></button>
           <div className="assistant-topbar-title">
             <strong>{view === "chat" ? conversations.find((conversation) => conversation.id === conversationId)?.title ?? "Nova conversa" : view === "settings" ? "Preferências" : "Finanças"}</strong>
             <span>{view === "chat" ? "SophIA · sua assistente financeira" : "Dados calculados pelo sistema"}</span>
           </div>
           <div className="assistant-topbar-actions">
-          {view === "chat" && hasUsefulContext && <button aria-expanded={contextPanelOpen} aria-label={contextPanelOpen ? "Recolher contexto financeiro" : "Abrir contexto financeiro"} className="assistant-context-toggle" onClick={() => { setMobileMenuOpen(false); setContextPanelOpen((open) => !open); }} type="button"><PanelRightOpen aria-hidden="true" size={18} /><span>Contexto</span></button>}
+          {view === "chat" && contextPanelAvailable && <button aria-expanded={contextPanelOpen} aria-label={contextPanelOpen ? "Recolher contexto financeiro" : "Abrir contexto financeiro"} className="assistant-context-toggle" onClick={() => { setMobileMenuOpen(false); setContextPanelOpen((open) => !open); }} type="button"><PanelRightOpen aria-hidden="true" size={18} /><span>Contexto</span></button>}
           <button
             aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
             className="assistant-theme-toggle"
@@ -894,7 +944,7 @@ export function AssistantWorkspace({
             diagnostics={diagnostics}
           />
         ) : (
-          <div className={hasUsefulContext && contextPanelOpen ? "assistant-chat-layout" : "assistant-chat-layout context-hidden"}>
+          <div className={contextPanelAvailable && contextPanelOpen ? "assistant-chat-layout" : "assistant-chat-layout context-hidden"}>
             <section aria-label="Conversa com a SophIA" className="assistant-chat-column">
               <div className="assistant-message-list" ref={scrollRef}>
                 {showWelcome ? (
@@ -939,7 +989,7 @@ export function AssistantWorkspace({
               {!showWelcome && providerPausedNotice}
               {!showWelcome && composer}
             </section>
-            {hasUsefulContext && contextPanelOpen && <ContextPanel
+            {contextPanelAvailable && contextPanelOpen && <ContextPanel
               accounts={contextAccounts}
               cards={contextCards}
               dashboard={dashboard}
@@ -986,7 +1036,7 @@ function MessageBubble({
       {!userMessage && <span className="message-avatar" aria-hidden="true">S</span>}
       <div className="message-body">
         <div className="message-author">{userMessage ? "Você" : "SophIA"}</div>
-        {message.content && <p className="message-text">{message.content}</p>}
+        {message.content && <p className="message-text">{userMessage ? message.content : renderAssistantText(message.content)}</p>}
         {message.pending && !message.content && <span className="assistant-pending" role="status"><span className="assistant-spinner" />Respondendo</span>}
         {message.structured_content?.map((item) => (
           <StructuredCard
@@ -1116,8 +1166,9 @@ function StructuredCard({
     const pending = item.status === "pending" && Boolean(item.tool_call_id);
     return (
       <section className="assistant-data-card assistant-confirmation">
-        <div className="assistant-data-card-heading"><span>Confirme a alteração</span><small>Revisão necessária</small></div>
+        <div className="assistant-data-card-heading"><span>{stringValue(data.title) ?? "Confirme a alteração"}</span><small>Revisão necessária</small></div>
         {changes && <ul>{Object.entries(changes).map(([key, value]) => <li key={key}><span>{fieldLabel(key)}</span><strong>{String(value ?? "—")}</strong></li>)}</ul>}
+        {stringValue(data.message) && <p className="assistant-card-note">{stringValue(data.message)}</p>}
         {pending && <div className="assistant-confirm-actions"><button className="assistant-confirm-button" disabled={pendingAction?.id === item.tool_call_id} onClick={() => onPendingAction(item.tool_call_id ?? "", "confirm")} type="button">{pendingAction?.id === item.tool_call_id && pendingAction?.action === "confirm" ? "Aplicando…" : "Confirmar"}</button><button className="assistant-cancel-button" disabled={pendingAction?.id === item.tool_call_id} onClick={() => onPendingAction(item.tool_call_id ?? "", "cancel")} type="button">Cancelar</button></div>}
       </section>
     );
@@ -1126,7 +1177,13 @@ function StructuredCard({
     return <div className="assistant-inline-error"><strong>Não concluído</strong><span>{stringValue(data.message) ?? "Não foi possível concluir a operação."}</span></div>;
   }
   if (item.type === "success") {
-    return <div className="assistant-inline-success"><strong>Concluído</strong><span>{stringValue(data?.message) ?? "A operação foi concluída."}</span></div>;
+    const createdCategory = data?.type === "INCOME" || data?.type === "EXPENSE"
+      ? stringValue(data.name)
+      : null;
+    const title = stringValue(data?.title) ?? (createdCategory ? "Categoria criada" : "Concluído");
+    const message = stringValue(data?.message)
+      ?? (createdCategory ? `A categoria “${createdCategory}” foi criada.` : "A operação foi concluída.");
+    return <div className="assistant-inline-success"><strong>{title}</strong><span>{message}</span></div>;
   }
   return null;
 }
@@ -1160,10 +1217,39 @@ function normalizeForMatch(message: string): string {
 
 function contextMode(message: string, cards: ContextCard[], accounts: ContextAccount[]): ContextMode {
   const normalized = normalizeForMatch(message);
-  if (cards.some((card) => normalized.includes(normalizeForMatch(card.name)) || (card.institution && normalized.includes(normalizeForMatch(card.institution)))) || /(fatura|cartao|limite)/.test(normalized)) return "card";
-  if (accounts.some((account) => normalized.includes(normalizeForMatch(account.name))) || /(saldo da conta|conta bancaria|minha conta|nessa conta)/.test(normalized)) return "account";
+  const namesCard = cards.some((card) => normalized.includes(normalizeForMatch(card.name)));
+  if (namesCard || /(fatura|cartao|limite)/.test(normalized)) return "card";
+  const namesAccount = accounts.some((account) => normalized.includes(normalizeForMatch(account.name)));
+  if (namesAccount || /\bconta\b|\bextrato\b|saldo da conta|movimenta(?:cao|coes) da conta/.test(normalized)) return "account";
   if (/(gasto|gastei|despesa|categoria|aliment|mercado|combustivel|mes|periodo)/.test(normalized)) return "spending";
+  if (cards.some((card) => card.institution && normalized.includes(normalizeForMatch(card.institution)))) return "card";
   return "overview";
+}
+
+function todayInSaoPaulo(): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+  }).formatToParts(new Date());
+  const part = (type: "year" | "month" | "day") => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function contextInvoiceToShow(invoices: ContextInvoice[], today: string): ContextInvoice | null {
+  const openInvoices = invoices.filter((invoice) => invoice.outstanding !== "0.00");
+  const overdueInvoice = openInvoices
+    .filter((invoice) => invoice.due_date < today)
+    .sort((left, right) => right.due_date.localeCompare(left.due_date))[0];
+  if (overdueInvoice) return overdueInvoice;
+
+  const upcomingInvoice = openInvoices
+    .filter((invoice) => invoice.due_date >= today)
+    .sort((left, right) => left.due_date.localeCompare(right.due_date))[0];
+  if (upcomingInvoice) return upcomingInvoice;
+
+  return [...invoices].sort((left, right) => right.due_date.localeCompare(left.due_date))[0] ?? null;
 }
 
 function ContextPanel({
@@ -1186,6 +1272,7 @@ function ContextPanel({
   const selectedCard = cards.find((card) => normalizedMessage.includes(normalizeForMatch(card.name)) || (card.institution && normalizedMessage.includes(normalizeForMatch(card.institution)))) ?? (cards.length === 1 ? cards[0] : null);
   const selectedCardId = selectedCard?.id ?? null;
   const selectedAccount = accounts.find((account) => normalizedMessage.includes(normalizeForMatch(account.name))) ?? (accounts.length === 1 ? accounts[0] : null);
+  const today = todayInSaoPaulo();
   const [invoice, setInvoice] = useState<ContextInvoice | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [previousDashboard, setPreviousDashboard] = useState<Dashboard | null>(null);
@@ -1202,7 +1289,7 @@ function ContextPanel({
     setInvoice(null);
     setInvoiceLoading(true);
     apiRequest<ContextInvoice[]>(`/api/cards/${selectedCardId}/invoices`)
-      .then((rows) => { if (active) setInvoice(rows[0] ?? null); })
+      .then((rows) => { if (active) setInvoice(contextInvoiceToShow(rows, todayInSaoPaulo())); })
       .catch(() => { if (active) setInvoice(null); })
       .finally(() => { if (active) setInvoiceLoading(false); });
     return () => { active = false; };
@@ -1222,6 +1309,14 @@ function ContextPanel({
       .finally(() => { if (active) setPreviousDashboardLoading(false); });
     return () => { active = false; };
   }, [mode, previousMonth]);
+
+  const invoiceHeading = !invoice
+    ? "Fatura do cartão"
+    : invoice.outstanding === "0.00"
+      ? "Última fatura registrada"
+      : invoice.due_date < today
+        ? "Fatura em atraso"
+        : "Próxima fatura em aberto";
 
   const contextCopy = {
     overview: { title: "Resumo", detail: "Sua posição financeira", icon: WalletCards },
@@ -1257,7 +1352,7 @@ function ContextPanel({
             <div><span>Vencimento</span><strong>{selectedCard.next_due_date ? displayDate(selectedCard.next_due_date) : `Dia ${selectedCard.due_day}`}</strong></div>
           </div>
           <section className="context-cards">
-            <div className="context-section-heading"><span>Fatura mais recente</span>{invoice && <span>{invoiceStatusLabel(invoice.status)}</span>}</div>
+            <div className="context-section-heading"><span>{invoiceHeading}</span>{invoice && <span>{invoiceStatusLabel(invoice.status)}</span>}</div>
             {invoiceLoading ? <p>Carregando fatura…</p> : invoice ? <div className="context-metrics">
               <div><span>Total</span><strong>{formatCurrency(invoice.total)}</strong></div>
               <div><span>Em aberto</span><strong>{formatCurrency(invoice.outstanding)}</strong></div>
@@ -1273,21 +1368,26 @@ function ContextPanel({
             {accountMovements.length ? accountMovements.slice(0, 4).map((transaction) => <ContextMovementRow key={transaction.id} transaction={transaction} />) : <p>Sem movimentações recentes nesta conta.</p>}
           </section>
         </> : accounts.length ? <section className="context-cards"><div className="context-section-heading"><span>Saldos das contas</span></div>{accounts.slice(0, 4).map((account) => <div className="context-card-row" key={account.id}><span>{account.name}</span><strong>{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</strong></div>)}</section> : <p className="context-empty">Nenhuma conta cadastrada.</p>
-      ) : mode === "spending" ? previousMonthRequested && !previousDashboard ? <p className="context-empty">{previousDashboardLoading ? "Carregando o mês passado…" : "Resumo do mês passado indisponível."}</p> : <>
+      ) : mode === "spending" ? <>
+        <section className="context-balance"><span>Saldo atual das contas</span><strong>{dashboard.total_balance === null ? "Incompleto" : formatCurrency(dashboard.total_balance)}</strong><small>{dashboard.total_balance === null ? `${dashboard.incomplete_account_count} conta(s) precisam de saldo inicial e data-base` : "Soma dos saldos atuais das contas"}</small></section>
+        {previousMonthRequested && !previousDashboard ? <p className="context-empty">{previousDashboardLoading ? "Carregando o mês passado…" : "Resumo do mês passado indisponível."}</p> : <>
         <div className="context-metrics context-period-comparison">
-          <div><span>{previousMonthRequested ? "Mês passado" : "Este mês"}</span><strong>{formatCurrency(spendingDashboard?.monthly_expenses ?? "0.00")}</strong></div>
-          <div><span>{previousMonthRequested ? "Este mês" : "Mês anterior"}</span><strong>{formatCurrency(previousMonthRequested ? dashboard.monthly_expenses : previousDashboard?.monthly_expenses ?? "0.00")}</strong></div>
+          <div><span>{previousMonthRequested ? displayMonth(spendingDashboard?.period_start ?? "") : displayMonth(dashboard.period_start)}</span><strong>{formatCurrency(spendingDashboard?.monthly_expenses ?? "0.00")}</strong></div>
+          <div><span>{previousMonthRequested ? displayMonth(dashboard.period_start) : previousDashboard ? displayMonth(previousDashboard.period_start) : "Mês anterior"}</span><strong>{formatCurrency(previousMonthRequested ? dashboard.monthly_expenses : previousDashboard?.monthly_expenses ?? "0.00")}</strong></div>
         </div>
         <section className="context-cards context-categories">
-          <div className="context-section-heading"><span>Por categoria</span><span>{previousMonthRequested ? "Mês passado" : "Este mês"}</span></div>
+          <div className="context-section-heading"><span>Por categoria</span><span>{displayMonth(spendingDashboard?.period_start ?? dashboard.period_start)}</span></div>
           {spendingDashboard?.expenses_by_category.length ? spendingDashboard.expenses_by_category.slice(0, 5).map((category) => <div className="context-category-row" key={category.category_id}><span>{category.category_name}</span><strong>{formatCurrency(category.amount)}</strong></div>) : <p>Nenhuma despesa categorizada neste período.</p>}
         </section>
         {recentExpenses.length > 0 && <section className="context-cards context-recent-list"><div className="context-section-heading"><span>Despesas recentes</span></div>{recentExpenses.slice(0, 3).map((transaction) => <ContextMovementRow key={transaction.id} transaction={transaction} />)}</section>}
+        </>}
       </> : <>
+        <section className="context-balance"><span>Saldo total em contas</span><strong>{dashboard.total_balance === null ? (dashboard.incomplete_account_count > 0 ? "Incompleto" : "Indisponível") : formatCurrency(dashboard.total_balance)}</strong><small>{dashboard.total_balance === null ? `${dashboard.incomplete_account_count} conta(s) precisam de saldo inicial e data-base` : "Soma dos saldos atuais das contas"}</small></section>
         <div className="context-metrics context-overview-metrics">
-          <div><span>Saldo total</span><strong>{dashboard.total_balance === null ? (dashboard.incomplete_account_count > 0 ? "Incompleto" : "Indisponível") : formatCurrency(dashboard.total_balance)}</strong></div>
-          <div><span>Gastos no mês</span><strong>{formatCurrency(dashboard.monthly_expenses)}</strong></div>
+          <div><span>Gastos em {displayMonth(dashboard.period_start)}</span><strong>{formatCurrency(dashboard.monthly_expenses)}</strong></div>
+          <div><span>Contas acompanhadas</span><strong>{accounts.length}</strong></div>
         </div>
+        {accounts.length > 0 && <section className="context-cards"><div className="context-section-heading"><span>Saldos por conta</span></div>{accounts.slice(0, 4).map((account) => <div className="context-card-row" key={account.id}><span>{account.name}</span><strong>{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</strong></div>)}</section>}
         {dashboard.recent_transactions.length > 0 && <section className="context-cards context-recent-list"><div className="context-section-heading"><span>Últimos movimentos</span></div>{dashboard.recent_transactions.slice(0, 3).map((transaction) => <ContextMovementRow key={transaction.id} transaction={transaction} />)}</section>}
       </>}
       {dashboard && <p className="context-truth-note"><span aria-hidden="true">✓</span> Valores do Finance Engine</p>}
@@ -1430,6 +1530,41 @@ function SettingsView({
             <div className="settings-cost-row"><span>Custo estimado</span><strong>{status?.provider === "ollama" ? "Sem cobrança por tokens" : status?.provider === "chatgpt_plan" ? "Incluído no Plus" : formatUsdCost(usage?.cost_usd_month)}</strong></div>
             <p className="settings-help">{status?.provider === "ollama" ? "O modelo roda na VM e não cobra tokens de API. O processamento usa os recursos da própria máquina." : "As respostas usam a cota compartilhada da sua conta ChatGPT Plus. A SophIA não usa chave de API nem tem fallback pago. O histórico e as preferências permanecem no PostgreSQL da SophIA."}</p>
           </section>
+          <section className="assistant-settings-card settings-memories">
+            <h2>Memórias da SophIA</h2>
+            <p>O que a SophIA sabe sobre você vem das preferências e referências que você escolheu guardar. Elas não alteram lançamentos e só são usadas quando você as registra.</p>
+            <fieldset className="settings-memory-examples">
+              <legend>Exemplos</legend>
+              <div className="settings-memory-example-options">
+                <button onClick={() => chooseMemoryExample("Quero acompanhar melhor os gastos com [categoria].")} type="button">Objetivo do mês</button>
+                <button onClick={() => chooseMemoryExample("Classifique compras na Padaria Central como Alimentação.")} type="button">Categoria</button>
+                <button onClick={() => chooseMemoryExample("Quando eu mencionar [assunto], quero dizer [contexto].")} type="button">Contexto</button>
+              </div>
+            </fieldset>
+            <form className="settings-memory-form" onSubmit={(event) => void submitMemory(event)}>
+              <label className="settings-memory-label" htmlFor="assistant-preference">Lembrete para a SophIA</label>
+              <p className="settings-memory-help" id="assistant-memory-help">Escreva uma frase específica. Você poderá editar ou remover essa memória depois.</p>
+              <textarea
+                aria-describedby="assistant-memory-help"
+                id="assistant-preference"
+                maxLength={500}
+                onChange={(event) => setMemoryDraft(event.target.value)}
+                placeholder="Ex.: Prefiro registrar compras no mercado na categoria Alimentação."
+                rows={4}
+                value={memoryDraft}
+              />
+              <div className="settings-memory-form-footer">
+                <span>{memoryDraft.length}/500 caracteres</span>
+                <div>
+                  {editingMemoryId && <button className="settings-memory-cancel" onClick={() => { setEditingMemoryId(null); setMemoryDraft(""); setMemoryError(""); }} type="button">Cancelar edição</button>}
+                  <button className="settings-memory-save" disabled={savingMemory || !memoryDraft.trim()} type="submit">{savingMemory ? "Salvando…" : editingMemoryId ? "Salvar memória" : "Adicionar memória"}</button>
+                </div>
+              </div>
+              {memoryError && <p className="settings-memory-error" role="alert">{memoryError}</p>}
+            </form>
+            <div className="settings-memory-list-heading"><strong>Lembretes ativos</strong><span>{visibleMemories.length}</span></div>
+            {visibleMemories.length === 0 ? <div className="settings-memory-empty">Nenhum lembrete adicional. As escolhas estruturadas ficam em “Meu Assistente”.</div> : visibleMemories.map((memory) => <div className="settings-memory-row" key={memory.id}><span>{memory.content}</span><div><button aria-label={`Editar preferência: ${memory.content}`} onClick={() => editMemory(memory)} type="button">Editar</button><button aria-label={`Remover preferência: ${memory.content}`} onClick={() => onDeleteMemory(memory.id)} type="button">Remover</button></div></div>)}
+          </section>
           <section className="assistant-settings-card settings-assistant-preferences">
             <div className="settings-card-heading"><div><p className="eyebrow">Personalização explícita</p><h2>Como a SophIA trabalha com você</h2></div></div>
             <p>Defina como a SophIA deve conversar e qual contexto priorizar. Só estas escolhas explícitas serão consideradas; não há aprendizado automático silencioso.</p>
@@ -1479,41 +1614,6 @@ function SettingsView({
                 <button aria-pressed={theme === "dark"} className={theme === "dark" ? "settings-theme-option selected" : "settings-theme-option"} onClick={() => onThemeChange("dark")} type="button"><Moon aria-hidden="true" size={17} />Escuro</button>
               </div>
             </fieldset>
-          </section>
-          <section className="assistant-settings-card settings-memories">
-            <h2>Memórias da SophIA</h2>
-            <p>O que a SophIA sabe sobre você vem das preferências e referências que você escolheu guardar. Elas não alteram lançamentos e só são usadas quando você as registra.</p>
-            <fieldset className="settings-memory-examples">
-              <legend>Exemplos</legend>
-              <div className="settings-memory-example-options">
-                <button onClick={() => chooseMemoryExample("Quero acompanhar melhor os gastos com [categoria].")} type="button">Objetivo do mês</button>
-                <button onClick={() => chooseMemoryExample("Classifique compras na Padaria Central como Alimentação.")} type="button">Categoria</button>
-                <button onClick={() => chooseMemoryExample("Quando eu mencionar [assunto], quero dizer [contexto].")} type="button">Contexto</button>
-              </div>
-            </fieldset>
-            <form className="settings-memory-form" onSubmit={(event) => void submitMemory(event)}>
-              <label className="settings-memory-label" htmlFor="assistant-preference">Lembrete para a SophIA</label>
-              <p className="settings-memory-help" id="assistant-memory-help">Escreva uma frase específica. Você poderá editar ou remover essa memória depois.</p>
-              <textarea
-                aria-describedby="assistant-memory-help"
-                id="assistant-preference"
-                maxLength={500}
-                onChange={(event) => setMemoryDraft(event.target.value)}
-                placeholder="Ex.: Prefiro registrar compras no mercado na categoria Alimentação."
-                rows={4}
-                value={memoryDraft}
-              />
-              <div className="settings-memory-form-footer">
-                <span>{memoryDraft.length}/500 caracteres</span>
-                <div>
-                  {editingMemoryId && <button className="settings-memory-cancel" onClick={() => { setEditingMemoryId(null); setMemoryDraft(""); setMemoryError(""); }} type="button">Cancelar edição</button>}
-                  <button className="settings-memory-save" disabled={savingMemory || !memoryDraft.trim()} type="submit">{savingMemory ? "Salvando…" : editingMemoryId ? "Salvar memória" : "Adicionar memória"}</button>
-                </div>
-              </div>
-              {memoryError && <p className="settings-memory-error" role="alert">{memoryError}</p>}
-            </form>
-            <div className="settings-memory-list-heading"><strong>Lembretes ativos</strong><span>{visibleMemories.length}</span></div>
-            {visibleMemories.length === 0 ? <div className="settings-memory-empty">Nenhum lembrete adicional. As escolhas estruturadas ficam em “Meu Assistente”.</div> : visibleMemories.map((memory) => <div className="settings-memory-row" key={memory.id}><span>{memory.content}</span><div><button aria-label={`Editar preferência: ${memory.content}`} onClick={() => editMemory(memory)} type="button">Editar</button><button aria-label={`Remover preferência: ${memory.content}`} onClick={() => onDeleteMemory(memory.id)} type="button">Remover</button></div></div>)}
           </section>
           {status?.diagnostics_enabled && (
             <section className="assistant-settings-card settings-diagnostics">
