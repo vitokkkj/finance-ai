@@ -3582,3 +3582,29 @@ textarea:focus-visible {
     align-items: flex-start;
   }
 }
+
+/* Mantém o ícone e o texto dos itens do menu alinhados à esquerda. */
+.assistant-nav .assistant-nav-group .assistant-nav-item {
+  justify-content: flex-start;
+}
+
+.assistant-nav .assistant-nav-group .assistant-nav-item > .assistant-nav-item-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+/* Separa o título do histórico do divisor e dá respiro à lista de conversas. */
+.assistant-history {
+  margin-top: 16px;
+  padding-top: 20px;
+}
+
+.assistant-history > p {
+  margin-bottom: 14px;
+}
+
+.success-message {
+  border-color: var(--color-success, #6ba77a);
+  color: var(--color-success, #6ba77a);
+}

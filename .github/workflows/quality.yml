@@ -1,0 +1,121 @@
+name: Qualidade e dependências
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      APP_ENV: development
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      SESSION_COOKIE_SECURE: "false"
+      INITIAL_SETUP_TOKEN: ""
+      OWNER_TOTP_SECRET: ""
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Preparar Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/requirements*.txt
+
+      - name: Instalar dependências e ferramentas
+        working-directory: apps/api
+        run: |
+          python -m pip install --upgrade pip==26.2.1
+          python -m pip install -r requirements-dev.txt
+
+      - name: Lint, tipos e testes
+        working-directory: apps/api
+        run: |
+          ruff check app tests migrations
+          mypy --config-file pyproject.toml app
+          pytest -q
+
+      - name: Auditar dependências Python
+        working-directory: apps/api
+        run: pip-audit
+
+  web:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      API_INTERNAL_URL: http://127.0.0.1:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Instalar dependências
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Auditar dependências JavaScript
+        working-directory: apps/web
+        run: npm audit --audit-level=high
+
+      - name: Lint, tipos e build
+        working-directory: apps/web
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run build
+
+  runtime:
+    name: Imagens e perfil público
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      APP_DOMAIN: sophia.example.invalid
+      INITIAL_SETUP_TOKEN: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      OWNER_TOTP_SECRET: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      POSTGRES_DB: finance_ai
+      POSTGRES_USER: finance_ai
+      POSTGRES_PASSWORD: CIOnlyNotSecret0123456789ABCDEF
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Preparar token fictício para validar a referência do segredo
+        run: printf 'token-invalido-apenas-para-ci' > "$RUNNER_TEMP/cloudflare-tunnel-token"
+
+      - name: Validar o Compose público
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN_FILE: ${{ runner.temp }}/cloudflare-tunnel-token
+        run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.vm.yml config -q
+
+      - name: Construir a imagem da API
+        run: docker build -f apps/api/Dockerfile -t sophia-api:ci .
+
+      - name: Construir a imagem web de produção
+        run: docker build -f apps/web/Dockerfile --target runner -t sophia-web:ci .
+
+      - name: Validar o Caddyfile
+        run: docker run --rm -e APP_DOMAIN=sophia.example.invalid -v "$PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.11.6-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

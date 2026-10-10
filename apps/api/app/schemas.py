@@ -23,6 +23,8 @@ class Credentials(BaseModel):
 
 class SetupRequest(Credentials):
     display_name: str = Field(min_length=1, max_length=100)
+    bootstrap_token: str | None = Field(default=None, min_length=32, max_length=256)
+    totp_code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
     @field_validator("display_name")
     @classmethod
@@ -41,6 +43,13 @@ class UserResponse(BaseModel):
 
 class SetupStateResponse(BaseModel):
     requires_setup: bool
+    setup_available: bool
+    bootstrap_token_required: bool
+    mfa_required: bool
+
+
+class LoginRequest(Credentials):
+    totp_code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
 
 class AccountCreate(BaseModel):

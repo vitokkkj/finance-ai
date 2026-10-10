@@ -15,6 +15,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
       ...init,
       headers: {
         "Content-Type": "application/json",
+        "X-SophIA-Request": "1",
         ...init?.headers,
       },
       cache: "no-store",

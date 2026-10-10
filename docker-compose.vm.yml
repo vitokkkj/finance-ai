@@ -1,9 +1,106 @@
-# Execução na VM de teste: usa processos de runtime sem overlays de desenvolvimento.
+# Runtime público de produção. Requer Docker Compose 2.24.4 ou superior para !override/!reset.
 services:
   api:
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command:
+      [
+        "sh",
+        "-c",
+        "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+      ]
     environment:
       APP_ENV: production
+      SESSION_COOKIE_NAME: __Host-sophia_session
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_TTL_HOURS: "24"
+      INITIAL_SETUP_TOKEN: ${INITIAL_SETUP_TOKEN:-}
+      OWNER_TOTP_SECRET: ${OWNER_TOTP_SECRET:?Configure OWNER_TOTP_SECRET no .env}
+    volumes: !override
+      - chatgpt_auth_data:/home/app/.config/sophia
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  worker:
+    volumes: !reset []
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
 
   web:
-    command: ["sh", "-c", "npm run build && npm run start -- --hostname 0.0.0.0"]
+    build:
+      target: runner
+    command: ["npm", "run", "start", "--", "--hostname", "0.0.0.0"]
+    ports: !reset []
+    volumes: !reset []
+    networks:
+      - app
+      - edge
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  caddy:
+    image: caddy:2.11.6-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Configure APP_DOMAIN com um domínio público}
+    ports: !reset []
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      - edge
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.0
+    command:
+      [
+        "tunnel",
+        "--no-autoupdate",
+        "run",
+        "--token-file",
+        "/run/secrets/cloudflare_tunnel_token",
+      ]
+    secrets:
+      - cloudflare_tunnel_token
+    depends_on:
+      caddy:
+        condition: service_started
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    networks:
+      - edge
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  cloudflare_tunnel_token:
+    file: ${CLOUDFLARE_TUNNEL_TOKEN_FILE:?Configure CLOUDFLARE_TUNNEL_TOKEN_FILE no .env}
+
+networks:
+  edge:

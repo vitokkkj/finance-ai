@@ -5,14 +5,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /workspace
 
-COPY apps/api/requirements.txt apps/api/requirements-dev.txt /tmp/
-RUN python -m pip install --no-cache-dir -r /tmp/requirements-dev.txt \
+COPY apps/api/requirements.txt /tmp/
+RUN python -m pip install --no-cache-dir --upgrade pip==26.2.1 \
+    && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
     && groupadd --system app \
     && useradd --system --gid app --create-home app \
     && mkdir -p /home/app/.config/sophia \
     && chown -R app:app /home/app/.config
 
 COPY apps/api /workspace/apps/api
+COPY worker /workspace/worker
 
 USER app
 WORKDIR /workspace/apps/api

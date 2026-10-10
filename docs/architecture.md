@@ -2,21 +2,29 @@
 
 ## Serviços implementados
 
-O monorepo separa quatro processos:
+O monorepo separa a aplicação em processos independentes:
 
 ```text
-Navegador
-   │ localhost:3000
+Internet
+   │ HTTPS (TLS na Cloudflare)
    ▼
-Next.js (web) ── proxy same-origin /api/* ──► FastAPI (api) ── OAuth ChatGPT ──► Responses API
-                                                   ├── autenticação e operações financeiras
-                                                   ├── Finance Engine e ferramentas explícitas da IA
-                                                   └── PostgreSQL 17
+Cloudflare Tunnel (conexão de saída; rede edge)
+   │ HTTP interno, sem porta publicada no host
+   ▼
+Caddy (cabeçalhos de segurança; rede edge)
+   │
+Next.js (web; edge + app) ── proxy same-origin /api/* ──► FastAPI (api; app + data)
+                                                               ├── sessão, TOTP e operações financeiras
+                                                               ├── Finance Engine e ferramentas da IA
+                                                               ├── OAuth ChatGPT ──► Responses API
+                                                               └── PostgreSQL 17 (rede data interna)
 
-Worker Python (processo independente; estende ocorrências previstas)
+Worker Python (processo independente; rede data; estende ocorrências previstas)
 ```
 
-- `web` atende a interface e encaminha chamadas `/api/*` para a API. Apenas a porta do frontend é publicada no host.
+- `cloudflared` mantém conexões somente de saída com a Cloudflare e não publica portas. O hostname público é encaminhado para `caddy:80` dentro da rede `edge`.
+- `caddy` não publica portas no host. Recebe HTTP somente pela rede Docker, aplica cabeçalhos de segurança e encaminha ao frontend; o TLS externo termina na Cloudflare.
+- `web` atende a interface pela rede `edge` e encaminha chamadas `/api/*` para a API pela rede `app`. Em produção, a porta 3000 não é publicada no host e o contêiner não monta o código-fonte.
 - `api` expõe autenticação, CRUD financeiro, filtros, resumos e health checks. Ao iniciar, aplica Alembic antes de iniciar o servidor.
 - `Finance Engine` fica em `apps/api/app/finance_engine.py`; recebe movimentos tipados e calcula saldos e agregações com `Decimal`, sem depender de componentes web.
 - `cards.py`, `transfers.py` e `invoices.py` expõem os comandos e consultas da Fase 2B; os cálculos de saldo, fatura, limite e ciclo continuam centralizados no Finance Engine.
@@ -26,7 +34,7 @@ Worker Python (processo independente; estende ocorrências previstas)
 - `ai.py`, `ai_chat.py`, `ai_provider.py` e `ai_tools.py` isolam endpoints e persistência, o loop de streaming, o adaptador do provider e as operações financeiras permitidas. O provider padrão usa OAuth ChatGPT no backend (`store=false`); tokens ficam em volume privado montado somente na API. A chamada de ferramenta recebe o usuário da sessão autenticada e chama módulos financeiros existentes.
 - Respostas chegam à web por Server-Sent Events. O backend persiste mensagens e auditoria, e transmite texto incremental e cartões estruturados sem expor chaves ao navegador.
 
-O Compose usa dependências `service_healthy` para aguardar o PostgreSQL antes das migrations, e a API antes do frontend e do worker. A implantação de teste é auto-hospedada e privada; endereços de rede ficam em configuração privada fora do repositório. API e PostgreSQL não publicam portas. Requisitos e estado operacional estão em [deployment.md](deployment.md).
+O Compose usa dependências `service_healthy` para aguardar PostgreSQL e API. Em desenvolvimento, a web publica apenas `127.0.0.1:3000`; no perfil público, nenhuma porta é publicada no host. Requisitos e operação estão em [deployment.md](deployment.md).
 
 ## Núcleo financeiro manual — Fase 2A
 
@@ -52,11 +60,11 @@ O worker é um processo simples separado que executa a extensão diária do hori
 
 ## Identidade e sessão
 
-`users.id` é UUID e `auth_sessions.user_id` é uma chave estrangeira para `users.id`. Sessões são opacas: o navegador recebe um token aleatório em cookie `HttpOnly`, `SameSite=Strict`; o banco armazena somente seu digest SHA-256. Senhas são armazenadas com Argon2id via `argon2-cffi`. A API aplica limite local de tentativas de login. O cookie `Secure` fica ligado por padrão; o Compose de desenvolvimento o desliga para HTTP em `localhost`.
+`users.id` é UUID e `auth_sessions.user_id` é uma chave estrangeira para `users.id`. Sessões são opacas: o navegador recebe um token aleatório; o banco armazena somente seu digest SHA-256. Em produção o cookie usa `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`, caminho `/` e validade máxima de 24 horas. Senhas são armazenadas com Argon2id via `argon2-cffi`. O login também exige código TOTP do proprietário; a chave Base32 é mantida no `.env` da VM, fora do banco. A API exige um cabeçalho de origem da própria aplicação em todas as gravações, além de `SameSite=Strict`.
 
-A interface permite a criação da primeira conta enquanto não existe usuário. Depois, essa rota retorna conflito. Não existe endpoint de cadastro público contínuo.
+A criação da primeira conta exige um token aleatório temporário e o TOTP do proprietário em produção. Um lock consultivo transacional do PostgreSQL protege o bootstrap entre processos; a rota retorna conflito depois da primeira conta. Não existe cadastro público contínuo. A migration de produção revoga as sessões antigas para exigir nova autenticação.
 
-MFA/TOTP e trilha persistente de auditoria ainda não fazem parte desta fundação local; devem ser concluídos antes de expor a aplicação remotamente.
+O limitador mantém memória limitada e bloqueia novas verificações de senha após falhas repetidas da mesma origem. Cloudflare substitui o cabeçalho `CF-Connecting-IP`; Caddy encaminha esse valor como IP do cliente e Uvicorn só aceita cabeçalhos de proxy vindos de redes privadas do Compose. Como o estado é local ao processo, o perfil público mantém uma única instância/worker da API. Ainda não há trilha persistente de auditoria financeira; alterações continuam visíveis no histórico de lançamentos, mas exclusões não formam um livro imutável.
 
 ## Assistente conversacional
 
@@ -64,7 +72,7 @@ Mensagens financeiras simples e inequívocas podem ser interpretadas por parser 
 
 ## Segurança de rede
 
-O navegador acessa a aplicação pelo frontend. A API e o banco não têm portas publicadas. PostgreSQL e worker compartilham apenas a rede de dados interna; a API participa das redes de aplicação e de dados para atender o frontend e consultar o banco. Credenciais OAuth do provider ficam em volume privado disponível somente à API; não há chave de API no fluxo padrão.
+Cloudflared, Caddy e frontend compartilham a rede `edge`; frontend e API também compartilham `app`. API participa de `app` e da rede `data` interna; PostgreSQL e worker só participam de `data`. A VM não publica portas do host, e o túnel não alcança diretamente API ou banco. Credenciais OAuth do provider ficam em volume privado disponível somente à API; não há chave de API no fluxo padrão. O token do túnel é montado como segredo do Compose e não deve ser salvo no repositório.
 
 ## Evolução planejada
 

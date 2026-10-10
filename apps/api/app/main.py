@@ -1,8 +1,11 @@
 from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from app.accounts import router as accounts_router
 from app.ai import router as ai_router
@@ -34,6 +37,27 @@ app.include_router(cards_router)
 app.include_router(invoices_router)
 app.include_router(transfers_router)
 app.include_router(recurrences_router)
+
+
+@app.middleware("http")
+async def protect_api_writes(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
+    if (
+        request.url.path.startswith("/api/")
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.headers.get("x-sophia-request") != "1"
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Solicitação bloqueada. Atualize a página e tente novamente."},
+        )
+
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.get("/api/health/live", tags=["saúde"])

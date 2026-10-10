@@ -24,6 +24,12 @@ export function AppShell() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [bootstrapToken, setBootstrapToken] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [setupAvailable, setSetupAvailable] = useState(true);
+  const [bootstrapTokenRequired, setBootstrapTokenRequired] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [messageKind, setMessageKind] = useState<"error" | "success">("error");
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
@@ -37,7 +43,15 @@ export function AppShell() {
   useEffect(() => {
     async function loadSession() {
       try {
-        const setup = await apiRequest<{ requires_setup: boolean }>("/api/auth/setup-state");
+        const setup = await apiRequest<{
+          requires_setup: boolean;
+          setup_available: boolean;
+          bootstrap_token_required: boolean;
+          mfa_required: boolean;
+        }>("/api/auth/setup-state");
+        setSetupAvailable(setup.setup_available);
+        setBootstrapTokenRequired(setup.bootstrap_token_required);
+        setMfaRequired(setup.mfa_required);
         if (setup.requires_setup) {
           setGate("setup");
           return;
@@ -60,17 +74,40 @@ export function AppShell() {
     event.preventDefault();
     setBusy(true);
     setMessage("");
+    setMessageKind("error");
     try {
-      const path = gate === "setup" ? "/api/auth/setup" : "/api/auth/login";
-      const payload = gate === "setup" ? { display_name: displayName, email, password } : { email, password };
-      const signedInUser = await apiRequest<User>(path, {
+      const payload = {
+        email,
+        password,
+        ...(totpCode ? { totp_code: totpCode } : {}),
+      };
+      if (gate === "setup") {
+        await apiRequest<User>("/api/auth/setup", {
+          method: "POST",
+          body: JSON.stringify({
+            ...payload,
+            display_name: displayName,
+            ...(bootstrapToken ? { bootstrap_token: bootstrapToken } : {}),
+          }),
+        });
+        setGate("login");
+        setPassword("");
+        setBootstrapToken("");
+        setTotpCode("");
+        setMessageKind("success");
+        setMessage("Conta criada. Entre com sua senha e o código do autenticador para continuar.");
+        return;
+      }
+      const signedInUser = await apiRequest<User>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(payload),
       });
       setUser(signedInUser);
       setGate("authenticated");
       setPassword("");
+      setTotpCode("");
     } catch (error) {
+      setTotpCode("");
       setMessage(error instanceof Error ? error.message : "Ocorreu um erro inesperado.");
     } finally {
       setBusy(false);
@@ -84,6 +121,7 @@ export function AppShell() {
       setUser(null);
       setGate("login");
       setPassword("");
+      setTotpCode("");
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Não foi possível encerrar a sessão.");
@@ -120,6 +158,15 @@ export function AppShell() {
       {gate === "loading" && <LoadingState />}
       {gate === "unavailable" && <UnavailableState onRetry={() => window.location.reload()} />}
       {(gate === "setup" || gate === "login") && (
+        gate === "setup" && !setupAvailable ? (
+          <section className="auth-card">
+            <div className="auth-heading">
+              <p className="eyebrow">Primeiro acesso desativado</p>
+              <h2>A conta ainda não foi habilitada.</h2>
+              <p>O proprietário precisa configurar o token temporário de primeiro acesso no servidor.</p>
+            </div>
+          </section>
+        ) : (
           <div className="auth-card">
             <div className="auth-heading">
               <p className="eyebrow">{gate === "setup" ? "Primeiro acesso" : "Bem-vindo de volta"}</p>
@@ -141,6 +188,20 @@ export function AppShell() {
                     value={displayName}
                     onChange={(event) => setDisplayName(event.target.value)}
                     placeholder="Seu nome"
+                  />
+                </label>
+              )}
+              {gate === "setup" && bootstrapTokenRequired && (
+                <label className="field-label">
+                  Token temporário de primeiro acesso
+                  <input
+                    autoComplete="off"
+                    required
+                    maxLength={256}
+                    type="password"
+                    value={bootstrapToken}
+                    onChange={(event) => setBootstrapToken(event.target.value)}
+                    placeholder="Token configurado no servidor"
                   />
                 </label>
               )}
@@ -169,7 +230,30 @@ export function AppShell() {
                   placeholder="Pelo menos 12 caracteres"
                 />
               </label>
-              {message && <p className="form-message" role="alert">{message}</p>}
+              {mfaRequired && (
+                <label className="field-label">
+                  Código do autenticador
+                  <input
+                    autoComplete="one-time-code"
+                    inputMode="numeric"
+                    maxLength={6}
+                    minLength={6}
+                    pattern="[0-9]{6}"
+                    required
+                    value={totpCode}
+                    onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                  />
+                </label>
+              )}
+              {message && (
+                <p
+                  className={`form-message ${messageKind === "success" ? "success-message" : ""}`}
+                  role={messageKind === "success" ? "status" : "alert"}
+                >
+                  {message}
+                </p>
+              )}
               <button className="primary-button" type="submit" disabled={busy}>
                 {busy ? "Aguarde…" : gate === "setup" ? "Criar conta privada" : "Entrar"}
                 <span aria-hidden="true">↗</span>
@@ -177,9 +261,12 @@ export function AppShell() {
             </form>
             <p className="security-caption">
               <span aria-hidden="true">⌑</span>
-              Sua senha é protegida e nunca aparece em texto nos registros.
+              {mfaRequired
+                ? "Sua sessão usa senha, código temporário e cookie seguro."
+                : "Sua senha é protegida e nunca aparece em texto nos registros."}
             </p>
           </div>
+        )
       )}
       <footer className="auth-page-footer">SophIA <span>·</span> Acesso privado</footer>
     </main>

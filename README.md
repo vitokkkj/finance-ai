@@ -31,10 +31,16 @@ Use `docker compose up --build` quando alterar dependências ou Dockerfiles.
 | `web` | Interface Next.js, filtros e proxy same-origin para a API | `localhost:3000` |
 | `api` | Autenticação, operações financeiras e Finance Engine | Somente pela rede Docker |
 | `worker` | Processo separado que mantém as ocorrências recorrentes no horizonte de 90 dias | Somente pela rede Docker |
+| `caddy` | Cabeçalhos HTTP de segurança e proxy interno para o frontend (produção) | Somente pela rede Docker; sem porta publicada |
+| `cloudflared` | Túnel de saída que publica o hostname configurado na Cloudflare (produção) | Somente pela rede Docker; sem porta publicada |
 | ollama | Inferência local opcional (Qwen3), iniciada somente com o perfil local-ai | Somente pela rede Docker; sem porta publicada |
 | `postgres` | Fonte persistente de usuários e dados financeiros | Somente pela rede Docker interna; sem porta publicada |
 
-O frontend, API, worker e PostgreSQL permanecem em serviços separados. A API não publica porta no host. O banco participa somente da rede Docker interna e nunca é publicado externamente.
+Frontend, API, worker, Caddy, cloudflared e PostgreSQL permanecem em serviços separados. A API não publica porta no host. O banco participa somente da rede Docker interna e nunca é publicado externamente.
+
+## Acesso externo na VM
+
+Não exponha a execução local `docker compose up` à internet. Para a VM pública, use exclusivamente o perfil de produção documentado em [docs/deployment.md](docs/deployment.md): Cloudflare Tunnel é a única entrada, sem portas de entrada publicadas na VM; Caddy aplica cabeçalhos de segurança atrás do túnel, o cookie é seguro e o login exige TOTP. API e banco não têm portas públicas; o primeiro cadastro também exige token temporário de bootstrap. Configure a rota `finance.ruralflow.com.br`, `APP_DOMAIN` e os segredos privados antes de iniciar esse perfil. Os backups da VM são gerenciados pelo Proxmox, fora do repositório.
 
 O padrão usa OAuth do plano ChatGPT, sem chave da API e sem fallback para chamadas pagas da API. O repositório já é público sob MIT; a instância, as credenciais OAuth e os dados financeiros continuam privados. O uso feito pela SophIA entra nos limites do próprio plano autorizado e não dá acesso ao histórico ou às memórias do ChatGPT. Confira as permissões e os limites do aplicativo em ChatGPT → Configurações → Uso. Consulte a [documentação oficial de Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) e o guia para [VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
 
@@ -167,4 +173,4 @@ O `docker compose up` simples continua reservado ao ambiente local de desenvolvi
 
 Pluggy, parcelamentos, financiamentos, investimentos, previsões e notificações ainda não foram implementados. Recorrências cobrem regras e ocorrências previstas; as despesas recorrentes completas podem ser programadas pelo chat com prévia e confirmação, e não alteram saldos até a ocorrência ser marcada como paga. O uso do plano ChatGPT via OAuth é o provider padrão, sem chave da API nem fallback pago; o Ollama é uma alternativa local opcional. O parser determinístico cobre frases inequívocas de despesas e programação mensal; pedidos incompletos ou ambíguos seguem para o modelo, com instruções para sugerir e perguntar. Entidades de fases futuras continuam apenas documentadas.
 
-Uma VM Debian pode hospedar uma instância privada de teste com o Compose de runtime; publique somente o código, nunca `.env`, credenciais, endereços privados ou dados financeiros. API e PostgreSQL permanecem sem portas públicas. Topologia, requisitos de backup/restauração e itens pendentes antes de produção estão em [docs/deployment.md](docs/deployment.md). O lançamento iOS/Android também fica para o futuro.
+Uma VM Debian pode hospedar a instância pessoal pela internet usando o perfil de produção descrito em [docs/deployment.md](docs/deployment.md). Publique somente o código, nunca `.env`, credenciais, endereços privados ou dados financeiros. Cloudflare Tunnel é a única entrada pública; a VM não publica portas, e API e PostgreSQL permanecem privados. A interface responsiva pode ser instalada como PWA no iOS; um app nativo pode ser desenvolvido depois reutilizando a API.

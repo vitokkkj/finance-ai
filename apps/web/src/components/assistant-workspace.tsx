@@ -489,7 +489,11 @@ export function AssistantWorkspace({
 
       const response = await fetch(`/api/ai/conversations/${activeConversationId}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-SophIA-Request": "1",
+          Accept: "text/event-stream",
+        },
         body: JSON.stringify({ content: clean }),
         cache: "no-store",
       });

@@ -1,61 +1,74 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.auth_security import LoginRateLimiter, verify_totp
 from app.config import settings
 from app.database import get_db
 from app.models import AuthSession, User
-from app.schemas import Credentials, SetupRequest, SetupStateResponse, UserResponse
+from app.schemas import LoginRequest, SetupRequest, SetupStateResponse, UserResponse
 
 router = APIRouter(prefix="/api/auth", tags=["autenticação"])
 password_hasher = PasswordHasher()
 dummy_password_hash = password_hasher.hash(secrets.token_urlsafe(32))
 setup_lock = threading.Lock()
+SETUP_ADVISORY_LOCK_ID = 873421073914
 
 
-class LoginRateLimiter:
-    def __init__(self) -> None:
-        self._failures: dict[str, list[float]] = {}
-        self._lock = threading.Lock()
-
-    def is_limited(self, key: str, now: float) -> bool:
-        with self._lock:
-            recent = [
-                attempt
-                for attempt in self._failures.get(key, [])
-                if now - attempt < settings.login_rate_limit_window_seconds
-            ]
-            if recent:
-                self._failures[key] = recent
-            else:
-                self._failures.pop(key, None)
-            return len(recent) >= settings.login_rate_limit_attempts
-
-    def record_failure(self, key: str, now: float) -> None:
-        with self._lock:
-            self._failures.setdefault(key, []).append(now)
-
-    def clear(self, key: str) -> None:
-        with self._lock:
-            self._failures.pop(key, None)
-
-    def reset(self) -> None:
-        with self._lock:
-            self._failures.clear()
+login_rate_limiter = LoginRateLimiter(
+    max_attempts=settings.login_rate_limit_attempts,
+    window_seconds=settings.login_rate_limit_window_seconds,
+)
 
 
-login_rate_limiter = LoginRateLimiter()
+def _totp_is_required() -> bool:
+    return bool(settings.owner_totp_secret)
+
+
+def _verify_owner_totp(code: str | None) -> bool:
+    if not _totp_is_required():
+        return settings.app_env.casefold() != "production"
+    return verify_totp(settings.owner_totp_secret or "", code)
+
+
+def _client_rate_keys(request: Request, action: str) -> tuple[str, ...]:
+    client_host = request.client.host if request.client else "unknown"
+    return (f"{action}:ip:{client_host}",)
+
+
+def _raise_rate_limit() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Muitas tentativas. Aguarde antes de tentar novamente.",
+        headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
+    )
+
+
+@contextmanager
+def _exclusive_first_user_creation(db: Session) -> Iterator[None]:
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": SETUP_ADVISORY_LOCK_ID},
+        )
+        yield
+        return
+    with setup_lock:
+        yield
 
 
 def _user_response(user: User) -> UserResponse:
@@ -90,16 +103,54 @@ def _create_session(db: Session, user: User, response: Response) -> None:
 @router.get("/setup-state", response_model=SetupStateResponse)
 def setup_state(db: Annotated[Session, Depends(get_db)]) -> SetupStateResponse:
     existing_user = db.scalar(select(User.id).limit(1))
-    return SetupStateResponse(requires_setup=existing_user is None)
+    requires_setup = existing_user is None
+    setup_available = settings.app_env.casefold() != "production" or bool(
+        settings.initial_setup_token
+    )
+    return SetupStateResponse(
+        requires_setup=requires_setup,
+        setup_available=not requires_setup or setup_available,
+        bootstrap_token_required=requires_setup and bool(settings.initial_setup_token),
+        mfa_required=_totp_is_required(),
+    )
 
 
 @router.post("/setup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_first_user(
     payload: SetupRequest,
+    request: Request,
     response: Response,
     db: Annotated[Session, Depends(get_db)],
 ) -> UserResponse:
-    with setup_lock:
+    setup_keys = _client_rate_keys(request, "setup")
+    now = time.monotonic()
+    if not login_rate_limiter.allow_attempt(setup_keys, now):
+        _raise_rate_limit()
+    if settings.app_env.casefold() == "production":
+        configured_token = settings.initial_setup_token
+        if not configured_token:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="O primeiro acesso ainda não foi habilitado pelo proprietário.",
+            )
+        token_matches = hmac.compare_digest(
+            (payload.bootstrap_token or "").encode("utf-8"), configured_token.encode("utf-8")
+        )
+    else:
+        token_matches = not settings.initial_setup_token or hmac.compare_digest(
+            (payload.bootstrap_token or "").encode("utf-8"),
+            settings.initial_setup_token.encode("utf-8"),
+        )
+
+    credentials_match = token_matches and _verify_owner_totp(payload.totp_code)
+    if not credentials_match:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Não foi possível validar os dados do primeiro acesso.",
+        )
+
+    login_rate_limiter.clear(setup_keys)
+    with _exclusive_first_user_creation(db):
         if db.scalar(select(User.id).limit(1)) is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -112,7 +163,8 @@ def create_first_user(
         )
         db.add(user)
         db.flush()
-        _create_session(db, user, response)
+        if settings.app_env.casefold() != "production" and not _totp_is_required():
+            _create_session(db, user, response)
         db.commit()
         db.refresh(user)
     return _user_response(user)
@@ -120,18 +172,15 @@ def create_first_user(
 
 @router.post("/login", response_model=UserResponse)
 def login(
-    payload: Credentials,
+    payload: LoginRequest,
+    request: Request,
     response: Response,
     db: Annotated[Session, Depends(get_db)],
 ) -> UserResponse:
-    key = payload.email
+    keys = _client_rate_keys(request, "login")
     now = time.monotonic()
-    if login_rate_limiter.is_limited(key, now):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Muitas tentativas. Aguarde antes de tentar novamente.",
-            headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
-        )
+    if not login_rate_limiter.allow_attempt(keys, now):
+        _raise_rate_limit()
 
     user = db.scalar(select(User).where(User.email == payload.email))
     encoded_hash = user.password_hash if user is not None else dummy_password_hash
@@ -141,14 +190,14 @@ def login(
     except (VerifyMismatchError, VerificationError, InvalidHashError):
         password_matches = False
 
-    if not password_matches or user is None:
-        login_rate_limiter.record_failure(key, now)
+    totp_matches = _verify_owner_totp(payload.totp_code)
+    if not password_matches or user is None or not totp_matches:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="E-mail ou senha inválidos.",
+            detail="E-mail, senha ou código inválidos.",
         )
 
-    login_rate_limiter.clear(key)
+    login_rate_limiter.clear(keys)
     _create_session(db, user, response)
     db.commit()
     return _user_response(user)

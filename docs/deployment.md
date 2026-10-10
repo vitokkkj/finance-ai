@@ -1,50 +1,88 @@
 # Implantação e operação
 
-## Topologia
+## Topologia pública
 
-O projeto separa frontend, API, worker e PostgreSQL em serviços Docker Compose. Em produção, somente o frontend deve receber tráfego externo; API e banco ficam em redes internas. O PostgreSQL não publica porta no host. Credenciais de OAuth ficam em um volume privado montado apenas na API.
+A VM publica a aplicação por um túnel de saída da Cloudflare. `cloudflared`, Caddy e Next.js compartilham a rede Docker `edge`; o túnel encaminha `finance.ruralflow.com.br` para `http://caddy:80`. O TLS público termina na Cloudflare. Caddy recebe HTTP apenas dentro da rede privada do Compose, define cabeçalhos de segurança e encaminha para o frontend. Nenhum serviço publica porta no host.
 
-O código aberto fica no [repositório GitHub](https://github.com/vitokkkj/finance-ai), sob licença MIT. Endereços privados, domínios de teste, credenciais, arquivos `.env` e dados financeiros não pertencem à documentação pública nem ao repositório.
+Next.js encaminha `/api/*` para FastAPI. API e worker acessam PostgreSQL pela rede `data`, marcada como interna; a API também participa da rede `app`. O worker e o banco não têm interface na rede pública. O túnel não alcança diretamente a API nem o banco.
 
-## Desenvolvimento e VM privada
+A API roda com um único worker para manter o limitador de tentativas de login consistente. Esta instalação foi projetada para uma instância de API; não escale réplicas sem antes mover o limitador para um mecanismo compartilhado.
 
-- Desenvolvimento local: `docker compose up`.
-- Runtime para uma VM privada: `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build`.
-- A VM é um ambiente auto-hospedado privado. Registre hostnames, IPs e detalhes da rede somente no inventário operacional privado do proprietário.
-- A configuração de runtime inicia o frontend com o servidor Next.js de produção e a API sem autoreload. API e PostgreSQL permanecem na rede interna do Compose.
-- O arquivo `.env` é exclusivo do ambiente e não entra no Git. `OPENAI_API_KEY` não é necessário no fluxo Sign in with ChatGPT. Os tokens OAuth ficam no volume privado da API, com permissões restritas.
-- A situação atual da autorização deve ser consultada em Preferências ou em `GET /api/ai/status`; não deduza que uma cópia do repositório tem credenciais configuradas.
+O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai), sob licença MIT. Endereços privados da VM, arquivos `.env`, tokens de túnel, credenciais OAuth e dados financeiros não pertencem ao GitHub.
 
-O OAuth para uma VM é concluído no computador que tem o navegador. Depois, as credenciais protegidas são transferidas por SSH e a própria VM renova os tokens. O host da VM precisa manter o seu identificador estável. Consulte o fluxo oficial de [Sign in with ChatGPT para VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
+## Requisitos
+
+- Docker Compose V2 `2.24.4` ou superior, por causa de `!reset` e `!override` usados para remover portas e mounts de desenvolvimento.
+- Zona `ruralflow.com.br` gerenciada pela Cloudflare e o túnel remoto `ruralflow-vm` existente.
+- Conectividade de saída da VM para a Cloudflare na porta `7844` (UDP ou TCP). Não é necessário abrir portas de entrada para a internet.
+- Token do túnel salvo em arquivo local privado no servidor. `cloudflared` executa como usuário não-root e lê `/run/secrets/cloudflare_tunnel_token`; o token não é colocado na linha de comando, no `.env` nem no Git.
+- Segredo TOTP do proprietário em `OWNER_TOTP_SECRET`, no `.env` privado da VM. Gere-o em um terminal confiável com `python3 scripts/generate-owner-totp.py`, cadastre a chave em um autenticador e mantenha a chave fora do banco e do repositório.
+- Token aleatório e temporário para criar a primeira conta. Gere com `openssl rand -hex 32` e configure em `INITIAL_SETUP_TOKEN` somente durante o bootstrap.
+- `POSTGRES_PASSWORD` aleatória, com letras e números para evitar codificação especial na URL do banco.
+
+Não reutilize valores de desenvolvimento do `.env.example` em produção. Não cole tokens, senhas, códigos TOTP, cookies ou credenciais OAuth no chat, em issues, logs ou workflows.
+
+## Rota Cloudflare
+
+No túnel `ruralflow-vm`, a rota publicada deve usar:
+
+- Hostname público: `finance.ruralflow.com.br`
+- Serviço interno: `http://caddy:80`
+- Catch-all: `http_status:404`
+
+Ao salvar a rota, a Cloudflare cria o DNS CNAME proxied apontando para o túnel. O conector `cloudflared` precisa estar na rede Docker `edge` deste Compose para resolver `caddy`. Não crie registros A/AAAA apontando para o IP da VM e não publique as portas 80/443 do host.
+
+O hostname público permite que qualquer visitante alcance a tela de login. O acesso aos dados exige a conta existente, senha e TOTP; a criação inicial exige o token temporário e o TOTP do proprietário. A rota pública não substitui a autenticação da aplicação.
+
+## Preparar a VM e publicar
+
+1. No `.env` privado da VM, defina `APP_DOMAIN=finance.ruralflow.com.br`, `OWNER_TOTP_SECRET`, `INITIAL_SETUP_TOKEN`, credenciais PostgreSQL e `CLOUDFLARE_TUNNEL_TOKEN_FILE=./secrets/cloudflare-tunnel-token`.
+2. Crie o diretório `secrets` como `root` com permissão `0700` e o arquivo `cloudflare-tunnel-token` como `root:root`, permissão `0644`. A pasta não é rastreada pelo Git; o arquivo é montado somente no container `cloudflared` como segredo.
+3. Configure a rota publicada no túnel conforme a seção anterior. Obtenha o token de conector pelo painel Cloudflare e instale-o diretamente no arquivo secreto da VM por um canal administrativo confiável; não o envie pelo chat nem o grave em histórico de shell.
+4. Valide a configuração sem imprimir valores interpolados: `docker compose -f docker-compose.yml -f docker-compose.vm.yml config -q`.
+5. Inicie os serviços: `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build`.
+6. Confirme que `cloudflared` está `Healthy` no painel e acesse `https://finance.ruralflow.com.br`. Verifique os cabeçalhos HSTS, proteção contra framing, MIME sniffing e permissões do navegador. Cookies usam o prefixo `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict` e validade máxima de 24 horas.
+7. Na tela inicial, crie a conta com e-mail, senha, token temporário e código TOTP. A criação não gera sessão; entre novamente com senha e TOTP. Após confirmar o login, remova `INITIAL_SETUP_TOKEN` do `.env` e recrie a API para retirar o segredo do processo. A rota de bootstrap continua fechada porque a conta já existe.
+
+A migration `0011_public_auth_hardening` revoga sessões antigas para exigir novo login. A alteração não remove dados financeiros.
+
+## Verificação de segurança pós-deploy
+
+- `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`: confira que web, API, worker, PostgreSQL, Caddy e cloudflared estão ativos.
+- Verifique que o Compose de produção não publica portas no host: `docker compose -f docker-compose.yml -f docker-compose.vm.yml port web 3000`, `port api 8000`, `port postgres 5432` e `port caddy 80` não devem retornar um endereço público.
+- Acesse `/api/health/live` e `/api/health/ready` pelo hostname HTTPS; confirme redirecionamento HTTP→HTTPS e cabeçalhos de segurança.
+- Confirme que a rota de bootstrap está indisponível depois que a conta do proprietário existir e que um login inválido não cria sessão.
+- Confira `alembic current`, integridade dos saldos no Finance Engine e logs sem segredos. Os backups e a recuperação permanecem sob responsabilidade do Proxmox, fora deste repositório.
+
+Não teste login real, não crie usuários adicionais e não use dados financeiros de produção em verificações automatizadas.
+
+## Desenvolvimento local
+
+O arquivo `.env.example` e `docker compose up` são para desenvolvimento em `http://localhost:3000`. O frontend fica ligado a `127.0.0.1`; o cookie `Secure` é desligado para HTTP local e o TOTP pode ficar sem configuração. API e PostgreSQL continuam sem portas publicadas. Não use esse modo para exposição pública.
+
+## Integração com o plano ChatGPT
+
+O OAuth para a VM é concluído no computador que tem o navegador. Depois, as credenciais protegidas são transferidas por SSH e a VM renova os tokens. O host da VM precisa manter seu identificador estável. Consulte o fluxo oficial de [Sign in with ChatGPT para VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms). Tokens ficam em volume privado montado somente na API, com permissões restritas. Não configure fallback para chamadas pagas de API.
 
 ## Dados e recuperação
 
-O Compose não agenda nem executa backups do PostgreSQL. Este repositório não comprova a existência de snapshots, retenção ou restauração testada na plataforma que hospeda a VM; configure e valide esses itens antes de tratar o ambiente como protegido. Não considere um deploy bem-sucedido como prova de backup.
+Os backups da VM são gerenciados pelo Proxmox fora deste repositório. Os snapshots não devem ser tratados como teste de restauração: mantenha uma verificação de recuperação conforme a política privada do proprietário. Backups podem conter dados financeiros; não os envie ao GitHub, logs, tickets ou serviços sem autorização.
 
-Antes de uma migration ou atualização que possa afetar dados:
+Antes de uma migration ou atualização que possa afetar dados, valide a recuperação conforme o procedimento do Proxmox e confira a revisão corrente:
 
-1. Confira o estado do banco e a revisão atual com `docker compose exec api alembic current`.
-2. Faça um backup do PostgreSQL para armazenamento privado, fora do volume em uso.
-3. Valide que o arquivo existe, tem acesso restrito e pode ser restaurado em uma instância descartável.
-4. Atualize os serviços e verifique `/api/health/live`, `/api/health/ready`, migrations e login.
-5. Preserve o backup e a imagem anterior até confirmar a operação; tenha um procedimento de retorno que não reverta migrations destrutivas automaticamente.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic current
+docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic upgrade head
+```
 
-Os backups podem conter informações financeiras pessoais: não os envie para o GitHub, logs, tickets ou serviços sem autorização.
-
-## Antes de disponibilizar para acesso externo
-
-- Use HTTPS e cookie de sessão `Secure`.
-- Mantenha o cadastro público desabilitado; a criação inicial da conta é controlada pela aplicação.
-- Restrinja a rede ao frontend e mantenha API/PostgreSQL sem portas públicas.
-- Valide login, recuperação de acesso, limite de tentativas, logs sem segredos, health checks, backup e restauração.
-- Confirme que o provedor OAuth está conectado e que o usuário autorizou o uso do plano ChatGPT. Não configure fallback para API paga sem decisão explícita.
-- Faça a atualização primeiro em uma cópia de teste do banco e confira os efeitos financeiros no Finance Engine.
+Depois da atualização, confira `/api/health/live`, `/api/health/ready`, login e o Finance Engine. Preserve a imagem anterior até confirmar a operação; não reverta migrations destrutivas automaticamente.
 
 ## Comandos de operação
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.vm.yml ps
-docker compose -f docker-compose.yml -f docker-compose.vm.yml logs --tail=100 web api worker postgres
+docker compose -f docker-compose.yml -f docker-compose.vm.yml logs --tail=100 cloudflared caddy web api worker postgres
 docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic current
-docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic upgrade head
 ```
+
+Os logs não devem conter senhas, token do túnel, token de bootstrap, códigos TOTP, cookies ou credenciais OAuth. Remova o token de primeiro acesso do `.env` assim que a conta for criada.

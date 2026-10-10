@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("SESSION_COOKIE_SECURE", "false")
 
 from app.auth import login_rate_limiter  # noqa: E402
@@ -46,6 +47,6 @@ def client(test_session_factory: sessionmaker[Session]) -> Generator[TestClient,
 
     app.dependency_overrides[get_db] = override_get_db
     login_rate_limiter.reset()
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"X-SophIA-Request": "1"}) as test_client:
         yield test_client
     app.dependency_overrides.clear()

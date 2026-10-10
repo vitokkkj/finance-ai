@@ -20,4 +20,4 @@ Pluggy/MeuPluggy permanece uma candidata futura, não uma integração implement
 
 ## Implantação
 
-A instância permanece privada e auto-hospedada. O repositório público documenta a arquitetura sem publicar endereço de VM, domínio privado, tokens ou dados financeiros. Consulte [deployment.md](deployment.md) para procedimentos e requisitos de operação.
+A instância é auto-hospedada e pode ser acessada pela internet somente pelo perfil de produção com Cloudflare Tunnel, HTTPS na borda, bootstrap fechado e TOTP do proprietário. Nenhuma porta de entrada é publicada na VM. O repositório público não contém endereço da VM, tokens ou dados financeiros. Consulte [deployment.md](deployment.md) para DNS, firewall e operação.
