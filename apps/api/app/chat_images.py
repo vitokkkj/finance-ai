@@ -14,11 +14,18 @@ MAX_CHAT_IMAGE_EDGE = 2048
 
 
 def normalize_chat_image(data_url: str) -> str:
-    """Validate, orient, and strip metadata from a bounded WebP data URL."""
+    """Validate, orient, and strip metadata from a bounded browser image data URL."""
     if len(data_url) > MAX_CHAT_IMAGE_DATA_URL_CHARS:
         raise ValueError("A imagem ficou grande demais depois da preparação.")
-    prefix = "data:image/webp;base64,"
-    if not data_url.startswith(prefix):
+    expected_formats = {
+        "data:image/webp;base64,": "WEBP",
+        "data:image/png;base64,": "PNG",
+        "data:image/jpeg;base64,": "JPEG",
+    }
+    prefix = next(
+        (candidate for candidate in expected_formats if data_url.startswith(candidate)), None
+    )
+    if prefix is None:
         raise ValueError("Formato de imagem não aceito para análise.")
 
     try:
@@ -33,8 +40,8 @@ def normalize_chat_image(data_url: str) -> str:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(BytesIO(raw)) as source:
-                if source.format != "WEBP":
-                    raise ValueError("O conteúdo enviado não corresponde a uma imagem WebP.")
+                if source.format != expected_formats[prefix]:
+                    raise ValueError("O conteúdo enviado não corresponde ao formato da imagem.")
                 width, height = source.size
                 if width < 1 or height < 1 or width * height > MAX_CHAT_IMAGE_PIXELS:
                     raise ValueError("A imagem preparada excede a resolução permitida.")

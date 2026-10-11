@@ -48,8 +48,10 @@ class MessageCreate(BaseModel):
     def normalize_image_data_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        if not value.startswith("data:image/webp;base64,"):
-            raise ValueError("Envie uma imagem WebP preparada para análise.")
+        if not value.startswith(
+            ("data:image/webp;base64,", "data:image/png;base64,", "data:image/jpeg;base64,")
+        ):
+            raise ValueError("Envie uma imagem PNG, JPEG ou WebP preparada para análise.")
         return value
 
     @model_validator(mode="after")

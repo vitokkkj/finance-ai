@@ -141,6 +141,42 @@ def _small_webp_data_url() -> str:
     return "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode("ascii")
 
 
+def _small_png_data_url() -> str:
+    image = Image.new("RGB", (80, 120), color=(245, 245, 245))
+    output = BytesIO()
+    image.save(output, format="PNG")
+    import base64
+
+    return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+
+
+def test_png_canvas_fallback_is_accepted_for_chat_image(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sign_up(client)
+    monkeypatch.setattr(settings, "ai_provider", "chatgpt_plan")
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [[ProviderEvent(type="text_delta", text="Encontrei as faturas."), _completed()]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={
+            "content": "Crie o cartão Nubank e cadastre essas futuras faturas",
+            "image_data_url": _small_png_data_url(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Encontrei as faturas." in response.text
+    request = next(request for request in fake.requests if request.input_items)
+    user_item = next(item for item in request.input_items if item.get("role") == "user")
+    assert isinstance(user_item["content"], list)
+    assert user_item["content"][1]["type"] == "input_image"
+
+
 def test_image_turn_is_ephemeral_and_cannot_create_transactions(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
