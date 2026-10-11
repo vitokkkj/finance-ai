@@ -3675,6 +3675,7 @@ textarea:focus-visible {
 .assistant-nav .assistant-nav-group .assistant-nav-item > .assistant-nav-item-label {
   min-width: 0;
   flex: 1 1 auto;
+  color: inherit;
   text-align: left;
 }
 
