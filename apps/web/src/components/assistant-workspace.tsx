@@ -850,10 +850,15 @@ export function AssistantWorkspace({
           {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" size={16} /> : <PanelLeftClose aria-hidden="true" size={16} />}
           <span>{sidebarCollapsed ? "Expandir menu" : "Recolher menu"}</span>
         </button>
-        <button className="assistant-new-chat" onClick={startConversation} type="button">
+        <button
+          aria-label="Nova conversa"
+          className="assistant-new-chat"
+          onClick={startConversation}
+          title="Nova conversa"
+          type="button"
+        >
           <Plus aria-hidden="true" size={17} strokeWidth={2} /><span>Nova conversa</span>
         </button>
-        {view === "chat" && contextPanelAvailable && <button aria-expanded={contextPanelOpen} aria-label={contextPanelOpen ? "Recolher contexto financeiro" : "Abrir contexto financeiro"} className="assistant-context-sidebar-toggle" onClick={() => { setMobileMenuOpen(false); setContextPanelOpen((open) => !open); }} title="Contexto financeiro" type="button"><PanelRightOpen aria-hidden="true" size={16} /><span>Contexto financeiro</span></button>}
         <div className="assistant-history">
           <p>Conversas recentes</p>
           {loading ? <span className="history-placeholder">Carregando…</span> : conversations.length === 0 ? (
@@ -895,6 +900,7 @@ export function AssistantWorkspace({
               const key = item.view === "finance" ? `finance-${item.section}` : item.view;
               return (
                 <button
+                  aria-label={item.label}
                   className={currentNav === key ? "assistant-nav-item selected" : "assistant-nav-item"}
                   key={key}
                   onClick={() => chooseNavigation(item)}
@@ -912,6 +918,7 @@ export function AssistantWorkspace({
             const key = item.view === "finance" ? `finance-${item.section}` : item.view;
             return (
               <button
+                aria-label={item.label}
                 className={currentNav === key ? "assistant-nav-item selected" : "assistant-nav-item"}
                 key={key}
                 onClick={() => chooseNavigation(item)}
@@ -941,19 +948,32 @@ export function AssistantWorkspace({
             <span>{view === "chat" ? "SophIA · sua assistente financeira" : view === "account" ? "Perfil, segurança e sessões" : "Dados calculados pelo sistema"}</span>
           </div>
           <div className="assistant-topbar-actions">
-          <button
-            aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
-            className="assistant-theme-toggle"
-            onClick={() => onThemeChange(theme === "light" ? "dark" : "light")}
-            title={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
-            type="button"
-          >
-            {theme === "light" ? <Moon aria-hidden="true" size={17} /> : <Sun aria-hidden="true" size={17} />}
-            <span>{theme === "light" ? "Escuro" : "Claro"}</span>
-          </button>
-          <div className={`assistant-connection ${aiAvailable ? "connected" : status ? "paused" : "checking"}`}>
-            <span aria-hidden="true" />{aiAvailable ? status?.provider === "ollama" ? "IA local" : "ChatGPT Plus" : status ? "IA pausada" : "Verificando IA"}
-          </div>
+            {view === "chat" && contextPanelAvailable && (
+              <button
+                aria-expanded={contextPanelOpen}
+                aria-label={contextPanelOpen ? "Recolher contexto financeiro" : "Abrir contexto financeiro"}
+                className="assistant-context-toggle"
+                onClick={() => setContextPanelOpen((open) => !open)}
+                title="Contexto financeiro"
+                type="button"
+              >
+                <PanelRightOpen aria-hidden="true" size={16} />
+                <span>Contexto</span>
+              </button>
+            )}
+            <button
+              aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
+              className="assistant-theme-toggle"
+              onClick={() => onThemeChange(theme === "light" ? "dark" : "light")}
+              title={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
+              type="button"
+            >
+              {theme === "light" ? <Moon aria-hidden="true" size={17} /> : <Sun aria-hidden="true" size={17} />}
+              <span>{theme === "light" ? "Escuro" : "Claro"}</span>
+            </button>
+            <div className={`assistant-connection ${aiAvailable ? "connected" : status ? "paused" : "checking"}`}>
+              <span aria-hidden="true" />{aiAvailable ? status?.provider === "ollama" ? "IA local" : "ChatGPT Plus" : status ? "IA pausada" : "Verificando IA"}
+            </div>
           </div>
         </header>
 

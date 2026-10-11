@@ -4089,39 +4089,6 @@ textarea:focus-visible {
   color: var(--color-sidebar-brand);
 }
 
-.assistant-context-sidebar-toggle {
-  min-width: 0;
-  width: 100%;
-  min-height: 36px;
-  margin: 0 1px;
-  padding: 0 9px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-sidebar-muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  text-align: left;
-  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
-}
-
-.assistant-context-sidebar-toggle > svg {
-  flex: none;
-}
-
-.assistant-context-sidebar-toggle:hover,
-.assistant-context-sidebar-toggle[aria-expanded="true"] {
-  border-color: var(--color-border);
-  background: var(--color-surface-soft);
-  color: var(--color-sidebar-brand);
-}
-
-.assistant-context-sidebar-toggle:focus-visible,
 .assistant-sidebar-toggle:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 1px;
@@ -4354,18 +4321,6 @@ textarea:focus-visible {
 }
 
 .sidebar-collapsed .assistant-sidebar-toggle > span,
-.sidebar-collapsed .assistant-context-sidebar-toggle > span {
-  display: none;
-}
-
-.sidebar-collapsed .assistant-context-sidebar-toggle {
-  width: 42px;
-  min-height: 38px;
-  margin: 0;
-  padding: 0;
-  justify-content: center;
-}
-
 .sidebar-collapsed .assistant-new-chat {
   margin-top: 12px;
   margin-bottom: 8px;
@@ -4373,6 +4328,71 @@ textarea:focus-visible {
 
 .sidebar-collapsed .assistant-history {
   display: none;
+}
+
+/* Mantém os controles e ícones realmente centrados no modo compacto desktop. */
+@media (min-width: 761px) {
+  .assistant-layout.sidebar-collapsed .assistant-sidebar .assistant-brand {
+    justify-content: center;
+  }
+
+  .assistant-layout.sidebar-collapsed .assistant-sidebar .assistant-nav .assistant-nav-group .assistant-nav-item {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .assistant-layout.sidebar-collapsed .assistant-sidebar .assistant-account {
+    justify-content: center;
+    gap: 3px;
+    padding-inline: 0;
+  }
+
+  .assistant-layout.sidebar-collapsed .assistant-sidebar .assistant-account-trigger {
+    width: 28px;
+    min-height: 28px;
+    flex: 0 0 28px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .assistant-layout.sidebar-collapsed .assistant-sidebar .assistant-avatar {
+    width: 26px;
+    height: 26px;
+  }
+
+  .assistant-layout.sidebar-collapsed .assistant-sidebar .assistant-logout {
+    position: static;
+    width: 24px;
+    height: 28px;
+    flex: 0 0 24px;
+  }
+}
+
+/* Ícones, marcadores e rótulos compartilham a mesma linha de centro. */
+.assistant-sidebar .assistant-nav .assistant-nav-group .assistant-nav-item {
+  display: flex;
+  align-items: center;
+}
+
+.assistant-sidebar .assistant-nav .assistant-nav-group .assistant-nav-item > svg {
+  flex: 0 0 20px;
+  align-self: center;
+}
+
+.assistant-sidebar .assistant-nav .assistant-nav-group .assistant-nav-item > .assistant-nav-item-label {
+  align-self: center;
+  line-height: 1.25;
+}
+
+.assistant-sidebar .history-row,
+.assistant-sidebar .history-item {
+  align-items: center;
+}
+
+.assistant-sidebar .history-item > .history-marker,
+.assistant-sidebar .history-item > .history-title {
+  align-self: center;
+  margin-block: 0;
 }
 
 [data-theme="light"] .assistant-sidebar .assistant-nav .assistant-nav-group .assistant-nav-item.selected {
