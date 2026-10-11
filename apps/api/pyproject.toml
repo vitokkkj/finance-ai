@@ -18,5 +18,5 @@ plugins = ["pydantic.mypy"]
 exclude = ["migrations/versions"]
 
 [[tool.mypy.overrides]]
-module = ["argon2.*", "psycopg.*"]
+module = ["argon2.*", "psycopg.*", "qrcode", "qrcode.*"]
 ignore_missing_imports = true

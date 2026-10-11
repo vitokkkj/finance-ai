@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     login_rate_limit_attempts: int = Field(default=5, ge=3, le=20)
     login_rate_limit_window_seconds: int = Field(default=300, ge=60, le=3600)
     initial_setup_token: str | None = None
+    mfa_enrollment_token: str | None = None
     owner_totp_secret: str | None = None
     ai_provider: Literal["ollama", "chatgpt_plan"] = "chatgpt_plan"
     chatgpt_auth_dir: str = "/home/app/.config/sophia"
@@ -41,6 +42,11 @@ class Settings(BaseSettings):
                     raise ValueError(
                         "OWNER_TOTP_SECRET precisa ser uma chave Base32 aleatória com ao menos "
                         "32 caracteres."
+                    )
+                enrollment_token = (self.mfa_enrollment_token or "").strip()
+                if enrollment_token and len(enrollment_token) < 32:
+                    raise ValueError(
+                        "MFA_ENROLLMENT_TOKEN precisa ter ao menos 32 caracteres."
                     )
         return self
 

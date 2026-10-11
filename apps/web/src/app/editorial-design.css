@@ -1618,6 +1618,90 @@ textarea:focus-visible {
   color: var(--color-muted);
 }
 
+.mfa-enrollment-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.mfa-enrollment-link-row .text-button,
+.auth-back-button {
+  min-height: 44px;
+  color: var(--color-brand);
+}
+
+.mfa-enrollment-note {
+  margin: -6px 0 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.mfa-enrollment-qr-panel {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-soft);
+}
+
+.mfa-enrollment-qr {
+  width: min(100%, 240px);
+  aspect-ratio: 1;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff;
+  image-rendering: pixelated;
+}
+
+.mfa-enrollment-qr-panel > p,
+.mfa-enrollment-qr-panel details > p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.mfa-enrollment-qr-panel details {
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-ink-soft);
+  font-size: 12px;
+}
+
+.mfa-enrollment-qr-panel summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--color-brand);
+  font-weight: 650;
+}
+
+.mfa-enrollment-qr-panel details > p {
+  margin: 5px 0 8px;
+  text-align: left;
+}
+
+.mfa-enrollment-qr-panel code {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--color-surface-inset);
+  color: var(--color-ink);
+  font-size: 12px;
+  user-select: all;
+}
+
 .assistant-backdrop,
 .assistant-context-backdrop {
   background: rgb(21 31 24 / 38%);

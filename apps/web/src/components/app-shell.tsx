@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 
 import { ApiError, apiRequest } from "@/lib/api";
 import { AssistantWorkspace } from "@/components/assistant-workspace";
@@ -12,12 +13,14 @@ type User = {
 };
 
 type Gate = "loading" | "setup" | "login" | "authenticated" | "unavailable";
+type LoginStep = "credentials" | "mfa";
 type Theme = "light" | "dark";
 
 const THEME_STORAGE_KEY = "finance-ai-theme";
 
 export function AppShell() {
   const [gate, setGate] = useState<Gate>("loading");
+  const [loginStep, setLoginStep] = useState<LoginStep>("credentials");
   const [user, setUser] = useState<User | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -29,6 +32,14 @@ export function AppShell() {
   const [setupAvailable, setSetupAvailable] = useState(true);
   const [bootstrapTokenRequired, setBootstrapTokenRequired] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaEnrolled, setMfaEnrolled] = useState(false);
+  const [mfaEnrollmentAvailable, setMfaEnrollmentAvailable] = useState(false);
+  const [mfaEnrollmentOpen, setMfaEnrollmentOpen] = useState(false);
+  const [enrollmentToken, setEnrollmentToken] = useState("");
+  const [enrollmentQr, setEnrollmentQr] = useState("");
+  const [enrollmentManualKey, setEnrollmentManualKey] = useState("");
+  const [enrollmentCode, setEnrollmentCode] = useState("");
+  const [enrollmentExpiresAt, setEnrollmentExpiresAt] = useState("");
   const [messageKind, setMessageKind] = useState<"error" | "success">("error");
   const [theme, setTheme] = useState<Theme>("light");
 
@@ -95,8 +106,33 @@ export function AppShell() {
         setBootstrapToken("");
         setTotpCode("");
         setMessageKind("success");
-        setMessage("Conta criada. Entre com sua senha e o código do autenticador para continuar.");
+        setMessage("Conta criada. Entre com seu e-mail e senha; depois a SophIA pedirá o código MFA.");
         return;
+      }
+      if (gate === "login" && loginStep === "credentials") {
+        const credentials = await apiRequest<{
+          mfa_required: boolean;
+          mfa_enrolled: boolean;
+          mfa_enrollment_available: boolean;
+        }>("/api/auth/login/check", {
+          method: "POST",
+          body: JSON.stringify({ email, password }),
+        });
+        setMfaRequired(credentials.mfa_required);
+        setMfaEnrolled(credentials.mfa_enrolled);
+        setMfaEnrollmentAvailable(credentials.mfa_enrollment_available);
+        if (credentials.mfa_required) {
+          setLoginStep("mfa");
+          setMessageKind("success");
+          setMessage(
+            credentials.mfa_enrolled
+              ? "Senha confirmada. O MFA é obrigatório para proteger suas finanças. Abra o Authy, escolha SophIA e informe o código atual."
+              : credentials.mfa_enrollment_available
+                ? "Senha confirmada. O MFA é obrigatório para proteger suas finanças. Configure o Authy pela opção abaixo e confirme o primeiro código."
+                : "Senha confirmada. O MFA é obrigatório para proteger suas finanças. Informe o código do Authy; se ainda não pareou, o responsável pelo servidor precisa habilitar o primeiro cadastro."
+          );
+          return;
+        }
       }
       const signedInUser = await apiRequest<User>("/api/auth/login", {
         method: "POST",
@@ -104,14 +140,90 @@ export function AppShell() {
       });
       setUser(signedInUser);
       setGate("authenticated");
+      setLoginStep("credentials");
       setPassword("");
       setTotpCode("");
+      setEnrollmentToken("");
+      setEnrollmentCode("");
+      setEnrollmentQr("");
     } catch (error) {
       setTotpCode("");
       setMessage(error instanceof Error ? error.message : "Ocorreu um erro inesperado.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function startMfaEnrollment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    setMessageKind("error");
+    try {
+      const enrollment = await apiRequest<{
+        qr_code_data_url: string;
+        manual_key: string;
+        expires_at: string;
+      }>("/api/auth/mfa/enrollment/start", {
+        method: "POST",
+        body: JSON.stringify({ email, password, enrollment_token: enrollmentToken }),
+      });
+      setEnrollmentQr(enrollment.qr_code_data_url);
+      setEnrollmentManualKey(enrollment.manual_key);
+      setEnrollmentExpiresAt(enrollment.expires_at);
+      setMessageKind("success");
+      setMessage("QR criado. Adicione a SophIA no Authy e confirme com o código exibido no aplicativo.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível iniciar o pareamento.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmMfaEnrollment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    setMessageKind("error");
+    try {
+      const enrolledUser = await apiRequest<User>("/api/auth/mfa/enrollment/confirm", {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          password,
+          enrollment_token: enrollmentToken,
+          totp_code: enrollmentCode,
+        }),
+      });
+      setUser(enrolledUser);
+      setGate("authenticated");
+      setLoginStep("credentials");
+      setPassword("");
+      setTotpCode("");
+      setEnrollmentCode("");
+      setEnrollmentToken("");
+      setEnrollmentQr("");
+      setEnrollmentManualKey("");
+      setEnrollmentExpiresAt("");
+    } catch (error) {
+      setEnrollmentCode("");
+      setMessage(error instanceof Error ? error.message : "Não foi possível confirmar o MFA.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function returnToCredentials() {
+    setLoginStep("credentials");
+    setMfaEnrollmentOpen(false);
+    setEnrollmentToken("");
+    setEnrollmentCode("");
+    setEnrollmentQr("");
+    setEnrollmentManualKey("");
+    setEnrollmentExpiresAt("");
+    setTotpCode("");
+    setMessage("");
+    setMessageKind("error");
   }
 
   async function handleLogout() {
@@ -169,14 +281,84 @@ export function AppShell() {
         ) : (
           <div className="auth-card">
             <div className="auth-heading">
-              <p className="eyebrow">{gate === "setup" ? "Primeiro acesso" : "Bem-vindo de volta"}</p>
-              <h2>{gate === "setup" ? "Crie sua conta" : "Entre na sua conta"}</h2>
+              <p className="eyebrow">
+                {gate === "setup" ? "Primeiro acesso" : loginStep === "mfa" ? "Verificação de segurança" : "Bem-vindo de volta"}
+              </p>
+              <h2>
+                {gate === "setup"
+                  ? "Crie sua conta"
+                  : loginStep === "mfa"
+                    ? mfaEnrollmentOpen ? "Configure o Authy" : "Confirme que é você"
+                    : "Entre na sua conta"}
+              </h2>
               <p>
                 {gate === "setup"
                   ? "Sua conta é privada e será usada para proteger seus dados."
-                  : "Acesse seu espaço financeiro pessoal."}
+                  : loginStep === "mfa"
+                    ? mfaEnrollmentOpen
+                      ? enrollmentQr
+                        ? "Escaneie o QR com o Authy e confirme o pareamento com o código de seis dígitos."
+                        : "Informe o código temporário do servidor para gerar o QR seguro do Authy."
+                      : "Sua conta exige autenticação multifator (MFA) para proteger suas finanças. Informe o código temporário do Authy."
+                    : "Informe seu e-mail e senha. Em seguida, você confirmará o acesso com o MFA obrigatório."}
               </p>
             </div>
+            {gate === "login" && loginStep === "mfa" && mfaEnrollmentOpen ? (
+              enrollmentQr ? (
+                <form className="auth-form" onSubmit={confirmMfaEnrollment}>
+                  <div className="mfa-enrollment-qr-panel">
+                    <Image className="mfa-enrollment-qr" src={enrollmentQr} alt="QR code para adicionar a SophIA ao Authy" width={240} height={240} unoptimized />
+                    <p>Authy → adicionar conta → escanear QR code. O QR expira às {new Date(enrollmentExpiresAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}.</p>
+                    <details>
+                      <summary>Não consegue escanear?</summary>
+                      <p>Adicione uma conta manualmente no Authy e informe esta chave:</p>
+                      <code>{enrollmentManualKey}</code>
+                    </details>
+                  </div>
+                  <label className="field-label">
+                    Código de seis dígitos do Authy
+                    <input
+                      autoComplete="one-time-code"
+                      inputMode="numeric"
+                      maxLength={6}
+                      minLength={6}
+                      pattern="[0-9]{6}"
+                      required
+                      value={enrollmentCode}
+                      onChange={(event) => setEnrollmentCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="000000"
+                    />
+                  </label>
+                  {message && <p className={`form-message ${messageKind === "success" ? "success-message" : ""}`} role={messageKind === "success" ? "status" : "alert"}>{message}</p>}
+                  <button className="primary-button" type="submit" disabled={busy}>
+                    {busy ? "Aguarde…" : "Confirmar e entrar"}<span aria-hidden="true">↗</span>
+                  </button>
+                  <button className="text-button auth-back-button" type="button" onClick={() => setMfaEnrollmentOpen(false)}>Voltar ao código MFA</button>
+                </form>
+              ) : (
+                <form className="auth-form" onSubmit={startMfaEnrollment}>
+                  <label className="field-label">
+                    Código temporário de pareamento
+                    <input
+                      autoComplete="off"
+                      required
+                      minLength={32}
+                      maxLength={256}
+                      type="password"
+                      value={enrollmentToken}
+                      onChange={(event) => setEnrollmentToken(event.target.value)}
+                      placeholder="Gerado no servidor para este primeiro pareamento"
+                    />
+                  </label>
+                  <p className="mfa-enrollment-note">Esse código temporário autoriza somente o primeiro pareamento do Authy. Ele não é o código de seis dígitos do MFA.</p>
+                  {message && <p className={`form-message ${messageKind === "success" ? "success-message" : ""}`} role={messageKind === "success" ? "status" : "alert"}>{message}</p>}
+                  <button className="primary-button" type="submit" disabled={busy}>
+                    {busy ? "Gerando QR…" : "Gerar QR code"}<span aria-hidden="true">↗</span>
+                  </button>
+                  <button className="text-button auth-back-button" type="button" onClick={() => setMfaEnrollmentOpen(false)}>Voltar ao login</button>
+                </form>
+              )
+            ) : (
             <form className="auth-form" onSubmit={handleSubmit}>
               {gate === "setup" && (
                 <label className="field-label">
@@ -205,7 +387,7 @@ export function AppShell() {
                   />
                 </label>
               )}
-              <label className="field-label">
+              {!(gate === "login" && loginStep === "mfa") && <label className="field-label">
                 E-mail
                 <input
                   autoComplete="email"
@@ -216,8 +398,8 @@ export function AppShell() {
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="voce@exemplo.com"
                 />
-              </label>
-              <label className="field-label">
+              </label>}
+              {!(gate === "login" && loginStep === "mfa") && <label className="field-label">
                 Senha
                 <input
                   autoComplete={gate === "setup" ? "new-password" : "current-password"}
@@ -229,10 +411,10 @@ export function AppShell() {
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="Pelo menos 12 caracteres"
                 />
-              </label>
-              {mfaRequired && (
+              </label>}
+              {mfaRequired && (gate === "setup" || loginStep === "mfa") && (
                 <label className="field-label">
-                  Código do autenticador
+                  Código de seis dígitos do Authy
                   <input
                     autoComplete="one-time-code"
                     inputMode="numeric"
@@ -254,15 +436,27 @@ export function AppShell() {
                   {message}
                 </p>
               )}
+              {gate === "login" && loginStep === "mfa" && mfaEnrollmentAvailable && !mfaEnrolled && (
+                <div className="mfa-enrollment-link-row">
+                  <span>Primeiro acesso ao Authy?</span>
+                  <button className="text-button" type="button" onClick={() => { setMfaEnrollmentOpen(true); setMessage(""); }}>
+                    Configurar autenticador
+                  </button>
+                </div>
+              )}
+              {gate === "login" && loginStep === "mfa" && (
+                <button className="text-button auth-back-button" type="button" onClick={returnToCredentials}>Voltar e corrigir e-mail ou senha</button>
+              )}
               <button className="primary-button" type="submit" disabled={busy}>
-                {busy ? "Aguarde…" : gate === "setup" ? "Criar conta privada" : "Entrar"}
+                {busy ? "Aguarde…" : gate === "setup" ? "Criar conta privada" : loginStep === "credentials" ? "Continuar" : "Entrar com MFA"}
                 <span aria-hidden="true">↗</span>
               </button>
             </form>
+            )}
             <p className="security-caption">
               <span aria-hidden="true">⌑</span>
               {mfaRequired
-                ? "Sua sessão usa senha, código temporário e cookie seguro."
+                ? "O acesso exige senha, código de uso único e sessão segura."
                 : "Sua senha é protegida e nunca aparece em texto nos registros."}
             </p>
           </div>

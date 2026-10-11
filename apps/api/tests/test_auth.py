@@ -75,6 +75,133 @@ def test_login_uses_generic_failure_and_logout_revokes_session(client: TestClien
     assert client.get("/api/auth/me").status_code == 401
 
 
+def test_login_checks_password_before_mfa_step(client: TestClient) -> None:
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    client.cookies.clear()
+
+    invalid = client.post(
+        "/api/auth/login/check",
+        json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+    )
+    assert invalid.status_code == 401
+
+    valid = client.post(
+        "/api/auth/login/check",
+        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+    )
+    assert valid.status_code == 200
+    assert valid.json() == {
+        "mfa_required": False,
+        "mfa_enrolled": False,
+        "mfa_enrollment_available": False,
+    }
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_owner_can_pair_authenticator_with_one_time_enrollment_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import auth
+
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    client.cookies.clear()
+    monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+    monkeypatch.setattr(settings, "mfa_enrollment_token", "m" * 64)
+    monkeypatch.setattr(auth, "_verify_owner_totp", lambda code: code == "123456")
+
+    checked = client.post(
+        "/api/auth/login/check",
+        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+    )
+    assert checked.json() == {
+        "mfa_required": True,
+        "mfa_enrolled": False,
+        "mfa_enrollment_available": True,
+    }
+    assert client.get("/api/auth/me").status_code == 401
+
+    start = client.post(
+        "/api/auth/mfa/enrollment/start",
+        json={
+            "email": "usuario@example.com",
+            "password": "uma-senha-local-segura",
+            "enrollment_token": "m" * 64,
+        },
+    )
+    assert start.status_code == 200
+    assert start.headers["cache-control"] == "no-store"
+    assert start.json()["qr_code_data_url"].startswith("data:image/svg+xml;base64,")
+    assert start.json()["manual_key"] == "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+
+    client.cookies.clear()
+    confirm = client.post(
+        "/api/auth/mfa/enrollment/confirm",
+        json={
+            "email": "usuario@example.com",
+            "password": "uma-senha-local-segura",
+            "enrollment_token": "m" * 64,
+            "totp_code": "123456",
+        },
+    )
+    assert confirm.status_code == 200
+    assert confirm.cookies.get("finance_ai_session")
+    assert client.get("/api/auth/me").json()["email"] == "usuario@example.com"
+
+    repeated = client.post(
+        "/api/auth/mfa/enrollment/start",
+        json={
+            "email": "usuario@example.com",
+            "password": "uma-senha-local-segura",
+            "enrollment_token": "m" * 64,
+        },
+    )
+    assert repeated.status_code == 409
+
+
+def test_mfa_enrollment_requires_the_server_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import auth
+
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    client.cookies.clear()
+    monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+    monkeypatch.setattr(settings, "mfa_enrollment_token", "m" * 64)
+    monkeypatch.setattr(auth, "_verify_owner_totp", lambda code: False)
+
+    response = client.post(
+        "/api/auth/mfa/enrollment/start",
+        json={
+            "email": "usuario@example.com",
+            "password": "uma-senha-local-segura",
+            "enrollment_token": "wrong" * 8,
+        },
+    )
+    assert response.status_code == 401
+    assert "qr_code_data_url" not in response.json()
+
+
 def test_login_rate_limit_blocks_repeated_failures(client: TestClient) -> None:
     from app.main import app
 

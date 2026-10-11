@@ -52,6 +52,26 @@ class LoginRequest(Credentials):
     totp_code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
 
+class LoginCheckResponse(BaseModel):
+    mfa_required: bool
+    mfa_enrolled: bool
+    mfa_enrollment_available: bool
+
+
+class MFAEnrollmentRequest(Credentials):
+    enrollment_token: str = Field(min_length=32, max_length=256)
+
+
+class MFAEnrollmentConfirmRequest(MFAEnrollmentRequest):
+    totp_code: str = Field(pattern=r"^\d{6}$")
+
+
+class MFAEnrollmentResponse(BaseModel):
+    qr_code_data_url: str
+    manual_key: str
+    expires_at: datetime
+
+
 class AccountCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     type: Literal["CHECKING", "SAVINGS", "CASH", "OTHER"]

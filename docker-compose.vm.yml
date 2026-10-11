@@ -14,6 +14,7 @@ services:
       SESSION_TTL_HOURS: "24"
       APP_COMPONENT: api
       INITIAL_SETUP_TOKEN: ${INITIAL_SETUP_TOKEN:-}
+      MFA_ENROLLMENT_TOKEN: ${MFA_ENROLLMENT_TOKEN:-}
       OWNER_TOTP_SECRET: ${OWNER_TOTP_SECRET:?Configure OWNER_TOTP_SECRET no .env}
     volumes: !override
       - chatgpt_auth_data:/home/app/.config/sophia

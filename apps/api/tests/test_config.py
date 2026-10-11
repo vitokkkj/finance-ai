@@ -26,3 +26,16 @@ def test_production_api_requires_owner_totp() -> None:
             database_url="sqlite+pysqlite:///:memory:",
             session_cookie_secure=True,
         )
+
+
+def test_production_api_rejects_short_mfa_enrollment_token() -> None:
+    with pytest.raises(ValidationError, match="MFA_ENROLLMENT_TOKEN"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            app_component="api",
+            database_url="sqlite+pysqlite:///:memory:",
+            session_cookie_secure=True,
+            owner_totp_secret="A" * 32,
+            mfa_enrollment_token="too-short",
+        )
