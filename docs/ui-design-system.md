@@ -17,6 +17,8 @@ Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawe
 
 A Visão Geral destaca o saldo de contas correntes. Poupança e outros tipos aparecem em grupos separados, com saldo realizado e projetado. A área “A pagar” separa atrasados, próximos sete dias e restante do mês; receitas previstas e projeção não se confundem com valores realizados. Conversas recentes recebem um título curto: o provedor sugere o título quando o modelo atende a primeira mensagem, e o parser local usa um resumo determinístico quando já consegue interpretá-la. A sugestão do modelo usa uma chamada breve da mesma conexão ChatGPT e conta no limite de uso do Plus, sem cobrança da API. O usuário pode renomear ou arquivar conversas pela sidebar; títulos longos ficam em uma linha e são truncados visualmente.
 
+O sino **Avisos** no cabeçalho abre uma lista de pagamentos atrasados e vencimentos dos próximos sete dias, com valor, data e conta ou cartão. A contagem do sino reflete avisos ativos, não itens não lidos; pagar ou cancelar uma obrigação remove o aviso quando os dados financeiros são atualizados. A lista reaproveita a previsão da API, atualizada ao abrir, ao retornar à aba e em intervalos de cinco minutos. No celular, o painel se adapta à largura da tela. Estes são avisos dentro da SophIA; push e e-mail ainda não estão incluídos.
+
 ## Componentes de resposta
 
 Respostas estruturadas usam um conjunto compacto de componentes para resumo financeiro, categorias, lançamentos, transferências, saldo de contas, cartões, faturas, confirmação, erro e sucesso. As informações são apresentadas a partir dos dados estruturados enviados pela API; o frontend não recalcula totais nem altera a semântica de transferências, compras ou pagamentos de fatura.

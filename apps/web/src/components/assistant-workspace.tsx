@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import Image from "next/image";
 import {
   Archive,
@@ -8,8 +8,11 @@ import {
   ArrowLeftRight,
   ArrowUp,
   ArrowUpRight,
+  Bell,
+  BellRing,
   ChartNoAxesCombined,
   CreditCard,
+  TriangleAlert,
   ImagePlus,
   Landmark,
   LayoutDashboard,
@@ -242,6 +245,125 @@ function displayDate(value: string): string {
   }).format(parsed);
 }
 
+function daysBetweenDates(from: string, to: string): number {
+  const fromDay = Date.parse(`${from.slice(0, 10)}T00:00:00Z`);
+  const toDay = Date.parse(`${to.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(fromDay) || Number.isNaN(toDay)) return 0;
+  return Math.round((toDay - fromDay) / 86_400_000);
+}
+
+function dueDateLabel(item: Dashboard["forecast_items"][number], today: string): string {
+  const days = daysBetweenDates(today, item.due_date);
+  if (days < 0) return `Atrasado há ${Math.abs(days)} ${Math.abs(days) === 1 ? "dia" : "dias"}`;
+  if (days === 0) return "Vence hoje";
+  if (days === 1) return "Vence amanhã";
+  return `Vence em ${days} dias`;
+}
+
+function DueNotifications({
+  dashboard,
+  openForecast,
+  refreshDashboard,
+}: {
+  dashboard: Dashboard | null;
+  openForecast: () => void;
+  refreshDashboard: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const alertItems = dashboard?.forecast_items.filter((item) =>
+    item.type === "EXPENSE" && (item.status === "OVERDUE" || item.status === "DUE_SOON"),
+  ) ?? [];
+  const overdueItems = alertItems.filter((item) => item.status === "OVERDUE");
+  const upcomingItems = alertItems.filter((item) => item.status === "DUE_SOON");
+  const overdueCount = overdueItems.length;
+  const laterCount = dashboard?.forecast_items.filter((item) =>
+    item.type === "EXPENSE" && item.status === "PLANNED",
+  ).length ?? 0;
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (event.target instanceof Node && !containerRef.current?.contains(event.target)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  const BellIcon = alertItems.length > 0 ? BellRing : Bell;
+  const renderItems = (items: Dashboard["forecast_items"]) => items.map((item) => {
+    const overdue = item.status === "OVERDUE";
+    return (
+      <button className={`notification-item${overdue ? " urgent" : ""}`} key={item.id} onClick={() => { setOpen(false); openForecast(); }} type="button">
+        <span className={`notification-icon${overdue ? " urgent" : ""}`} aria-hidden="true">
+          {overdue ? <TriangleAlert size={17} /> : <Bell size={16} />}
+        </span>
+        <span className="notification-copy">
+          <strong>{item.description}</strong>
+          <small>{dueDateLabel(item, dashboard?.as_of ?? "")} · {displayDate(item.due_date)}{item.account_name ? ` · ${item.account_name}` : item.card_name ? ` · ${item.card_name}` : ""}</small>
+        </span>
+        <b className="notification-amount">{formatCurrency(item.amount)}</b>
+      </button>
+    );
+  });
+
+  return (
+    <div className="assistant-notifications" ref={containerRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label={alertItems.length ? `Avisos: ${alertItems.length} vencimento(s) próximo(s) ou em atraso` : "Abrir avisos"}
+        className="assistant-notifications-toggle"
+        onClick={() => {
+          setOpen((current) => !current);
+          if (!open) refreshDashboard();
+        }}
+        title="Avisos de vencimentos"
+        type="button"
+      >
+        <BellIcon aria-hidden="true" size={17} strokeWidth={1.9} />
+        <span>Avisos</span>
+        {alertItems.length > 0 && <b className={overdueCount ? "notification-count urgent" : "notification-count"}>{alertItems.length > 9 ? "9+" : alertItems.length}</b>}
+      </button>
+      {open && (
+        <section aria-label="Avisos de vencimentos" className="assistant-notifications-panel" role="dialog">
+          <header className="notifications-heading">
+            <div>
+              <p className="eyebrow">Acompanhe seus compromissos</p>
+              <h2>Avisos</h2>
+            </div>
+            <span className={overdueCount ? "notifications-summary urgent" : "notifications-summary"}>
+              {alertItems.length ? `${alertItems.length} ${alertItems.length === 1 ? "aviso" : "avisos"}` : "Tudo em dia"}
+            </span>
+          </header>
+          {!dashboard ? (
+            <p className="notifications-empty">Carregando seus vencimentos…</p>
+          ) : alertItems.length ? (
+            <>
+              {overdueItems.length > 0 && <><p className="notifications-group-label urgent">Em atraso</p><div className="notifications-list">{renderItems(overdueItems)}</div></>}
+              {upcomingItems.length > 0 && <><p className="notifications-group-label">Vencem nos próximos 7 dias</p><div className="notifications-list">{renderItems(upcomingItems)}</div></>}
+              {laterCount > 0 && <p className="notifications-later">Mais {laterCount} {laterCount === 1 ? "pagamento previsto" : "pagamentos previstos"} para depois dos próximos 7 dias.</p>}
+            </>
+          ) : (
+            <p className="notifications-empty">Você não tem pagamentos atrasados ou vencendo nos próximos 7 dias.</p>
+          )}
+          <footer className="notifications-footer">
+            <span>Atualizado em {dashboard ? displayDate(dashboard.as_of) : "—"}</span>
+            <button onClick={openForecast} type="button">Ver previsão completa</button>
+          </footer>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function displayMonth(value: string): string {
   const parsed = new Date(`${value.slice(0, 10)}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return "Este mês";
@@ -441,6 +563,18 @@ export function AssistantWorkspace({
     void loadDashboard();
     return () => {
       mounted = false;
+    };
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadDashboard();
+    };
+    const interval = window.setInterval(refreshWhenVisible, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [loadDashboard]);
 
@@ -744,7 +878,7 @@ export function AssistantWorkspace({
     void prepareChatImages(imageItems.map((item) => item.getAsFile()).filter((file): file is File => file !== null));
   }
 
-  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void sendMessage(draft, attachedImages.map((image) => image.dataUrl));
@@ -875,6 +1009,15 @@ export function AssistantWorkspace({
       if (item.section) setFinanceSection(item.section);
       setMobileMenuOpen(false);
     }
+  }
+
+  function openForecast() {
+    setError("");
+    setView("finance");
+    setFinanceSection("overview");
+    setMobileMenuOpen(false);
+    setContextPanelOpen(false);
+    void loadDashboard();
   }
 
   function openAccount() {
@@ -1108,6 +1251,7 @@ export function AssistantWorkspace({
             <span>{view === "chat" ? "SophIA · sua assistente financeira" : view === "account" ? "Perfil, segurança e sessões" : "Dados calculados pelo sistema"}</span>
           </div>
           <div className="assistant-topbar-actions">
+            <DueNotifications dashboard={dashboard} openForecast={openForecast} refreshDashboard={() => void loadDashboard()} />
             {view === "chat" && contextPanelAvailable && (
               <button
                 aria-expanded={contextPanelOpen}

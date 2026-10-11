@@ -63,6 +63,13 @@ Parcelamentos, financiamentos, investimentos reais, reembolsos, previsões de lo
 - Saldo projetado por tipo parte do saldo real calculado e aplica entradas/saídas previstas até o fim do mês, inclusive atrasos que continuam sem pagamento. Uma conta corrente incompleta torna indisponível só a projeção do grupo `CHECKING`; uma poupança incompleta não muda o saldo de contas correntes.
 - A previsão é uma estimativa, não uma garantia de caixa; ela não considera movimentos futuros não cadastrados e não afeta valores realizados.
 
+## Avisos de vencimento na aplicação
+
+- O centro de avisos deriva os itens do mesmo resumo financeiro usado pela área “A pagar”; não persiste cópias nem totais de alertas.
+- Mostra despesas vencidas e despesas que vencem hoje ou nos seis dias seguintes. Receitas previstas e despesas posteriores aos próximos sete dias permanecem na previsão mensal, sem badge de urgência.
+- A contagem representa avisos ativos. Ao registrar pagamento, cancelar ou alterar uma obrigação, o item deixa de aparecer conforme o resumo é atualizado.
+- A interface busca novamente o resumo ao abrir o centro, ao voltar à aba e a cada cinco minutos enquanto a aplicação estiver visível. A funcionalidade depende de a SophIA estar aberta e conectada; push, e-mail e notificações de sistema não fazem parte deste fluxo.
+
 ## Anexos de imagem no chat
 
 - Uma mensagem pode levar até quatro imagens PNG, JPEG ou WebP. O cliente reduz as imagens antes do envio e o servidor normaliza cada conteúdo antes de encaminhá-lo ao provedor.
