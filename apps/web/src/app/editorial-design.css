@@ -3747,6 +3747,12 @@ textarea:focus-visible {
 
 .assistant-sidebar .history-row {
   align-items: flex-start;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.assistant-sidebar {
+  color: var(--color-sidebar-text);
 }
 
 .assistant-sidebar .history-marker {
