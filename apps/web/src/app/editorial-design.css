@@ -4320,7 +4320,10 @@ textarea:focus-visible {
   justify-content: center;
 }
 
-.sidebar-collapsed .assistant-sidebar-toggle > span,
+.sidebar-collapsed .assistant-sidebar-toggle > span {
+  display: none;
+}
+
 .sidebar-collapsed .assistant-new-chat {
   margin-top: 12px;
   margin-bottom: 8px;
