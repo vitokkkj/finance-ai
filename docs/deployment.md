@@ -13,7 +13,7 @@ O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokk
 ## Requisitos
 
 - Docker Compose V2 `2.24.4` ou superior, por causa de `!reset` e `!override` usados para remover portas e mounts de desenvolvimento.
-- Zona `ruralflow.com.br` gerenciada pela Cloudflare e o túnel remoto `ruralflow-vm` existente.
+- Zona `ruralflow.com.br` gerenciada pela Cloudflare e um túnel dedicado chamado `finance-sophia`. Não reutilize um túnel que publique outros domínios.
 - Conectividade de saída da VM para a Cloudflare na porta `7844` (UDP ou TCP). Não é necessário abrir portas de entrada para a internet.
 - Token do túnel salvo em arquivo local privado no servidor. `cloudflared` executa como usuário não-root e lê `/run/secrets/cloudflare_tunnel_token`; o token não é colocado na linha de comando, no `.env` nem no Git.
 - Segredo TOTP do proprietário em `OWNER_TOTP_SECRET`, no `.env` privado da VM. Gere-o em um terminal confiável com `python3 scripts/generate-owner-totp.py`, cadastre a chave em um autenticador e mantenha a chave fora do banco e do repositório.
@@ -24,7 +24,7 @@ Não reutilize valores de desenvolvimento do `.env.example` em produção. Não 
 
 ## Rota Cloudflare
 
-No túnel `ruralflow-vm`, a rota publicada deve usar:
+No túnel dedicado `finance-sophia`, a rota publicada deve usar:
 
 - Hostname público: `finance.ruralflow.com.br`
 - Serviço interno: `http://caddy:80`
@@ -36,13 +36,13 @@ O hostname público permite que qualquer visitante alcance a tela de login. O ac
 
 ## Preparar a VM e publicar
 
-1. No `.env` privado da VM, defina `APP_DOMAIN=finance.ruralflow.com.br`, `OWNER_TOTP_SECRET`, `INITIAL_SETUP_TOKEN`, credenciais PostgreSQL e `CLOUDFLARE_TUNNEL_TOKEN_FILE=./secrets/cloudflare-tunnel-token`.
-2. Crie o diretório `secrets` como `root` com permissão `0700` e o arquivo `cloudflare-tunnel-token` como `root:root`, permissão `0644`. A pasta não é rastreada pelo Git; o arquivo é montado somente no container `cloudflared` como segredo.
-3. Configure a rota publicada no túnel conforme a seção anterior. Obtenha o token de conector pelo painel Cloudflare e instale-o diretamente no arquivo secreto da VM por um canal administrativo confiável; não o envie pelo chat nem o grave em histórico de shell.
+1. No `.env` privado da VM, defina `APP_DOMAIN=finance.ruralflow.com.br`, `OWNER_TOTP_SECRET`, credenciais PostgreSQL e `CLOUDFLARE_TUNNEL_TOKEN_FILE=./secrets/cloudflare-tunnel-token`. Configure `INITIAL_SETUP_TOKEN` somente se ainda não houver uma conta; remova-o depois do bootstrap.
+2. Crie o diretório `secrets` como `root` com permissão `0700` e o arquivo `cloudflare-tunnel-token` como `root:root`, permissão `0644`. A pasta não é rastreada pelo Git e impede leitura por usuários locais sem privilégio; o arquivo precisa ser legível pelo processo não-root do container `cloudflared`.
+3. Crie o túnel dedicado `finance-sophia` no painel Cloudflare e instale o token desse conector diretamente no arquivo secreto da VM por um canal administrativo confiável; não o envie pelo chat nem o grave em histórico de shell. Não publique a rota ainda. Não reutilize o túnel `ruralflow-vm`, que já publica `ruralflow.com.br` para outro serviço.
 4. Valide a configuração sem imprimir valores interpolados: `docker compose -f docker-compose.yml -f docker-compose.vm.yml config -q`.
-5. Inicie os serviços: `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build`.
-6. Confirme que `cloudflared` está `Healthy` no painel e acesse `https://finance.ruralflow.com.br`. Verifique os cabeçalhos HSTS, proteção contra framing, MIME sniffing e permissões do navegador. Cookies usam o prefixo `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict` e validade máxima de 24 horas.
-7. Na tela inicial, crie a conta com e-mail, senha, token temporário e código TOTP. A criação não gera sessão; entre novamente com senha e TOTP. Após confirmar o login, remova `INITIAL_SETUP_TOKEN` do `.env` e recrie a API para retirar o segredo do processo. A rota de bootstrap continua fechada porque a conta já existe.
+5. Inicie os serviços: `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build`. Confirme que os seis serviços estão em execução e que o Compose não publica portas no host.
+6. Só depois da validação interna, publique no túnel dedicado a rota `finance.ruralflow.com.br` → `http://caddy:80`, com fallback `http_status:404`.
+7. Confirme que o conector `cloudflared` está conectado no painel e acesse `https://finance.ruralflow.com.br`. Verifique os cabeçalhos HSTS, proteção contra framing, MIME sniffing e permissões do navegador. Cookies usam o prefixo `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict` e validade máxima de 24 horas. A conta existente exige novo login com senha e TOTP; a migration `0011_public_auth_hardening` invalida sessões antigas, mas preserva os dados financeiros.
 
 A migration `0011_public_auth_hardening` revoga sessões antigas para exigir novo login. A alteração não remove dados financeiros.
 
