@@ -44,6 +44,18 @@ type RecurrenceOccurrence = {
   notes: string | null;
   status: OccurrenceStatus;
 };
+type PlannedCommitment = {
+  id: string;
+  transaction_id: string | null;
+  account_id: string;
+  category_id: string;
+  type: MovementType;
+  description: string;
+  amount: string;
+  due_date: string;
+  notes: string | null;
+  status: "PLANNED" | "OVERDUE" | "PAID" | "CANCELLED";
+};
 type RuleForm = {
   account_id: string;
   category_id: string;
@@ -57,6 +69,7 @@ type RuleForm = {
   notes: string;
 };
 type OccurrenceForm = { description: string; amount: string; notes: string; scope: Scope };
+type CommitmentForm = { account_id: string; category_id: string; type: MovementType; description: string; amount: string; due_date: string; notes: string };
 type Notice = { kind: "success" | "error"; message: string } | null;
 
 function financialDate(): string {
@@ -90,6 +103,10 @@ function emptyRule(): RuleForm {
   };
 }
 
+function emptyCommitment(): CommitmentForm {
+  return { account_id: "", category_id: "", type: "EXPENSE", description: "", amount: "", due_date: financialDate(), notes: "" };
+}
+
 function frequencyLabel(frequency: Frequency, interval: number): string {
   const labels: Record<Frequency, [string, string]> = {
     DAILY: ["dia", "dias"],
@@ -113,9 +130,10 @@ function statusLabel(status: OccurrenceStatus): string {
   return labels[status];
 }
 
-export function RecurrenceWorkspace() {
+export function RecurrenceWorkspace({ onFinanceChanged }: { onFinanceChanged?: () => void | Promise<void> }) {
   const [rules, setRules] = useState<RecurrenceRule[]>([]);
   const [occurrences, setOccurrences] = useState<RecurrenceOccurrence[]>([]);
+  const [commitments, setCommitments] = useState<PlannedCommitment[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,18 +150,23 @@ export function RecurrenceWorkspace() {
     scope: "THIS",
   });
   const [showHistory, setShowHistory] = useState(false);
+  const [commitmentFormOpen, setCommitmentFormOpen] = useState(false);
+  const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(null);
+  const [commitmentForm, setCommitmentForm] = useState<CommitmentForm>(emptyCommitment);
 
   const loadData = useCallback(async (showLoader = true) => {
     if (showLoader) setLoading(true);
     try {
-      const [ruleRows, occurrenceRows, accountRows, categoryRows] = await Promise.all([
+      const [ruleRows, occurrenceRows, commitmentRows, accountRows, categoryRows] = await Promise.all([
         apiRequest<RecurrenceRule[]>("/api/recurrences"),
         apiRequest<RecurrenceOccurrence[]>("/api/recurrences/occurrences"),
+        apiRequest<PlannedCommitment[]>("/api/commitments"),
         apiRequest<Account[]>("/api/accounts?include_archived=true"),
         apiRequest<Category[]>("/api/categories?include_archived=true"),
       ]);
       setRules(ruleRows);
       setOccurrences(occurrenceRows);
+      setCommitments(commitmentRows);
       setAccounts(accountRows);
       setCategories(categoryRows);
     } catch (error) {
@@ -168,6 +191,9 @@ export function RecurrenceWorkspace() {
   const currentCategories = categories.filter(
     (category) => !category.is_archived && category.type === ruleForm.type,
   );
+  const currentCommitmentCategories = categories.filter(
+    (category) => !category.is_archived && category.type === commitmentForm.type,
+  );
   const visibleOccurrences = occurrences
     .filter((item) => showHistory || !["PAID", "SKIPPED", "CANCELLED"].includes(item.status))
     .slice(0, showHistory ? 60 : 18);
@@ -184,6 +210,58 @@ export function RecurrenceWorkspace() {
     });
     setRuleFormOpen(true);
     setNotice(null);
+  }
+
+  function openNewCommitment() {
+    const expenseCategory = categories.find((category) => !category.is_archived && category.type === "EXPENSE");
+    setEditingCommitmentId(null);
+    setCommitmentForm({ ...emptyCommitment(), account_id: activeAccounts[0]?.id ?? "", category_id: expenseCategory?.id ?? "" });
+    setCommitmentFormOpen(true);
+    setNotice(null);
+  }
+
+  function openCommitmentEdit(item: PlannedCommitment) {
+    setEditingCommitmentId(item.id);
+    setCommitmentForm({ account_id: item.account_id, category_id: item.category_id, type: item.type, description: item.description, amount: item.amount.replace(".", ","), due_date: item.due_date, notes: item.notes ?? "" });
+    setCommitmentFormOpen(true);
+    setNotice(null);
+  }
+
+  async function saveCommitment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      const payload = { ...commitmentForm, amount: toDecimalString(commitmentForm.amount), notes: commitmentForm.notes.trim() || null };
+      const path = editingCommitmentId ? `/api/commitments/${editingCommitmentId}` : "/api/commitments";
+      await apiRequest<PlannedCommitment>(path, { method: editingCommitmentId ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      setCommitmentFormOpen(false);
+      setEditingCommitmentId(null);
+      setNotice({ kind: "success", message: editingCommitmentId ? "Pagamento previsto atualizado." : "Pagamento previsto cadastrado." });
+      await loadData(false);
+      void onFinanceChanged?.();
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível salvar o pagamento previsto." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeCommitment(item: PlannedCommitment, action: "pay" | "cancel") {
+    if (action === "cancel" && !window.confirm(`Cancelar “${item.description}”?`)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const updated = await apiRequest<PlannedCommitment>(`/api/commitments/${item.id}/${action}`, { method: "POST" });
+      setCommitments((rows) => rows.filter((row) => row.id !== item.id || action !== "cancel").map((row) => row.id === updated.id ? updated : row));
+      setNotice({ kind: "success", message: action === "pay" ? "Pagamento registrado nos lançamentos de hoje." : "Pagamento previsto cancelado." });
+      await loadData(false);
+      void onFinanceChanged?.();
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível atualizar o pagamento previsto." });
+    } finally {
+      setBusy(false);
+    }
   }
 
   function openRuleEdit(rule: RecurrenceRule) {
@@ -225,6 +303,7 @@ export function RecurrenceWorkspace() {
       setEditingRuleId(null);
       setNotice({ kind: "success", message: editingRuleId ? "Recorrência atualizada." : "Recorrência criada." });
       await loadData(false);
+      void onFinanceChanged?.();
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível salvar." });
     } finally {
@@ -240,6 +319,7 @@ export function RecurrenceWorkspace() {
       await apiRequest<RecurrenceRule>(`/api/recurrences/${rule.id}/cancel`, { method: "POST" });
       setNotice({ kind: "success", message: "Recorrência encerrada. O histórico foi preservado." });
       await loadData(false);
+      void onFinanceChanged?.();
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível encerrar." });
     } finally {
@@ -260,6 +340,7 @@ export function RecurrenceWorkspace() {
         message: action === "pay" ? "Pagamento registrado nos lançamentos de hoje." : "Ocorrência ignorada.",
       });
       setOccurrences((rows) => rows.map((row) => (row.id === result.id ? result : row)));
+      void onFinanceChanged?.();
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível atualizar." });
     } finally {
@@ -305,6 +386,7 @@ export function RecurrenceWorkspace() {
       setEditingOccurrence(null);
       setNotice({ kind: "success", message: "Ocorrência atualizada." });
       await loadData(false);
+      void onFinanceChanged?.();
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível editar." });
     } finally {
@@ -362,6 +444,23 @@ export function RecurrenceWorkspace() {
         </form>
       )}
 
+      {commitmentFormOpen && (
+        <form className="editor-form recurrence-form" onSubmit={saveCommitment}>
+          <div className="editor-heading"><div><p className="eyebrow">Previsão sem recorrência</p><h3>{editingCommitmentId ? "Editar pagamento previsto" : "Novo pagamento previsto"}</h3></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setCommitmentFormOpen(false)} type="button"><X size={17} /></button></div>
+          <div className="form-grid recurrence-form-grid">
+            <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setCommitmentForm({ ...commitmentForm, description: event.target.value })} required value={commitmentForm.description} /></label>
+            <label className="field-label">Tipo<select onChange={(event) => setCommitmentForm({ ...commitmentForm, type: event.target.value as MovementType, category_id: "" })} value={commitmentForm.type}><option value="EXPENSE">Despesa</option><option value="INCOME">Receita prevista</option></select></label>
+            <div className="field-label"><label htmlFor="planned-commitment-amount">Valor previsto</label><CurrencyInput id="planned-commitment-amount" onChange={(value) => setCommitmentForm({ ...commitmentForm, amount: value })} placeholder="0,00" required value={commitmentForm.amount} /></div>
+            <div className="field-label"><label htmlFor="planned-commitment-date">Vencimento</label><CalendarDateInput id="planned-commitment-date" onChange={(value) => setCommitmentForm({ ...commitmentForm, due_date: value })} required value={commitmentForm.due_date} /></div>
+            <label className="field-label">Conta<select onChange={(event) => setCommitmentForm({ ...commitmentForm, account_id: event.target.value })} required value={commitmentForm.account_id}><option value="">Selecione</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+            <label className="field-label">Categoria<select onChange={(event) => setCommitmentForm({ ...commitmentForm, category_id: event.target.value })} required value={commitmentForm.category_id}><option value="">Selecione</option>{currentCommitmentCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <label className="field-label recurrence-notes">Observações<textarea maxLength={2000} onChange={(event) => setCommitmentForm({ ...commitmentForm, notes: event.target.value })} rows={2} value={commitmentForm.notes} /></label>
+          </div>
+          {(activeAccounts.length === 0 || currentCommitmentCategories.length === 0) && <p className="form-note">Cadastre uma conta ativa e uma categoria do tipo escolhido.</p>}
+          <div className="recurrence-form-actions"><button className="secondary-button compact-button" onClick={() => setCommitmentFormOpen(false)} type="button">Cancelar</button><button className="primary-button compact-button" disabled={busy || activeAccounts.length === 0 || currentCommitmentCategories.length === 0} type="submit">{busy ? "Salvando…" : "Salvar previsão"}</button></div>
+        </form>
+      )}
+
       {loading ? (
         <div className="finance-loading" role="status"><BrandMark className="loading-mark" size={30} />Carregando recorrências…</div>
       ) : (
@@ -389,6 +488,15 @@ export function RecurrenceWorkspace() {
                 })}
               </div>
             )}
+          </section>
+
+          <section className="surface-card data-card recurrence-occurrences-card">
+            <div className="surface-heading"><div><p className="eyebrow">Contas avulsas</p><h2>Pagamentos previstos</h2><p className="account-directory-copy">Cadastre uma conta ou entrada futura sem criar um lançamento realizado. Ao pagar ou receber, a SophIA registra o movimento uma única vez.</p></div><button className="primary-button compact-button" onClick={openNewCommitment} type="button"><Plus aria-hidden="true" size={16} /> Novo compromisso</button></div>
+            {commitments.length === 0 ? <div className="recurrence-empty"><CalendarClock aria-hidden="true" size={22} /><div><strong>Nenhum pagamento avulso cadastrado</strong><p>Use esta área para despesas pontuais com vencimento, além das faturas e recorrências.</p></div></div> : <div className="recurrence-occurrence-list">{commitments.map((item) => {
+              const account = accounts.find((row) => row.id === item.account_id)?.name ?? "Conta arquivada";
+              const category = categories.find((row) => row.id === item.category_id)?.name ?? "Categoria arquivada";
+              return <article className="recurrence-occurrence-row" key={item.id}><time className="recurrence-date" dateTime={item.due_date}>{displayDate(item.due_date)}</time><div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account} · {category} · {item.type === "INCOME" ? "Receita" : "Despesa"}</span></div><strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong><span className={`recurrence-status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="recurrence-actions"><button aria-label={`Editar ${item.description}`} className="table-action" disabled={busy} onClick={() => openCommitmentEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeCommitment(item, "pay")} type="button"><Check size={15} /><span>{item.type === "INCOME" ? "Marcar como recebido" : "Marcar como pago"}</span></button><button aria-label={`Cancelar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeCommitment(item, "cancel")} type="button">Cancelar</button></div></article>;
+            })}</div>}
           </section>
 
           <section className="surface-card data-card recurrence-occurrences-card">

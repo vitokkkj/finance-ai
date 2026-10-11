@@ -58,7 +58,7 @@ from app.models import AIConversation, AIMemory, AIMessage, AIToolCall, User
 router = APIRouter(prefix="/api/ai", tags=["assistente"])
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 TITLE_REFRESH_INTERVAL = 3
-MAX_MESSAGE_BODY_BYTES = 4_000_000
+MAX_MESSAGE_BODY_BYTES = 12_500_000
 AI_MESSAGE_RATE_LIMIT = 20
 AI_MESSAGE_RATE_WINDOW_SECONDS = 60
 MAX_CONCURRENT_AI_STREAMS = 3
@@ -182,9 +182,7 @@ def _conversation_messages(
     ]
 
 
-def _conversation_title_context(
-    db: Session, user: User, conversation: AIConversation
-) -> str:
+def _conversation_title_context(db: Session, user: User, conversation: AIConversation) -> str:
     recent_messages = db.scalars(
         select(AIMessage.content)
         .where(
@@ -308,8 +306,7 @@ async def send_message(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=(
-                "Você enviou muitas mensagens em pouco tempo. "
-                "Aguarde um minuto e tente novamente."
+                "Você enviou muitas mensagens em pouco tempo. Aguarde um minuto e tente novamente."
             ),
             headers={"Retry-After": str(AI_MESSAGE_RATE_WINDOW_SECONDS)},
         )
@@ -338,29 +335,34 @@ async def send_message(
         ) from error
 
     conversation = _get_conversation(db, user, conversation_id)
-    image_data_url: str | None = None
-    if payload.image_data_url is not None:
+    image_data_urls: list[str] = []
+    if payload.image_data_urls:
         if settings.ai_provider != "chatgpt_plan":
             raise HTTPException(
                 status_code=422,
-                detail="Análise de imagens requer o ChatGPT conectado; a imagem não foi enviada.",
+                detail=(
+                    "Análise de imagens requer o ChatGPT conectado; "
+                    "as imagens não foram enviadas."
+                ),
             )
         try:
-            image_data_url = normalize_chat_image(payload.image_data_url)
+            image_data_urls = [normalize_chat_image(image) for image in payload.image_data_urls]
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     message_content = payload.content or (
-        "Analise esta imagem financeira e sugira o que posso registrar."
+        "Analise estas imagens financeiras em conjunto e sugira o que posso registrar."
     )
-    previous_user_message_count = db.scalar(
-        select(func.count(AIMessage.id))
-        .where(
-            AIMessage.user_id == user.id,
-            AIMessage.conversation_id == conversation.id,
-            AIMessage.role == "USER",
+    previous_user_message_count = (
+        db.scalar(
+            select(func.count(AIMessage.id)).where(
+                AIMessage.user_id == user.id,
+                AIMessage.conversation_id == conversation.id,
+                AIMessage.role == "USER",
+            )
         )
-    ) or 0
+        or 0
+    )
     user_message_number = previous_user_message_count + 1
     generate_title = not conversation.title_is_custom and (
         user_message_number == 1
@@ -373,8 +375,8 @@ async def send_message(
         role="USER",
         content=message_content,
         structured_content=(
-            [{"type": "image_attachment", "data": {"stored": False}}]
-            if image_data_url is not None
+            [{"type": "image_attachment", "data": {"stored": False}} for _ in image_data_urls]
+            if image_data_urls
             else None
         ),
         created_at=datetime.now(UTC),
@@ -403,7 +405,7 @@ async def send_message(
     async def events() -> AsyncIterator[str]:
         try:
             async for item in stream_assistant_reply(
-                db, user, conversation, message, provider, image_data_url=image_data_url
+                db, user, conversation, message, provider, image_data_urls=image_data_urls
             ):
                 yield item
             if not generate_title:
@@ -425,10 +427,12 @@ async def send_message(
             ):
                 return
             try:
-                generated_title, title_input_tokens, title_output_tokens = (
-                    await suggest_conversation_title(
-                        provider, _conversation_title_context(db, user, conversation)
-                    )
+                (
+                    generated_title,
+                    title_input_tokens,
+                    title_output_tokens,
+                ) = await suggest_conversation_title(
+                    provider, _conversation_title_context(db, user, conversation)
                 )
             except AIProviderError:
                 return
@@ -447,12 +451,12 @@ async def send_message(
             conversation.updated_at = datetime.now(UTC)
             if title_input_tokens is not None:
                 assistant_message.input_tokens = (
-                    (assistant_message.input_tokens or 0) + title_input_tokens
-                )
+                    assistant_message.input_tokens or 0
+                ) + title_input_tokens
             if title_output_tokens is not None:
                 assistant_message.output_tokens = (
-                    (assistant_message.output_tokens or 0) + title_output_tokens
-                )
+                    assistant_message.output_tokens or 0
+                ) + title_output_tokens
             try:
                 db.commit()
             except SQLAlchemyError:

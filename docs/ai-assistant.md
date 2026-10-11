@@ -2,7 +2,7 @@
 
 ## Escopo
 
-O assistente é a entrada principal da aplicação. Ele mantém conversas privadas e pode consultar ou registrar operações financeiras pela API. O chat pode agendar novos compromissos recorrentes com prévia e confirmação; consulta, edição, cancelamento e marcação de pagamento continuam disponíveis na área financeira existente. Integração Pluggy, previsões, embeddings, agentes, Telegram, notificações push e outros provedores de mensagem permanecem fora do escopo atual.
+O assistente é a entrada principal da aplicação. Ele mantém conversas privadas e pode consultar ou registrar operações financeiras pela API. O chat pode agendar novos compromissos recorrentes com prévia e confirmação; previsão mensal e compromissos avulsos são gerenciados na área financeira. Integração Pluggy, previsões de longo prazo, orçamento, embeddings, agentes, Telegram, notificações push e outros provedores de mensagem permanecem fora do escopo atual.
 
 O provider padrão usa OAuth Sign in with ChatGPT e chamadas a ferramentas validadas pela API. O histórico próprio da SophIA fica no PostgreSQL; o OAuth não dá acesso às conversas ou memórias do ChatGPT. O adapter fica em `apps/api/app/ai_provider.py`; o armazenamento e a renovação OAuth ficam em `apps/api/app/chatgpt_plan.py`; conversas e o ciclo de chamadas ficam em `ai.py` e `ai_chat.py`; as ferramentas autorizadas estão em `ai_tools.py`. Não se usa chave da API nem há fallback para cobrança da API.
 
@@ -19,7 +19,9 @@ O modelo não acessa SQL e não recebe `user_id`. A API injeta o usuário autent
 - resumo financeiro do dashboard.
 - compromissos recorrentes e ocorrências futuras.
 
-Uma conta sem saldo inicial ou data-base conhecidos retorna `balance: null`. A SophIA deve informar que o saldo daquela conta ainda é desconhecido, sem tratá-lo como zero. Se qualquer conta ativa estiver incompleta, o saldo consolidado também não está disponível.
+Uma conta sem saldo inicial ou data-base conhecidos retorna `balance: null`. A SophIA deve informar que o saldo daquela conta ainda é desconhecido, sem tratá-lo como zero. O resumo principal inclui somente contas correntes; saldos de poupança, dinheiro e outros tipos ficam separados. A incompletude de uma conta afeta apenas o total daquele tipo.
+
+`get_dashboard_summary` também consulta “A pagar” no mês financeiro atual: compromissos recorrentes, itens avulsos e faturas abertas, com totais vencidos, dos próximos sete dias e do restante do mês. Receitas previstas e saldos projetados são apresentados à parte dos valores realizados. Faturas sem conta pagadora associada não são atribuídas a uma conta projetada.
 
 As ferramentas de escrita registram despesas ou receitas comuns já ocorridas, transferências próprias, compras já feitas no cartão, categorias, totais de faturas preexistentes e compromissos futuros recorrentes. Para importar faturas em lote, a SophIA usa o total informado por mês, desconta compras daquele ciclo que já estejam cadastradas e registra somente a diferença como dívida inicial. Isso evita duplicar uma compra e não cria despesas históricas. Toda importação de faturas exige confirmação explícita; o resumo mostra os meses, compras já lançadas e saldo inicial que será gravado. Transferências e compras são eventos históricos manuais; não enviam instruções ao banco. Quando uma ferramenta falha, o backend substitui o rascunho do modelo por uma resposta de erro determinística.
 
@@ -33,7 +35,7 @@ Todos os valores usados nos dados estruturados vêm da API e do Finance Engine. 
 
 ## Conversas, memória e privacidade
 
-Uma mensagem pode incluir uma foto JPEG, PNG ou WebP, selecionada pelo botão de anexo ou colada no campo do chat com Ctrl+V/⌘+V. O navegador reduz a imagem para até 2.048 px e a API valida e reencoda o conteúdo; a foto só é enviada ao provedor configurado quando a mensagem é enviada, sem fallback automático. Com AI_PROVIDER=chatgpt_plan, a imagem é enviada ao ChatGPT conectado. A SophIA grava no histórico apenas uma indicação de que havia uma imagem; os bytes e metadados não são persistidos nem reutilizados nos turnos seguintes. A interface avisa sobre o envio antes da análise.
+Uma mensagem pode incluir até quatro imagens JPEG, PNG ou WebP, selecionadas juntas pelo botão de anexo ou coladas no campo do chat com Ctrl+V/⌘+V. O navegador reduz as imagens para até 2.048 px e a API valida e reencoda cada conteúdo; elas só são enviadas ao provedor configurado quando a mensagem é enviada, sem fallback automático. Com AI_PROVIDER=chatgpt_plan, as imagens são enviadas ao ChatGPT conectado. A SophIA grava no histórico apenas indicações de que havia anexos; bytes e metadados não são persistidos nem reutilizados nos turnos seguintes. A interface avisa sobre o envio antes da análise.
 
 O endpoint de mensagens aceita até 20 envios por usuário a cada 60 segundos e mantém no máximo três respostas do assistente em andamento por processo da API. Respostas limitadas retornam HTTP 429 e o cabeçalho Retry-After. Esses limites reduzem abuso e pressão sobre o provider; a Cloudflare continua responsável por limitar tráfego abusivo antes de chegar à aplicação.
 

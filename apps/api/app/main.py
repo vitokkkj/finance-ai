@@ -12,6 +12,7 @@ from app.ai import router as ai_router
 from app.auth import router as auth_router
 from app.cards import router as cards_router
 from app.categories import router as categories_router
+from app.commitments import router as commitments_router
 from app.config import settings
 from app.database import get_db
 from app.invoices import router as invoices_router
@@ -37,12 +38,11 @@ app.include_router(cards_router)
 app.include_router(invoices_router)
 app.include_router(transfers_router)
 app.include_router(recurrences_router)
+app.include_router(commitments_router)
 
 
 @app.middleware("http")
-async def protect_api_writes(
-    request: Request, call_next: RequestResponseEndpoint
-) -> Response:
+async def protect_api_writes(request: Request, call_next: RequestResponseEndpoint) -> Response:
     if (
         request.url.path.startswith("/api/")
         and request.method in {"POST", "PUT", "PATCH", "DELETE"}

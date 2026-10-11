@@ -13,7 +13,7 @@ O primeiro cadastro ativo de conta é a única opção e passa a ser o destino p
 - A API representa como `null` o saldo inicial, a data-base e o saldo calculado quando a pessoa ainda não informou a base da conta.
 - O banco exige que valor e data estejam ambos preenchidos ou ambos vazios.
 - O Finance Engine não calcula o saldo individual de uma conta sem base.
-- O saldo consolidado é `null` se não houver conta ativa ou se ao menos uma conta ativa não tiver saldo e data-base. A SophIA mostra quais contas precisam dessa informação e não apresenta a soma das contas conhecidas como se fosse o saldo total.
+- O saldo principal (`checking_balance`) soma somente contas correntes ativas. Se não houver conta corrente ou uma delas estiver sem saldo/data-base, o total aparece indisponível; isso não é zero. Poupança, dinheiro e outros tipos têm subtotais separados, e uma conta incompleta afeta somente o subtotal do próprio tipo.
 - Totais de receitas, despesas e resultado mensal continuam calculados a partir dos lançamentos confirmados; não dependem do saldo inicial.
 
 ## Primeiro lançamento pela interface
@@ -24,4 +24,4 @@ Quando há exatamente uma conta ou um cartão compatível, os formulários manua
 
 ## Cobertura automatizada
 
-Os testes de API cobrem a criação com saldo conhecido e desconhecido, a exigência do par saldo/data, o estado `null` no cálculo individual, a indisponibilidade do total consolidado se alguma conta ativa estiver incompleta, a preservação dos totais mensais e a recuperação do saldo ao preencher a base.
+Os testes de API cobrem a criação com saldo conhecido e desconhecido, a exigência do par saldo/data, o estado `null` no cálculo individual, a indisponibilidade do saldo corrente quando uma conta corrente está incompleta, a independência dos saldos de outros tipos, a preservação dos totais mensais e a recuperação do saldo ao preencher a base.

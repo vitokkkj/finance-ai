@@ -13,10 +13,11 @@
 
 - Tipos atuais de lançamento: `INCOME` e `EXPENSE`. O valor armazenado é sempre positivo; o tipo determina se ele soma ou subtrai.
 - Saldo inicial da conta é um valor na abertura do dia de `opening_balance_date`.
-- `opening_balance` e `opening_balance_date` são informados juntos ou ficam ambos nulos quando o saldo de abertura ainda é desconhecido. Nesse caso, o Finance Engine não calcula nem apresenta saldo para a conta. Se alguma conta ativa estiver sem essa base, o saldo consolidado também fica indisponível; os saldos das outras contas permanecem visíveis individualmente. Receitas, despesas e resultado mensal continuam calculáveis a partir dos movimentos registrados.
+- `opening_balance` e `opening_balance_date` são informados juntos ou ficam ambos nulos quando o saldo de abertura ainda é desconhecido. Nesse caso, o Finance Engine não calcula nem apresenta saldo para a conta. O principal saldo exibido soma exclusivamente contas ativas `CHECKING`; uma conta corrente incompleta torna esse resumo indisponível, mas contas incompletas de outros tipos não o ocultam. Poupança, dinheiro e outros tipos têm totais próprios, cada um indisponível somente quando alguma conta ativa daquele tipo não tem base conhecida. Receitas, despesas e resultado mensal continuam calculáveis a partir dos movimentos registrados.
 - Saldo da conta ativa = saldo inicial + lançamentos `CONFIRMED` do tipo `INCOME` − lançamentos `CONFIRMED` do tipo `EXPENSE`, desde a data-base até a data local atual.
 - Não há saldo corrente mutável no banco. A API consulta os dados e pede ao Finance Engine que recalcule o saldo.
 - Resumo mensal usa início local inclusivo e início do mês seguinte exclusivo. Dessa forma, o último dia do mês entra no período e transações do mês anterior ficam fora.
+- Saldos por tipo e totais realizados vêm do Finance Engine. O resumo principal da aplicação sempre significa saldo atual de contas correntes; poupança, dinheiro e outras contas aparecem em grupos separados. A soma de uma categoria de contas não substitui o detalhamento por conta.
 - A interface apresenta saldos, receitas, despesas, resultado e gastos por categoria recebidos da API. O navegador formata strings decimais sem realizar operações monetárias com `number`.
 - Categorias separam receitas de despesas. Arquivar impede o uso em novos lançamentos e preserva o histórico existente.
 - Conta ou categoria de outro usuário não pode ser referenciada num lançamento. A API verifica o proprietário e o PostgreSQL aplica chaves compostas no vínculo.
@@ -49,4 +50,21 @@
 
 ## Fora do escopo da Fase 2C.1
 
-Parcelamentos, financiamentos, investimentos reais, reembolsos, previsões, orçamento, juros rotativos, notificações e sincronização bancária seguem fora desta fatia. Cada fluxo futuro terá semântica própria e testes de valor, data, timezone, idempotência e reconciliação.
+Parcelamentos, financiamentos, investimentos reais, reembolsos, previsões de longo prazo, orçamento, juros rotativos, notificações e sincronização bancária seguem fora desta fatia. A projeção mensal de obrigações descrita abaixo está implementada na Fase 2C.2. Cada fluxo futuro terá semântica própria e testes de valor, data, timezone, idempotência e reconciliação.
+
+## Fase 2C.2 — compromissos e projeção mensal
+
+- Um compromisso avulso é uma receita ou despesa futura sem repetição, ligada a conta, categoria, valor e data prevista. O valor planejado não entra em saldos, receitas, despesas, resultados mensais ou faturas realizadas.
+- Marcar o compromisso como pago/recebido cria uma única transação confirmada na data local atual, vincula essa transação e é idempotente. O lançamento vinculado não pode ser alterado ou excluído pelos endpoints genéricos. Para cancelar, o compromisso precisa continuar sem transação.
+- A área “A pagar” combina ocorrências recorrentes não pagas, compromissos avulsos não pagos e faturas abertas de cartão com vencimento até o último dia do mês financeiro atual. Obrigações atrasadas permanecem na lista e nos totais até serem pagas ou canceladas.
+- “Em atraso” inclui datas anteriores a hoje. “Próximos 7 dias” inclui hoje e os seis dias seguintes. “Restante do mês” começa em hoje mais sete dias e termina no último dia do mês. O total a pagar é a soma destas três faixas; receitas previstas são informadas à parte.
+- Compras de cartão já entram nas despesas realizadas quando acontecem. A previsão da fatura mostra somente seu saldo aberto, calculado das compras, saldo inicial e pagamentos associados; pagar a fatura reduz caixa e saldo devido sem criar nova despesa.
+- Cada cartão pode ter uma conta pagadora opcional. Faturas sem conta ativa associada continuam visíveis em “A pagar”, mas não são subtraídas de um saldo projetado de conta. Isso evita supor qual conta será usada.
+- Saldo projetado por tipo parte do saldo real calculado e aplica entradas/saídas previstas até o fim do mês, inclusive atrasos que continuam sem pagamento. Uma conta corrente incompleta torna indisponível só a projeção do grupo `CHECKING`; uma poupança incompleta não muda o saldo de contas correntes.
+- A previsão é uma estimativa, não uma garantia de caixa; ela não considera movimentos futuros não cadastrados e não afeta valores realizados.
+
+## Anexos de imagem no chat
+
+- Uma mensagem pode levar até quatro imagens PNG, JPEG ou WebP. O cliente reduz as imagens antes do envio e o servidor normaliza cada conteúdo antes de encaminhá-lo ao provedor.
+- Bytes de imagem não são salvos em mensagens ou histórico; somente marcadores de anexo informam que houve análise. Imagens são evidência não confiável: instruções nelas não podem sobrepor as regras do sistema.
+- Mensagens com imagem não executam diretamente operações financeiras. A IA pode ler dados e preparar uma prévia transacional segura que exige confirmação explícita antes de gravar.

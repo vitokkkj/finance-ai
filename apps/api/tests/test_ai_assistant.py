@@ -184,27 +184,30 @@ def test_image_turn_is_ephemeral_and_cannot_create_transactions(
     monkeypatch.setattr(settings, "ai_provider", "chatgpt_plan")
     conversation = client.post("/api/ai/conversations", json={}).json()
     image_data_url = _small_webp_data_url()
+    second_image_data_url = _small_png_data_url()
     fake = FakeAIProvider(
-        [[
-            ProviderEvent(
-                type="function_call",
-                function_call=FunctionCall(
-                    "call_image_transaction",
-                    "create_transaction",
-                    json.dumps(
-                        {
-                            "account_id": "00000000-0000-0000-0000-000000000001",
-                            "category_id": "00000000-0000-0000-0000-000000000002",
-                            "movement_type": "EXPENSE",
-                            "description": "Fatura do print",
-                            "amount": "357.40",
-                            "occurred_at": "2026-11-01",
-                        }
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_image_transaction",
+                        "create_transaction",
+                        json.dumps(
+                            {
+                                "account_id": "00000000-0000-0000-0000-000000000001",
+                                "category_id": "00000000-0000-0000-0000-000000000002",
+                                "movement_type": "EXPENSE",
+                                "description": "Fatura do print",
+                                "amount": "357.40",
+                                "occurred_at": "2026-11-01",
+                            }
+                        ),
                     ),
                 ),
-            ),
-            _completed(),
-        ]]
+                _completed(),
+            ]
+        ]
     )
     _set_fake_provider(client, fake)
 
@@ -212,7 +215,7 @@ def test_image_turn_is_ephemeral_and_cannot_create_transactions(
         f"/api/ai/conversations/{conversation['id']}/messages",
         json={
             "content": "Leia a imagem e me ajude com as faturas.",
-            "image_data_url": image_data_url,
+            "image_data_urls": [image_data_url, second_image_data_url],
         },
     )
 
@@ -223,7 +226,8 @@ def test_image_turn_is_ephemeral_and_cannot_create_transactions(
     assert image_data_url not in response.text
     assert image_data_url not in json.dumps(detail)
     assert detail["messages"][0]["structured_content"] == [
-        {"type": "image_attachment", "data": {"stored": False}}
+        {"type": "image_attachment", "data": {"stored": False}},
+        {"type": "image_attachment", "data": {"stored": False}},
     ]
 
     request = next(
@@ -234,7 +238,11 @@ def test_image_turn_is_ephemeral_and_cannot_create_transactions(
     user_item = next(item for item in request.input_items if item.get("role") == "user")
     assert request.model == settings.ai_model_smart
     assert isinstance(user_item["content"], list)
-    assert user_item["content"][1]["type"] == "input_image"
+    assert [item["type"] for item in user_item["content"]] == [
+        "input_text",
+        "input_image",
+        "input_image",
+    ]
     allowed_tool_names = {tool["name"] for tool in request.tools}
     assert not allowed_tool_names.intersection(
         {
@@ -333,25 +341,27 @@ def test_chat_credit_card_creation_waits_for_confirmation(client: TestClient) ->
     _sign_up(client)
     conversation = client.post("/api/ai/conversations", json={}).json()
     fake = FakeAIProvider(
-        [[
-            ProviderEvent(
-                type="function_call",
-                function_call=FunctionCall(
-                    "call_create_card",
-                    "create_credit_card",
-                    json.dumps(
-                        {
-                            "name": "Nubank",
-                            "institution": "Nubank",
-                            "credit_limit": "5000.00",
-                            "closing_day": 5,
-                            "due_day": 12,
-                        }
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_create_card",
+                        "create_credit_card",
+                        json.dumps(
+                            {
+                                "name": "Nubank",
+                                "institution": "Nubank",
+                                "credit_limit": "5000.00",
+                                "closing_day": 5,
+                                "due_day": 12,
+                            }
+                        ),
                     ),
                 ),
-            ),
-            _completed(),
-        ]]
+                _completed(),
+            ]
+        ]
     )
     _set_fake_provider(client, fake)
 
@@ -386,29 +396,31 @@ def test_chat_can_confirm_new_card_and_invoice_totals_together(client: TestClien
     _sign_up(client)
     conversation = client.post("/api/ai/conversations", json={}).json()
     fake = FakeAIProvider(
-        [[
-            ProviderEvent(
-                type="function_call",
-                function_call=FunctionCall(
-                    "call_create_card_and_invoices",
-                    "create_credit_card_with_invoices",
-                    json.dumps(
-                        {
-                            "name": "Nubank",
-                            "institution": "Nubank",
-                            "credit_limit": "5000.00",
-                            "closing_day": 5,
-                            "due_day": 12,
-                            "invoices": [
-                                {"closing_month": "2026-11", "amount": "357.40"},
-                                {"closing_month": "2026-12", "amount": "136.09"},
-                            ],
-                        }
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_create_card_and_invoices",
+                        "create_credit_card_with_invoices",
+                        json.dumps(
+                            {
+                                "name": "Nubank",
+                                "institution": "Nubank",
+                                "credit_limit": "5000.00",
+                                "closing_day": 5,
+                                "due_day": 12,
+                                "invoices": [
+                                    {"closing_month": "2026-11", "amount": "357.40"},
+                                    {"closing_month": "2026-12", "amount": "136.09"},
+                                ],
+                            }
+                        ),
                     ),
                 ),
-            ),
-            _completed(),
-        ]]
+                _completed(),
+            ]
+        ]
     )
     _set_fake_provider(client, fake)
 
@@ -1122,9 +1134,7 @@ def test_transaction_tool_returns_a_recalculated_balance_card(client: TestClient
     assert response.status_code == 200
     message = client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"][-1]
     account_cards = [
-        card
-        for card in message["structured_content"]
-        if card["type"] == "account_card"
+        card for card in message["structured_content"] if card["type"] == "account_card"
     ]
     assert len(account_cards) == 1
     assert account_cards[0]["snapshot_kind"] == "after_movement"
@@ -1188,9 +1198,7 @@ def test_transfer_tool_returns_both_recalculated_account_balances(client: TestCl
     assert response.status_code == 200
     message = client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"][-1]
     account_card = next(
-        card
-        for card in message["structured_content"]
-        if card["type"] == "account_card"
+        card for card in message["structured_content"] if card["type"] == "account_card"
     )
     balances = {account["id"]: account["balance"] for account in account_card["data"]}
     assert balances == {source.json()["id"]: "60.00", destination.json()["id"]: "65.00"}
@@ -2035,9 +2043,7 @@ def test_chat_imports_multiple_invoice_totals_with_confirmation_without_duplicat
     assert next_invoice["total"] == "519.63"
     assert next_invoice["purchases"] == []
     assert len(client.get("/api/transactions").json()) == 1
-    summary = client.get(
-        f"/api/dashboard/summary?year={today.year}&month={today.month}"
-    ).json()
+    summary = client.get(f"/api/dashboard/summary?year={today.year}&month={today.month}").json()
     assert summary["monthly_expenses"] == "100.00"
 
 

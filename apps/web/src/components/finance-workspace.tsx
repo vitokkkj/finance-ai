@@ -70,8 +70,9 @@ type Dashboard = {
   as_of: string;
   period_start: string;
   period_end: string;
-  total_balance: string | null;
-  incomplete_account_count: number;
+  checking_balance: string | null;
+  incomplete_checking_account_count: number;
+  account_type_balances: { account_type: AccountType; balance: string | null; projected_balance: string | null; account_count: number; incomplete_account_count: number }[];
   monthly_income: string;
   monthly_expenses: string;
   monthly_result: string;
@@ -85,6 +86,15 @@ type Dashboard = {
     next_due_date: string | null;
   }[];
   recent_transactions: Transaction[];
+  forecast_start: string;
+  forecast_end: string;
+  forecast_payables_total: string;
+  forecast_overdue_total: string;
+  forecast_next_7_days_total: string;
+  forecast_rest_of_month_total: string;
+  forecast_income_total: string;
+  forecast_unassigned_invoice_total: string;
+  forecast_items: { id: string; source: "RECURRENCE" | "COMMITMENT" | "CARD_INVOICE"; description: string; type: MovementType; due_date: string; amount: string; account_type: AccountType | null; account_name: string | null; card_name: string | null; status: "OVERDUE" | "DUE_SOON" | "PLANNED" }[];
 };
 
 type AccountForm = {
@@ -170,6 +180,11 @@ function accountTypeLabel(value: AccountType): string {
     OTHER: "Outra",
   };
   return labels[value];
+}
+
+function projectedCheckingLabel(dashboard: Dashboard): string {
+  const projected = dashboard.account_type_balances.find((group) => group.account_type === "CHECKING")?.projected_balance;
+  return projected === null || projected === undefined ? "Indisponível" : formatCurrency(projected);
 }
 
 function financialTransactionLabel(value: FinancialTransactionType): string {
@@ -684,14 +699,14 @@ export function FinanceWorkspace({
                   </div>
                   <section aria-label="Saldo e fluxo do período" className="overview-primary-grid">
                     <article className="overview-balance-card">
-                      <span className="overview-primary-label">Saldo total</span>
-                      <strong>{dashboard.total_balance === null ? "Indisponível" : formatCurrency(dashboard.total_balance)}</strong>
+                      <span className="overview-primary-label">Saldo em contas correntes</span>
+                      <strong>{dashboard.checking_balance === null ? "Indisponível" : formatCurrency(dashboard.checking_balance)}</strong>
                       <span className="overview-balance-note">
-                        {dashboard.total_balance !== null
-                          ? "Soma dos saldos das contas ativas"
-                          : dashboard.incomplete_account_count > 0
-                            ? `Informe saldo inicial e data-base de ${dashboard.incomplete_account_count} ${dashboard.incomplete_account_count === 1 ? "conta" : "contas"} para ver o total.`
-                            : "Cadastre uma conta ativa para acompanhar o saldo."}
+                        {dashboard.checking_balance !== null
+                          ? "Somente contas correntes; poupança e outros tipos ficam separados"
+                          : dashboard.incomplete_checking_account_count > 0
+                            ? `Informe saldo inicial e data-base de ${dashboard.incomplete_checking_account_count} ${dashboard.incomplete_checking_account_count === 1 ? "conta corrente" : "contas correntes"}.`
+                            : "Cadastre uma conta corrente para acompanhar este saldo."}
                       </span>
                     </article>
                     <section className="overview-flow-card" aria-label="Fluxo mensal">
@@ -702,6 +717,23 @@ export function FinanceWorkspace({
                         <div><span>Resultado</span><strong>{formatCurrency(dashboard.monthly_result)}</strong><small>Receitas menos despesas</small></div>
                       </div>
                     </section>
+                  </section>
+
+                  {dashboard.account_type_balances.some((group) => group.account_type !== "CHECKING") && <section aria-label="Saldos separados por tipo de conta" className="account-type-balance-strip">
+                    {dashboard.account_type_balances.filter((group) => group.account_type !== "CHECKING").map((group) => <div className="account-type-balance-item" key={group.account_type}><span>{accountTypeLabel(group.account_type)}</span><strong>{group.balance === null ? "Pendente" : formatCurrency(group.balance)}</strong><small>Projeção: {group.projected_balance === null ? "indisponível" : formatCurrency(group.projected_balance)}</small></div>)}
+                  </section>}
+
+                  <section aria-label="Contas a pagar previstas" className="surface-card forecast-overview-card">
+                    <div className="surface-heading"><div><p className="eyebrow">Previsão até {displayDate(dashboard.forecast_end)}</p><h2>A pagar</h2><p>Valores previstos não alteram o saldo real até serem registrados como pagos.</p></div><strong className="forecast-total">{formatCurrency(dashboard.forecast_payables_total)}</strong></div>
+                    <div className="forecast-summary-grid">
+                      <div><span>Em atraso</span><strong>{formatCurrency(dashboard.forecast_overdue_total)}</strong></div>
+                      <div><span>Próximos 7 dias</span><strong>{formatCurrency(dashboard.forecast_next_7_days_total)}</strong></div>
+                      <div><span>Restante do mês</span><strong>{formatCurrency(dashboard.forecast_rest_of_month_total)}</strong></div>
+                      <div><span>Receitas previstas</span><strong>{formatCurrency(dashboard.forecast_income_total)}</strong></div>
+                      <div><span>Saldo corrente projetado</span><strong>{projectedCheckingLabel(dashboard)}</strong></div>
+                    </div>
+                    {dashboard.forecast_unassigned_invoice_total !== "0.00" && <p className="forecast-unassigned-note">Faturas sem conta pagadora definida: {formatCurrency(dashboard.forecast_unassigned_invoice_total)}. Elas aparecem na lista, mas não reduzem o saldo projetado.</p>}
+                    {dashboard.forecast_items.filter((item) => item.type === "EXPENSE").length === 0 ? <p className="forecast-empty">Nenhuma conta ou fatura prevista para pagar até o fim do mês.</p> : <div className="forecast-list">{dashboard.forecast_items.filter((item) => item.type === "EXPENSE").slice(0, 8).map((item) => <div className="forecast-row" key={item.id}><span><strong>{item.description}</strong><small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}{item.account_name ? ` · ${item.account_name}` : ""}</small></span><b>{formatCurrency(item.amount)}</b></div>)}</div>}
                   </section>
 
                   <div className="overview-grid">
@@ -751,15 +783,16 @@ export function FinanceWorkspace({
                 </>
               )}
 
-              {section === "recurrences" && <RecurrenceWorkspace />}
+              {section === "recurrences" && <RecurrenceWorkspace onFinanceChanged={loadFinance} />}
 
               {section === "accounts" && (
                 <section className="surface-card data-card">
                   <div className="surface-heading"><div><p className="eyebrow">Patrimônio</p><h2>Central de contas</h2><p className="account-directory-copy">Contas que você autorizou a SophIA a acompanhar. Uma conta só é cadastrada quando você inicia e salva o formulário.</p></div><span className="record-count">{accounts.length} {accounts.length === 1 ? "conta" : "contas"}</span></div>
                   <div className="account-directory-summary">
-                    <div><span>Saldo consolidado</span><strong>{dashboard?.total_balance === null || !dashboard ? "Indisponível" : formatCurrency(dashboard.total_balance)}</strong></div>
+                    <div><span>Saldo em contas correntes</span><strong>{dashboard?.checking_balance === null || !dashboard ? "Indisponível" : formatCurrency(dashboard.checking_balance)}</strong></div>
                     <div><span>Contas ativas</span><strong>{activeAccounts.length}</strong></div>
-                    {dashboard && dashboard.total_balance === null && dashboard.incomplete_account_count > 0 && <p>Informe o saldo inicial e a data-base das contas pendentes para calcular o total.</p>}
+                    {dashboard?.account_type_balances.filter((group) => group.account_type !== "CHECKING").map((group) => <div key={group.account_type}><span>Saldo em {accountTypeLabel(group.account_type).toLocaleLowerCase("pt-BR")}</span><strong>{group.balance === null ? "Pendente" : formatCurrency(group.balance)}</strong></div>)}
+                    {dashboard && dashboard.checking_balance === null && dashboard.incomplete_checking_account_count > 0 && <p>Informe o saldo inicial e a data-base das contas correntes pendentes para calcular o total.</p>}
                   </div>
                   {accountFormOpen && (
                     <form className="editor-form" onSubmit={saveAccount}>
@@ -770,7 +803,7 @@ export function FinanceWorkspace({
                         <div className="field-label"><label htmlFor="account-opening-balance">Saldo inicial (opcional)</label><CurrencyInput id="account-opening-balance" onChange={(value) => setAccountForm({ ...accountForm, opening_balance: value })} placeholder="0,00" value={accountForm.opening_balance} /></div>
                         <div className="field-label"><label htmlFor="account-opening-balance-date">Data do saldo inicial</label><CalendarDateInput id="account-opening-balance-date" disabled={!accountForm.opening_balance.trim()} onChange={(value) => setAccountForm({ ...accountForm, opening_balance_date: value })} required={Boolean(accountForm.opening_balance.trim())} value={accountForm.opening_balance_date} /></div>
                       </div>
-                      <div className="form-actions"><button className="primary-button compact-button" disabled={busy} type="submit">{busy ? "Salvando…" : "Salvar conta"}</button><span className="form-note">Deixe saldo e data em branco se ainda não souber. O saldo consolidado ficará indisponível até preencher os dois.</span></div>
+                      <div className="form-actions"><button className="primary-button compact-button" disabled={busy} type="submit">{busy ? "Salvando…" : "Salvar conta"}</button><span className="form-note">Deixe saldo e data em branco se ainda não souber. O saldo deste tipo ficará indisponível até preencher os dois.</span></div>
                     </form>
                   )}
                   {accounts.length === 0 ? <EmptyState actionLabel="Adicionar primeira conta" message="Cadastre uma conta para começar a acompanhar seu saldo." onAction={() => { setAccountForm(emptyAccount()); setAccountEditingId(null); setAccountFormOpen(true); }} /> : (

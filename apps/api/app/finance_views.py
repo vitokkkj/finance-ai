@@ -152,6 +152,7 @@ def credit_card_response(
         currency=card.currency,
         closing_day=card.closing_day,
         due_day=card.due_day,
+        payment_account_id=card.payment_account_id,
         is_active=card.is_active,
         used_limit=limit_summary.used_limit,
         available_limit=limit_summary.available_limit,

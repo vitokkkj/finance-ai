@@ -55,8 +55,8 @@ def test_account_can_be_created_before_opening_balance_is_known(client: TestClie
     assert account["balance"] is None
 
     summary = client.get("/api/dashboard/summary").json()
-    assert summary["total_balance"] is None
-    assert summary["incomplete_account_count"] == 1
+    assert summary["checking_balance"] is None
+    assert summary["incomplete_checking_account_count"] == 1
 
 
 def test_manual_expense_is_allowed_without_known_balance_but_base_cannot_skip_it(
@@ -88,8 +88,8 @@ def test_manual_expense_is_allowed_without_known_balance_but_base_cannot_skip_it
     assert account_after_expense["balance"] is None
 
     summary = client.get("/api/dashboard/summary?year=2026&month=10").json()
-    assert summary["total_balance"] is None
-    assert summary["incomplete_account_count"] == 1
+    assert summary["checking_balance"] is None
+    assert summary["incomplete_checking_account_count"] == 1
     assert summary["monthly_expenses"] == "87.50"
 
     base_after_existing_movement = client.patch(
@@ -145,7 +145,7 @@ def test_clearing_opening_balance_makes_balance_unavailable_until_reentered(
     )
     assert cleared.status_code == 200
     assert cleared.json()["balance"] is None
-    assert client.get("/api/dashboard/summary").json()["total_balance"] is None
+    assert client.get("/api/dashboard/summary").json()["checking_balance"] is None
 
     incomplete_patch = client.patch(
         f"/api/accounts/{account['id']}",
@@ -162,4 +162,4 @@ def test_clearing_opening_balance_makes_balance_unavailable_until_reentered(
     )
     assert completed.status_code == 200
     assert completed.json()["balance"] == "1250.00"
-    assert client.get("/api/dashboard/summary").json()["total_balance"] == "1250.00"
+    assert client.get("/api/dashboard/summary").json()["checking_balance"] == "1250.00"

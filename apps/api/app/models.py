@@ -130,6 +130,12 @@ class CreditCard(Base):
     __tablename__ = "credit_cards"
     __table_args__ = (
         UniqueConstraint("id", "user_id", name="uq_credit_cards_id_user_id"),
+        ForeignKeyConstraint(
+            ["payment_account_id", "user_id"],
+            ["accounts.id", "accounts.user_id"],
+            ondelete="RESTRICT",
+            name="fk_credit_cards_payment_account_owner",
+        ),
         CheckConstraint("currency = 'BRL'", name="ck_credit_cards_currency_brl"),
         CheckConstraint("credit_limit >= 0", name="ck_credit_cards_limit_nonnegative"),
         CheckConstraint("closing_day BETWEEN 1 AND 31", name="ck_credit_cards_closing_day"),
@@ -146,6 +152,7 @@ class CreditCard(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
     closing_day: Mapped[int] = mapped_column(nullable=False)
     due_day: Mapped[int] = mapped_column(nullable=False)
+    payment_account_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -250,9 +257,7 @@ class AIMessage(Base):
             "cache_write_tokens IS NULL OR cache_write_tokens >= 0",
             name="ck_ai_messages_cache_write_tokens",
         ),
-        CheckConstraint(
-            "duration_ms IS NULL OR duration_ms >= 0", name="ck_ai_messages_duration"
-        ),
+        CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_ai_messages_duration"),
         CheckConstraint(
             "diagnostic_status IS NULL OR diagnostic_status IN "
             "('SUCCEEDED', 'FAILED', 'PENDING_CONFIRMATION')",
@@ -555,6 +560,62 @@ class RecurrenceOccurrence(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
     rule_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    transaction_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    account_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    category_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    type: Mapped[str] = mapped_column(String(10), nullable=False)
+    description: Mapped[str] = mapped_column(String(200), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="PLANNED")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class PlannedCommitment(Base):
+    __tablename__ = "planned_commitments"
+    __table_args__ = (
+        UniqueConstraint("id", "user_id", name="uq_planned_commitments_id_user_id"),
+        UniqueConstraint("transaction_id", name="uq_planned_commitments_transaction"),
+        ForeignKeyConstraint(
+            ["transaction_id", "user_id"],
+            ["transactions.id", "transactions.user_id"],
+            ondelete="RESTRICT",
+            name="fk_planned_commitments_transaction_owner",
+        ),
+        ForeignKeyConstraint(
+            ["account_id", "user_id"],
+            ["accounts.id", "accounts.user_id"],
+            ondelete="RESTRICT",
+            name="fk_planned_commitments_account_owner",
+        ),
+        ForeignKeyConstraint(
+            ["category_id", "user_id"],
+            ["categories.id", "categories.user_id"],
+            ondelete="RESTRICT",
+            name="fk_planned_commitments_category_owner",
+        ),
+        CheckConstraint("type IN ('INCOME', 'EXPENSE')", name="ck_planned_commitments_type"),
+        CheckConstraint("amount > 0", name="ck_planned_commitments_amount_positive"),
+        CheckConstraint(
+            "status IN ('PLANNED', 'PAID', 'CANCELLED')", name="ck_planned_commitments_status"
+        ),
+        CheckConstraint(
+            "(status = 'PAID' AND transaction_id IS NOT NULL) OR "
+            "(status <> 'PAID' AND transaction_id IS NULL)",
+            name="ck_planned_commitments_paid_transaction",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
     transaction_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     account_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     category_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)

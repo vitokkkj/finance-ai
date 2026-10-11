@@ -227,6 +227,7 @@ class CreditCardCreate(BaseModel):
     credit_limit: Decimal = Field(ge=Decimal("0"), max_digits=14, decimal_places=2)
     closing_day: int = Field(ge=1, le=31)
     due_day: int = Field(ge=1, le=31)
+    payment_account_id: UUID | None = None
 
     @field_validator("name")
     @classmethod
@@ -257,6 +258,7 @@ class CreditCardUpdate(BaseModel):
     )
     closing_day: int | None = Field(default=None, ge=1, le=31)
     due_day: int | None = Field(default=None, ge=1, le=31)
+    payment_account_id: UUID | None = None
 
     @field_validator("name")
     @classmethod
@@ -289,6 +291,7 @@ class CreditCardResponse(BaseModel):
     currency: str
     closing_day: int
     due_day: int
+    payment_account_id: UUID | None
     is_active: bool
     used_limit: Decimal
     available_limit: Decimal
@@ -472,20 +475,151 @@ class CategoryExpenseSummary(BaseModel):
         return format(value, ".2f")
 
 
+class AccountTypeBalanceSummary(BaseModel):
+    account_type: Literal["CHECKING", "SAVINGS", "CASH", "OTHER"]
+    balance: Decimal | None
+    projected_balance: Decimal | None
+    account_count: int
+    incomplete_account_count: int
+
+    @field_serializer("balance", "projected_balance")
+    def serialize_money(self, value: Decimal | None) -> str | None:
+        return format(value, ".2f") if value is not None else None
+
+
+class ForecastItem(BaseModel):
+    id: str
+    source: Literal["RECURRENCE", "COMMITMENT", "CARD_INVOICE"]
+    description: str
+    type: Literal["INCOME", "EXPENSE"]
+    due_date: date
+    amount: Decimal
+    account_type: Literal["CHECKING", "SAVINGS", "CASH", "OTHER"] | None
+    account_name: str | None
+    card_name: str | None
+    status: Literal["OVERDUE", "DUE_SOON", "PLANNED"]
+
+    @field_serializer("amount")
+    def serialize_money(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
+class PlannedCommitmentCreate(BaseModel):
+    account_id: UUID
+    category_id: UUID
+    type: Literal["INCOME", "EXPENSE"]
+    description: str = Field(min_length=1, max_length=200)
+    amount: Decimal = Field(gt=Decimal("0"), max_digits=14, decimal_places=2)
+    due_date: date
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Informe a descrição do compromisso.")
+        return normalized
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def require_exact_money_string(cls, value: object) -> object:
+        if not isinstance(value, (str, Decimal)):
+            raise ValueError("Informe valores monetários como texto decimal.")
+        return value
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+
+class PlannedCommitmentUpdate(BaseModel):
+    account_id: UUID | None = None
+    category_id: UUID | None = None
+    type: Literal["INCOME", "EXPENSE"] | None = None
+    description: str | None = Field(default=None, min_length=1, max_length=200)
+    amount: Decimal | None = Field(default=None, gt=Decimal("0"), max_digits=14, decimal_places=2)
+    due_date: date | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Informe a descrição do compromisso.")
+        return normalized
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def require_exact_money_string(cls, value: object) -> object:
+        if value is not None and not isinstance(value, (str, Decimal)):
+            raise ValueError("Informe valores monetários como texto decimal.")
+        return value
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+
+class PlannedCommitmentResponse(BaseModel):
+    id: UUID
+    transaction_id: UUID | None
+    account_id: UUID
+    category_id: UUID
+    type: Literal["INCOME", "EXPENSE"]
+    description: str
+    amount: Decimal
+    due_date: date
+    notes: str | None
+    status: Literal["PLANNED", "PAID", "CANCELLED", "OVERDUE"]
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("amount")
+    def serialize_money(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
 class DashboardSummary(BaseModel):
     as_of: date
     period_start: date
     period_end: date
-    total_balance: Decimal | None
-    incomplete_account_count: int
+    checking_balance: Decimal | None
+    incomplete_checking_account_count: int
+    account_type_balances: list[AccountTypeBalanceSummary]
     monthly_income: Decimal
     monthly_expenses: Decimal
     monthly_result: Decimal
     expenses_by_category: list[CategoryExpenseSummary]
     cards: list[CreditCardResponse]
     recent_transactions: list[TransactionResponse]
+    forecast_start: date
+    forecast_end: date
+    forecast_payables_total: Decimal
+    forecast_overdue_total: Decimal
+    forecast_next_7_days_total: Decimal
+    forecast_rest_of_month_total: Decimal
+    forecast_income_total: Decimal
+    forecast_unassigned_invoice_total: Decimal
+    forecast_items: list[ForecastItem]
 
-    @field_serializer("total_balance", "monthly_income", "monthly_expenses", "monthly_result")
+    @field_serializer(
+        "checking_balance",
+        "monthly_income",
+        "monthly_expenses",
+        "monthly_result",
+        "forecast_payables_total",
+        "forecast_overdue_total",
+        "forecast_next_7_days_total",
+        "forecast_rest_of_month_total",
+        "forecast_income_total",
+        "forecast_unassigned_invoice_total",
+    )
     def serialize_money(self, value: Decimal | None) -> str | None:
         return format(value, ".2f") if value is not None else None
 

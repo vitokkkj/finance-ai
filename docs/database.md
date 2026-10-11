@@ -43,7 +43,7 @@ O saldo inicial de fatura é adicionado de forma incremental por `0010_card_invo
 - PostgreSQL usa `NUMERIC(14,2)`; Python usa `Decimal`; valores de resposta da API são strings decimais com duas casas.
 - A interface envia valores monetários como texto decimal e não soma valores. O Finance Engine executa os cálculos.
 - Quando informados, `opening_balance` e `opening_balance_date` representam o saldo no início do dia indicado. Os lançamentos confirmados dessa data em diante compõem o saldo. Quando ambos são nulos, o saldo daquela conta é desconhecido e a API o retorna como `null`.
-- O saldo consolidado só é calculado quando há contas ativas e todas têm saldo e data-base. Caso qualquer conta ativa esteja incompleta, `total_balance` é `null` e `incomplete_account_count` informa quantas contas precisam de uma base; a interface não apresenta um subtotal parcial como saldo total.
+- `checking_balance` soma somente contas correntes ativas e fica `null` se não houver corrente ativa ou se uma delas não tiver saldo/data-base. `account_type_balances` mantém saldos e contagens incompletas separados por tipo; uma poupança sem base não altera o saldo de contas correntes.
 - Saldo de conta ativa = saldo inicial + receitas confirmadas + transferências recebidas − despesas confirmadas − transferências enviadas − pagamentos de fatura. Compras no cartão não alteram saldos bancários. Não há coluna mutável `current_balance`.
 - Datas informadas pelo usuário são datas civis em `America/Sao_Paulo`. Para consultas, o início do dia/mês local vira o limite inferior inclusivo e o início do dia/mês seguinte vira o limite superior exclusivo, convertido para UTC.
 - Uma categoria arquivada não pode ser usada em novo lançamento; lançamentos existentes continuam consultáveis pelo nome histórico da categoria.
@@ -58,6 +58,13 @@ O saldo inicial de fatura é adicionado de forma incremental por `0010_card_invo
 - Ocorrências guardam o snapshot para mudanças na regra não reescreverem o passado. Valores previstos não são transações e não entram no Finance Engine. Ao pagar, a transação confirmada existente vira a fonte dos efeitos financeiros; o vínculo permite retornar o mesmo resultado em chamadas repetidas.
 - O vínculo único impede reutilizar a transação em outra ocorrência; o endpoint de exclusão de lançamentos recusa excluir transações vinculadas para preservar a idempotência.
 - A migration incremental `0008_recurring_occurrences` cria essas tabelas e vínculos. Seu downgrade é bloqueado quando há regras ou ocorrências para não remover compromissos registrados.
+
+### Fase 2C.2 — previsão e compromissos avulsos
+
+- `planned_commitments`: UUID, proprietário, conta/categoria com chaves compostas, tipo, descrição, valor `NUMERIC(14,2)`, data prevista, observação, estado (`PLANNED`, `PAID`, `CANCELLED`) e vínculo opcional único com a transação criada ao pagar.
+- `credit_cards.payment_account_id` associa opcionalmente a fatura a uma conta pagadora do mesmo proprietário. Fatura sem associação continua no total a pagar, sem reduzir projeção de conta.
+- A API calcula `checking_balance`, saldos realizados/projetados por tipo e itens de previsão em tempo de consulta. Esses totais não são armazenados como colunas financeiras derivadas.
+- A migration `0015_planned_commitments_and_card_payment_accounts` cria os compromissos e a associação pagadora.
 
 ### Conceitos futuros, ainda sem tabelas
 

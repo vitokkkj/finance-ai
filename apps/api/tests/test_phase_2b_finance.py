@@ -85,7 +85,7 @@ def test_transfer_changes_only_the_two_account_balances(client: TestClient) -> N
     }
     assert accounts == {"Sicredi": "4500.00", "Inter": "1500.00"}
     summary = client.get("/api/dashboard/summary").json()
-    assert summary["total_balance"] == "6000.00"
+    assert summary["checking_balance"] == "6000.00"
     assert summary["monthly_income"] == "0.00"
     assert summary["monthly_expenses"] == "0.00"
     assert summary["monthly_result"] == "0.00"
@@ -114,7 +114,7 @@ def test_card_purchase_creates_one_expense_and_does_not_change_bank_balance(
     assert purchase.json()["type"] == "CARD_PURCHASE"
     assert client.get("/api/accounts").json()[0]["balance"] == "5000.00"
     summary = client.get("/api/dashboard/summary?year=2026&month=10").json()
-    assert summary["total_balance"] == "5000.00"
+    assert summary["checking_balance"] == "5000.00"
     assert summary["monthly_expenses"] == "100.00"
     assert summary["monthly_income"] == "0.00"
     assert summary["monthly_result"] == "-100.00"
@@ -179,7 +179,7 @@ def test_acceptance_transfer_card_purchase_and_invoice_payment_are_not_double_co
     assert invoice["outstanding"] == "0.00"
     assert invoice["status"] == "PAID"
     summary = client.get("/api/dashboard/summary?year=2026&month=10").json()
-    assert summary["total_balance"] == "5900.00"
+    assert summary["checking_balance"] == "5900.00"
     assert summary["monthly_expenses"] == "100.00"
     assert summary["monthly_result"] == "-100.00"
 

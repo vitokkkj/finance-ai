@@ -1059,7 +1059,10 @@ TOOL_DEFINITIONS = (
     ),
     ToolDefinition(
         "get_dashboard_summary",
-        "Consulta o painel financeiro calculado pelo Finance Engine.",
+        (
+            "Consulta saldos por tipo, incluindo somente contas correntes no saldo principal, "
+            "além dos saldos projetados e da previsão mensal de contas a pagar."
+        ),
         MonthInput,
         _dashboard,
     ),

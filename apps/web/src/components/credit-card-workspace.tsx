@@ -16,6 +16,7 @@ type CreditCard = {
   credit_limit: string;
   closing_day: number;
   due_day: number;
+  payment_account_id: string | null;
   is_active: boolean;
   used_limit: string;
   available_limit: string;
@@ -50,6 +51,7 @@ type CardForm = {
   credit_limit: string;
   closing_day: string;
   due_day: string;
+  payment_account_id: string;
 };
 type Notice = { kind: "success" | "error"; message: string } | null;
 
@@ -74,7 +76,7 @@ function displayDate(value: string): string {
 }
 
 function emptyCard(): CardForm {
-  return { name: "", institution: "", credit_limit: "", closing_day: "13", due_day: "20" };
+  return { name: "", institution: "", credit_limit: "", closing_day: "13", due_day: "20", payment_account_id: "" };
 }
 
 function statusLabel(status: CardInvoice["status"]): string {
@@ -174,6 +176,7 @@ export function CreditCardWorkspace({
       credit_limit: card.credit_limit,
       closing_day: String(card.closing_day),
       due_day: String(card.due_day),
+      payment_account_id: card.payment_account_id ?? "",
     });
     setCardFormOpen(true);
   }
@@ -189,6 +192,7 @@ export function CreditCardWorkspace({
         credit_limit: toDecimalString(cardForm.credit_limit),
         closing_day: Number(cardForm.closing_day),
         due_day: Number(cardForm.due_day),
+        payment_account_id: cardForm.payment_account_id || null,
       };
       if (cardEditingId) {
         await apiRequest<CreditCard>(`/api/cards/${cardEditingId}`, {
@@ -310,6 +314,7 @@ export function CreditCardWorkspace({
               <div className="field-label"><label htmlFor="credit-card-limit">Limite</label><CurrencyInput id="credit-card-limit" onChange={(value) => setCardForm({ ...cardForm, credit_limit: value })} placeholder="0,00" required value={cardForm.credit_limit} /></div>
               <label className="field-label">Dia de fechamento<input max={31} min={1} onChange={(event) => setCardForm({ ...cardForm, closing_day: event.target.value })} required type="number" value={cardForm.closing_day} /></label>
               <label className="field-label">Dia de vencimento<input max={31} min={1} onChange={(event) => setCardForm({ ...cardForm, due_day: event.target.value })} required type="number" value={cardForm.due_day} /></label>
+              <label className="field-label">Conta usada para pagar a fatura (opcional)<select onChange={(event) => setCardForm({ ...cardForm, payment_account_id: event.target.value })} value={cardForm.payment_account_id}><option value="">Ainda não definida</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select><small>Usada somente para estimar o saldo previsto. O pagamento continua dependendo de você registrá-lo.</small></label>
             </div>
             <div className="form-actions"><button className="primary-button compact-button" disabled={busy} type="submit">{busy ? "Salvando…" : "Salvar cartão"}</button><span className="form-note">Quando o dia não existe no mês, usamos o último dia daquele mês.</span></div>
           </form>

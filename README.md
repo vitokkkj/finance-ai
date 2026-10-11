@@ -159,7 +159,7 @@ AGENTS.md
 
 ## Primeiro uso e lançamentos manuais
 
-Depois do cadastro privado, a SophIA pede uma conta para acompanhar. O saldo inicial e sua data podem ficar em branco; nesse caso, o saldo consolidado permanece indisponível até que todas as contas ativas tenham uma base conhecida. O cartão é opcional. Para registrar a primeira receita ou despesa pela interface, será necessário criar uma categoria; o formulário oferece um caminho para criá-la e voltar ao lançamento. Veja [docs/first-use-and-manual-records.md](docs/first-use-and-manual-records.md).
+Depois do cadastro privado, a SophIA pede uma conta para acompanhar. O saldo inicial e sua data podem ficar em branco; nesse caso, o saldo do tipo daquela conta permanece indisponível. O valor principal da interface considera apenas contas correntes; poupança e demais tipos ficam separados. O cartão é opcional. Para registrar a primeira receita ou despesa pela interface, será necessário criar uma categoria; o formulário oferece um caminho para criá-la e voltar ao lançamento. Veja [docs/first-use-and-manual-records.md](docs/first-use-and-manual-records.md).
 
 Na VM de teste, use o override para iniciar o frontend sem a barra Next.js Dev Tools e sem autoreload da API:
 

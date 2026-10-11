@@ -36,19 +36,30 @@ class ConversationUpdate(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(default="", max_length=4000)
-    image_data_url: str | None = Field(default=None, max_length=3_000_000)
+    image_data_urls: list[str] = Field(default_factory=list, max_length=4)
+    image_data_url: str | None = Field(default=None, max_length=3_000_000, exclude=True)
 
     @field_validator("content")
     @classmethod
     def normalize_content(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("image_data_urls")
+    @classmethod
+    def normalize_image_data_urls(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if len(value) > 3_000_000:
+                raise ValueError("Cada imagem deve ter no máximo 3 MB depois de preparada.")
+            if not value.startswith(
+                ("data:image/webp;base64,", "data:image/png;base64,", "data:image/jpeg;base64,")
+            ):
+                raise ValueError("Envie imagens PNG, JPEG ou WebP preparadas para análise.")
+        return values
+
     @field_validator("image_data_url")
     @classmethod
-    def normalize_image_data_url(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if not value.startswith(
+    def validate_legacy_image_data_url(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith(
             ("data:image/webp;base64,", "data:image/png;base64,", "data:image/jpeg;base64,")
         ):
             raise ValueError("Envie uma imagem PNG, JPEG ou WebP preparada para análise.")
@@ -56,8 +67,12 @@ class MessageCreate(BaseModel):
 
     @model_validator(mode="after")
     def require_message_or_image(self) -> MessageCreate:
-        if not self.content and self.image_data_url is None:
-            raise ValueError("Escreva uma mensagem ou anexe uma imagem.")
+        if self.image_data_url is not None:
+            if self.image_data_urls:
+                raise ValueError("Envie as imagens em apenas um dos formatos aceitos.")
+            self.image_data_urls = [self.image_data_url]
+        if not self.content and not self.image_data_urls:
+            raise ValueError("Escreva uma mensagem ou anexe ao menos uma imagem.")
         return self
 
 

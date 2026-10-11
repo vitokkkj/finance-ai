@@ -1,6 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -19,15 +19,27 @@ from app.finance_engine import (
     financial_day_start,
 )
 from app.finance_views import (
+    card_invoice_response,
     credit_card_response,
     transaction_movement,
     transaction_response,
     transaction_rows,
 )
-from app.models import Account, Category, CreditCard, RecurrenceOccurrence, Transaction, User
+from app.models import (
+    Account,
+    CardInvoice,
+    Category,
+    CreditCard,
+    PlannedCommitment,
+    RecurrenceOccurrence,
+    Transaction,
+    User,
+)
 from app.schemas import (
+    AccountTypeBalanceSummary,
     CategoryExpenseSummary,
     DashboardSummary,
+    ForecastItem,
     TransactionCreate,
     TransactionResponse,
     TransactionUpdate,
@@ -36,6 +48,12 @@ from app.schemas import (
 router = APIRouter(tags=["lançamentos"])
 ZERO = Decimal("0.00")
 FinancialTransactionType = Literal["INCOME", "EXPENSE", "TRANSFER", "CARD_PURCHASE", "CARD_PAYMENT"]
+
+
+class AccountTypeAggregate(TypedDict):
+    count: int
+    incomplete: int
+    balance: Decimal
 
 
 def _validate_references(
@@ -187,6 +205,21 @@ def update_transaction(
                 "Este movimento usa uma operação própria e não pode ser alterado por este endpoint."
             ),
         )
+    if (
+        db.scalar(
+            select(PlannedCommitment.id)
+            .where(PlannedCommitment.transaction_id == transaction.id)
+            .limit(1)
+        )
+        is not None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "O lançamento está vinculado a um compromisso pago e não pode ser alterado "
+                "por este endpoint."
+            ),
+        )
 
     changes = {
         field: value
@@ -243,6 +276,16 @@ def delete_transaction(
             status_code=409,
             detail="O lançamento está vinculado a uma recorrência e não pode ser excluído.",
         )
+    planned_commitment_id = db.scalar(
+        select(PlannedCommitment.id)
+        .where(PlannedCommitment.transaction_id == transaction.id)
+        .limit(1)
+    )
+    if planned_commitment_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="O lançamento está vinculado a um compromisso pago e não pode ser excluído.",
+        )
     db.delete(transaction)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -293,16 +336,18 @@ def dashboard_summary(
     accounts = db.scalars(
         select(Account).where(Account.user_id == user.id, Account.is_active.is_(True))
     ).all()
-    accounts_with_known_balance: list[tuple[Account, Decimal, date]] = []
-    for account in accounts:
-        if account.opening_balance is None or account.opening_balance_date is None:
-            continue
-        accounts_with_known_balance.append(
-            (account, account.opening_balance, account.opening_balance_date)
-        )
-    incomplete_account_count = len(accounts) - len(accounts_with_known_balance)
-    total_balance: Decimal | None = None
-    if accounts and incomplete_account_count == 0:
+    known_accounts = [
+        account
+        for account in accounts
+        if account.opening_balance is not None and account.opening_balance_date is not None
+    ]
+    accounts_with_known_balance = [
+        (account, account.opening_balance, account.opening_balance_date)
+        for account in known_accounts
+        if account.opening_balance is not None and account.opening_balance_date is not None
+    ]
+    account_balance_by_id: dict[UUID, Decimal] = {}
+    if accounts_with_known_balance:
         account_ids = [account.id for account, _, _ in accounts_with_known_balance]
         balance_transactions = db.scalars(
             select(Transaction).where(
@@ -328,19 +373,208 @@ def dashboard_summary(
                     transaction.destination_account_id,
                 ):
                     movements_by_account[account.id].append(movement)
-        total_balance = sum(
-            (
-                calculate_account_balance(
-                    opening_balance,
-                    opening_balance_date,
-                    movements_by_account[account.id],
-                    today,
-                    account_id=account.id,
-                )
-                for account, opening_balance, opening_balance_date in accounts_with_known_balance
-            ),
-            start=ZERO,
+        account_balance_by_id = {
+            account.id: calculate_account_balance(
+                opening_balance,
+                opening_balance_date,
+                movements_by_account[account.id],
+                today,
+                account_id=account.id,
+            )
+            for account, opening_balance, opening_balance_date in accounts_with_known_balance
+        }
+
+    account_type_groups: dict[str, AccountTypeAggregate] = {}
+    for account in accounts:
+        group = account_type_groups.setdefault(
+            account.type, {"count": 0, "incomplete": 0, "balance": ZERO}
         )
+        group["count"] += 1
+        if account.id not in account_balance_by_id:
+            group["incomplete"] += 1
+        else:
+            group["balance"] += account_balance_by_id[account.id]
+
+    forecast_end = (
+        period_end
+        if (selected_year, selected_month) == (today.year, today.month)
+        else (
+            date(today.year + 1, 1, 1) - timedelta(days=1)
+            if today.month == 12
+            else date(today.year, today.month + 1, 1) - timedelta(days=1)
+        )
+    )
+    account_by_id = {
+        account.id: account
+        for account in db.scalars(select(Account).where(Account.user_id == user.id)).all()
+    }
+    forecast_items: list[ForecastItem] = []
+    forecast_accounts_by_id: dict[str, Account | None] = {}
+
+    def add_forecast_item(
+        *,
+        item_id: str,
+        source: str,
+        description: str,
+        movement_type: str,
+        due_date: date,
+        amount: Decimal,
+        account: Account | None = None,
+        card_name: str | None = None,
+    ) -> None:
+        due_status = (
+            "OVERDUE"
+            if due_date < today
+            else "DUE_SOON"
+            if due_date <= today + timedelta(days=6)
+            else "PLANNED"
+        )
+        forecast_items.append(
+            ForecastItem(
+                id=item_id,
+                source=source,
+                description=description,
+                type=movement_type,
+                due_date=due_date,
+                amount=amount,
+                account_type=account.type if account is not None else None,
+                account_name=account.name if account is not None else None,
+                card_name=card_name,
+                status=due_status,
+            )
+        )
+        forecast_accounts_by_id[item_id] = account
+
+    planned_occurrences = db.scalars(
+        select(RecurrenceOccurrence).where(
+            RecurrenceOccurrence.user_id == user.id,
+            RecurrenceOccurrence.status == "PLANNED",
+            RecurrenceOccurrence.due_date <= forecast_end,
+        )
+    ).all()
+    for occurrence in planned_occurrences:
+        add_forecast_item(
+            item_id=f"recurrence:{occurrence.id}",
+            source="RECURRENCE",
+            description=occurrence.description,
+            movement_type=occurrence.type,
+            due_date=occurrence.due_date,
+            amount=occurrence.amount,
+            account=account_by_id.get(occurrence.account_id),
+        )
+
+    commitments = db.scalars(
+        select(PlannedCommitment).where(
+            PlannedCommitment.user_id == user.id,
+            PlannedCommitment.status == "PLANNED",
+            PlannedCommitment.due_date <= forecast_end,
+        )
+    ).all()
+    for commitment in commitments:
+        add_forecast_item(
+            item_id=f"commitment:{commitment.id}",
+            source="COMMITMENT",
+            description=commitment.description,
+            movement_type=commitment.type,
+            due_date=commitment.due_date,
+            amount=commitment.amount,
+            account=account_by_id.get(commitment.account_id),
+        )
+
+    all_cards = db.scalars(select(CreditCard).where(CreditCard.user_id == user.id)).all()
+    card_by_id = {card.id: card for card in all_cards}
+    invoices = db.scalars(
+        select(CardInvoice).where(
+            CardInvoice.user_id == user.id, CardInvoice.due_date <= forecast_end
+        )
+    ).all()
+    unassigned_invoice_total = ZERO
+    for invoice in invoices:
+        invoice_summary = card_invoice_response(db, invoice, today)
+        if invoice_summary.outstanding <= ZERO:
+            continue
+        card = card_by_id.get(invoice.credit_card_id)
+        if card is None:
+            continue
+        payment_account = (
+            account_by_id.get(card.payment_account_id) if card.payment_account_id else None
+        )
+        if payment_account is None or not payment_account.is_active:
+            payment_account = None
+            unassigned_invoice_total += invoice_summary.outstanding
+        add_forecast_item(
+            item_id=f"invoice:{invoice.id}",
+            source="CARD_INVOICE",
+            description=f"Fatura {card.name}",
+            movement_type="EXPENSE",
+            due_date=invoice.due_date,
+            amount=invoice_summary.outstanding,
+            account=payment_account,
+            card_name=card.name,
+        )
+
+    forecast_items.sort(key=lambda item: (item.due_date, item.description.casefold(), item.id))
+    overdue_total = sum(
+        (
+            item.amount
+            for item in forecast_items
+            if item.type == "EXPENSE" and item.status == "OVERDUE"
+        ),
+        start=ZERO,
+    )
+    next_7_days_total = sum(
+        (
+            item.amount
+            for item in forecast_items
+            if item.type == "EXPENSE" and item.status == "DUE_SOON"
+        ),
+        start=ZERO,
+    )
+    rest_of_month_total = sum(
+        (
+            item.amount
+            for item in forecast_items
+            if item.type == "EXPENSE" and item.status == "PLANNED"
+        ),
+        start=ZERO,
+    )
+    forecast_income_total = sum(
+        (item.amount for item in forecast_items if item.type == "INCOME"), start=ZERO
+    )
+    forecast_payables_total = overdue_total + next_7_days_total + rest_of_month_total
+    account_type_deltas: dict[str, Decimal] = {
+        account_type: ZERO for account_type in account_type_groups
+    }
+    for item in forecast_items:
+        payment_account = forecast_accounts_by_id[item.id]
+        if payment_account is not None and not payment_account.is_active:
+            payment_account = None
+        if payment_account is None or payment_account.type not in account_type_deltas:
+            continue
+        account_type_deltas[payment_account.type] += (
+            item.amount if item.type == "INCOME" else -item.amount
+        )
+
+    account_type_balances: list[AccountTypeBalanceSummary] = []
+    for account_type, group in account_type_groups.items():
+        count = group["count"]
+        incomplete = group["incomplete"]
+        balance = group["balance"] if incomplete == 0 else None
+        projected = balance + account_type_deltas[account_type] if balance is not None else None
+        account_type_balances.append(
+            AccountTypeBalanceSummary(
+                account_type=account_type,
+                balance=balance,
+                projected_balance=projected,
+                account_count=count,
+                incomplete_account_count=incomplete,
+            )
+        )
+    checking_group = account_type_groups.get("CHECKING")
+    incomplete_checking_account_count = checking_group["incomplete"] if checking_group else 0
+    checking_balance = None
+    if checking_group is not None and incomplete_checking_account_count == 0:
+        checking_balance = checking_group["balance"]
 
     cards = db.scalars(select(CreditCard).where(CreditCard.user_id == user.id)).all()
     card_summaries = [credit_card_response(db, card, today) for card in cards if card.is_active]
@@ -357,12 +591,22 @@ def dashboard_summary(
         as_of=today,
         period_start=period_start,
         period_end=period_end,
-        total_balance=total_balance,
-        incomplete_account_count=incomplete_account_count,
+        checking_balance=checking_balance,
+        incomplete_checking_account_count=incomplete_checking_account_count,
+        account_type_balances=account_type_balances,
         monthly_income=summary.income,
         monthly_expenses=summary.expenses,
         monthly_result=summary.result,
         expenses_by_category=category_summaries,
         cards=card_summaries,
         recent_transactions=recent_transactions,
+        forecast_start=today,
+        forecast_end=forecast_end,
+        forecast_payables_total=forecast_payables_total,
+        forecast_overdue_total=overdue_total,
+        forecast_next_7_days_total=next_7_days_total,
+        forecast_rest_of_month_total=rest_of_month_total,
+        forecast_income_total=forecast_income_total,
+        forecast_unassigned_invoice_total=unassigned_invoice_total,
+        forecast_items=forecast_items,
     )

@@ -1,0 +1,157 @@
+from calendar import monthrange
+from datetime import timedelta
+
+from fastapi.testclient import TestClient
+
+from app.finance_engine import current_financial_date
+
+
+def setup_commitment_finances(client: TestClient) -> tuple[str, str, str, str]:
+    setup = client.post(
+        "/api/auth/setup",
+        json={
+            "email": "compromissos@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    assert setup.status_code == 201
+    account = client.post(
+        "/api/accounts",
+        json={
+            "name": "Sicredi",
+            "type": "CHECKING",
+            "opening_balance": "1000.00",
+            "opening_balance_date": "2026-01-01",
+        },
+    ).json()
+    expense = client.post("/api/categories", json={"name": "Moradia", "type": "EXPENSE"}).json()
+    income = client.post("/api/categories", json={"name": "Salário", "type": "INCOME"}).json()
+    return account["id"], expense["id"], income["id"], account["balance"]
+
+
+def test_planned_commitments_are_forecast_then_recorded_once_when_paid(client: TestClient) -> None:
+    account_id, expense_category, income_category, _ = setup_commitment_finances(client)
+    today = current_financial_date()
+    due_soon = today + timedelta(days=2)
+    overdue_date = today - timedelta(days=1)
+    month_end = today.replace(day=monthrange(today.year, today.month)[1])
+    due_soon = min(due_soon, month_end)
+
+    late_bill = client.post(
+        "/api/commitments",
+        json={
+            "account_id": account_id,
+            "category_id": expense_category,
+            "type": "EXPENSE",
+            "description": "Conta atrasada",
+            "amount": "50.00",
+            "due_date": overdue_date.isoformat(),
+        },
+    )
+    bill = client.post(
+        "/api/commitments",
+        json={
+            "account_id": account_id,
+            "category_id": expense_category,
+            "type": "EXPENSE",
+            "description": "Conta de luz",
+            "amount": "70.00",
+            "due_date": due_soon.isoformat(),
+        },
+    )
+    salary = client.post(
+        "/api/commitments",
+        json={
+            "account_id": account_id,
+            "category_id": income_category,
+            "type": "INCOME",
+            "description": "Salário previsto",
+            "amount": "200.00",
+            "due_date": due_soon.isoformat(),
+        },
+    )
+    assert late_bill.status_code == bill.status_code == salary.status_code == 201
+
+    summary = client.get("/api/dashboard/summary").json()
+    assert summary["checking_balance"] == "1000.00"
+    assert summary["forecast_overdue_total"] == "50.00"
+    assert summary["forecast_next_7_days_total"] == "70.00"
+    assert summary["forecast_rest_of_month_total"] == "0.00"
+    assert summary["forecast_payables_total"] == "120.00"
+    assert summary["forecast_income_total"] == "200.00"
+    assert (
+        next(row for row in summary["account_type_balances"] if row["account_type"] == "CHECKING")[
+            "projected_balance"
+        ]
+        == "1080.00"
+    )
+    assert client.get("/api/transactions").json() == []
+
+    paid = client.post(f"/api/commitments/{bill.json()['id']}/pay")
+    repeated = client.post(f"/api/commitments/{bill.json()['id']}/pay")
+    assert paid.status_code == repeated.status_code == 200
+    assert paid.json()["transaction_id"] == repeated.json()["transaction_id"]
+    assert client.get("/api/accounts").json()[0]["balance"] == "930.00"
+    assert client.get("/api/transactions").json()[0]["amount"] == "70.00"
+    blocked_delete = client.delete(f"/api/transactions/{paid.json()['transaction_id']}")
+    assert blocked_delete.status_code == 409
+
+
+def test_planned_commitment_requires_owned_active_account_and_matching_category(
+    client: TestClient,
+) -> None:
+    account_id, expense_category, income_category, _ = setup_commitment_finances(client)
+    response = client.post(
+        "/api/commitments",
+        json={
+            "account_id": account_id,
+            "category_id": income_category,
+            "type": "EXPENSE",
+            "description": "Conta incompatível",
+            "amount": "10.00",
+            "due_date": current_financial_date().isoformat(),
+        },
+    )
+    assert response.status_code == 422
+    assert client.get("/api/commitments").json() == []
+    assert expense_category
+
+
+def test_open_card_invoice_is_forecast_and_reduces_only_its_selected_account_type(
+    client: TestClient,
+) -> None:
+    account_id, _, _, _ = setup_commitment_finances(client)
+    today = current_financial_date()
+    closing_month = f"{today.year:04d}-{today.month:02d}"
+    card = client.post(
+        "/api/cards",
+        json={
+            "name": "Nubank",
+            "credit_limit": "5000.00",
+            "closing_day": 13,
+            "due_day": 20,
+            "payment_account_id": account_id,
+        },
+    )
+    assert card.status_code == 201
+    invoice = client.put(
+        f"/api/cards/{card.json()['id']}/invoices/opening-balance",
+        json={"closing_month": closing_month, "amount": "250.00"},
+    )
+    assert invoice.status_code == 200
+
+    summary = client.get("/api/dashboard/summary").json()
+
+    assert summary["monthly_expenses"] == "0.00"
+    assert summary["checking_balance"] == "1000.00"
+    assert summary["forecast_payables_total"] == "250.00"
+    assert summary["forecast_unassigned_invoice_total"] == "0.00"
+    checking = next(
+        row for row in summary["account_type_balances"] if row["account_type"] == "CHECKING"
+    )
+    assert checking["projected_balance"] == "750.00"
+    assert any(
+        item["source"] == "CARD_INVOICE" and item["amount"] == "250.00"
+        for item in summary["forecast_items"]
+    )

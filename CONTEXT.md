@@ -34,6 +34,22 @@ _Evite_: classificação confirmada, aprendizagem automática.
 Resumo de uma regra futura antes de gravá-la. Exige confirmação e não altera saldo ou valores realizados.
 _Evite_: pagamento, transação futura.
 
+**Compromisso avulso**:
+Receita ou despesa futura sem repetição, vinculada a uma conta, categoria e data prevista. Permanece fora dos valores realizados até ser marcada como recebida ou paga e ligada a uma transação.
+_Evite_: transação futura, recorrência.
+
+**Previsão de obrigações**:
+Lista de ocorrências recorrentes não pagas, compromissos avulsos e faturas abertas com vencimento até o fim do mês. Inclui valores vencidos de meses anteriores e separa atrasados, próximos sete dias e restante do mês.
+_Evite_: dívida confirmada, saldo atual.
+
+**Saldo por tipo de conta**:
+Saldo real ou projetado agrupado por conta corrente, poupança, dinheiro e outras contas. O valor principal chamado saldo em contas correntes contém somente contas do tipo `CHECKING`.
+_Evite_: saldo total sem qualificar os tipos de conta.
+
+**Saldo projetado**:
+Estimativa separada do saldo real, obtida ao aplicar compromissos não pagos até o fim do mês e faturas abertas associadas a uma conta pagadora.
+_Evite_: saldo atual, saldo garantido.
+
 ## Fontes de dados
 
 **Registro manual**:
@@ -61,7 +77,7 @@ Movimento importado que pode corresponder a um registro manual e fica fora dos t
 Valor produzido pelo Finance Engine a partir do saldo inicial e das transações registradas.
 
 **Saldo calculado incompleto**:
-Resultado que não deve ser apresentado como saldo atual quando a data ou o valor de abertura ainda não foram informados. O sistema representa explicitamente essa situação; o acompanhamento de movimentos manuais ainda depende de o usuário registrar todos os movimentos desde a base informada.
+Resultado que não deve ser apresentado como saldo atual quando a data ou o valor de abertura ainda não foram informados. A incompletude afeta o resumo do tipo de conta correspondente; uma poupança incompleta não oculta o saldo de contas correntes. O acompanhamento de movimentos manuais ainda depende de o usuário registrar todos os movimentos desde a base informada.
 
 **Saldo informado pela instituição**:
 Valor de saldo reportado pelo banco em uma consulta ou sincronização, usado como referência de conferência.

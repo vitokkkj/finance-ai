@@ -65,10 +65,12 @@ type AssistantMessage = {
   role: "USER" | "ASSISTANT";
   content: string;
   structured_content?: StructuredItem[] | null;
-  imagePreview?: string;
+  imagePreviews?: { id: string; dataUrl: string }[];
   pending?: boolean;
   interrupted?: boolean;
 };
+
+type ChatImageAttachment = { id: string; dataUrl: string };
 
 let optimisticMessageSequence = 0;
 
@@ -130,10 +132,12 @@ const DEFAULT_ASSISTANT_PREFERENCES: AssistantPreferences = {
 };
 
 type Dashboard = {
+  as_of: string;
   period_start: string;
   period_end: string;
-  total_balance: string | null;
-  incomplete_account_count: number;
+  checking_balance: string | null;
+  incomplete_checking_account_count: number;
+  account_type_balances: { account_type: "CHECKING" | "SAVINGS" | "CASH" | "OTHER"; balance: string | null; projected_balance: string | null; account_count: number; incomplete_account_count: number }[];
   monthly_income: string;
   monthly_expenses: string;
   monthly_result: string;
@@ -156,9 +160,18 @@ type Dashboard = {
     source_account_id?: string | null;
     destination_account_id?: string | null;
   }[];
+  forecast_start: string;
+  forecast_end: string;
+  forecast_payables_total: string;
+  forecast_overdue_total: string;
+  forecast_next_7_days_total: string;
+  forecast_rest_of_month_total: string;
+  forecast_income_total: string;
+  forecast_unassigned_invoice_total: string;
+  forecast_items: { id: string; source: "RECURRENCE" | "COMMITMENT" | "CARD_INVOICE"; description: string; type: "INCOME" | "EXPENSE"; due_date: string; amount: string; account_type: "CHECKING" | "SAVINGS" | "CASH" | "OTHER" | null; account_name: string | null; card_name: string | null; status: "OVERDUE" | "DUE_SOON" | "PLANNED" }[];
 };
 
-type ContextAccount = { id: string; name: string; balance: string | null; is_active: boolean };
+type ContextAccount = { id: string; name: string; type: "CHECKING" | "SAVINGS" | "CASH" | "OTHER"; balance: string | null; is_active: boolean };
 type ContextCard = {
   id: string;
   name: string;
@@ -237,6 +250,10 @@ function displayMonth(value: string): string {
     year: "numeric",
     timeZone: "America/Sao_Paulo",
   }).format(parsed);
+}
+
+function accountTypeLabel(value: ContextAccount["type"]): string {
+  return { CHECKING: "Conta corrente", SAVINGS: "Poupança", CASH: "Dinheiro", OTHER: "Outras contas" }[value];
 }
 
 function previousMonthQuery(periodStart: string): string | null {
@@ -347,7 +364,7 @@ export function AssistantWorkspace({
   const [diagnostics, setDiagnostics] = useState<AIDiagnostic[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [draft, setDraft] = useState("");
-  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [attachedImages, setAttachedImages] = useState<ChatImageAttachment[]>([]);
   const [attachedImageError, setAttachedImageError] = useState("");
   const [greeting, setGreeting] = useState("Olá");
   const [loading, setLoading] = useState(true);
@@ -482,12 +499,21 @@ export function AssistantWorkspace({
     setMessages((current) => current.map((message) => (message.id === id ? update(message) : message)));
   }
 
-  async function sendMessage(content: string, imageDataUrl: string | null = null) {
+  async function sendMessage(content: string, imageDataUrls: string[] = []) {
     const clean = content.trim();
-    const messageContent = clean || (imageDataUrl ? "Analise esta imagem financeira e me diga o que encontrou." : "");
+    const messageContent = clean || (imageDataUrls.length ? "Analise estas imagens financeiras em conjunto e me diga o que encontrou." : "");
     if (!messageContent || sending || status?.configured !== true) return;
-    if (imageDataUrl && status.provider !== "chatgpt_plan") {
+    if (imageDataUrls.length && status.provider !== "chatgpt_plan") {
       setError("A análise de imagens está disponível quando o ChatGPT conectado estiver ativo.");
+      return;
+    }
+    if (imageDataUrls.length > 4) {
+      setAttachedImageError("Envie no máximo 4 imagens por mensagem.");
+      return;
+    }
+    const requestBody = JSON.stringify({ content: messageContent, ...(imageDataUrls.length ? { image_data_urls: imageDataUrls } : {}) });
+    if (new TextEncoder().encode(requestBody).byteLength > 12_500_000) {
+      setAttachedImageError("As imagens juntas excedem o limite da mensagem. Remova uma imagem ou escolha versões menores.");
       return;
     }
     setError("");
@@ -514,8 +540,10 @@ export function AssistantWorkspace({
         id: createOptimisticMessageId(),
         role: "USER",
         content: messageContent,
-        imagePreview: imageDataUrl ?? undefined,
-        structured_content: imageDataUrl ? [{ type: "image_attachment", data: { stored: false } }] : undefined,
+        imagePreviews: imageDataUrls.length
+          ? imageDataUrls.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl }))
+          : undefined,
+        structured_content: imageDataUrls.length ? imageDataUrls.map(() => ({ type: "image_attachment", data: { stored: false } })) : undefined,
       };
       const assistantId = createOptimisticMessageId();
       optimisticMessageIds = [userMessage.id, assistantId];
@@ -532,7 +560,7 @@ export function AssistantWorkspace({
           "X-SophIA-Request": "1",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ content: messageContent, ...(imageDataUrl ? { image_data_url: imageDataUrl } : {}) }),
+        body: requestBody,
         cache: "no-store",
         signal: requestController.signal,
       });
@@ -548,7 +576,7 @@ export function AssistantWorkspace({
       }
       responseAccepted = true;
       setDraft("");
-      setAttachedImage(null);
+      setAttachedImages([]);
       setAttachedImageError("");
       if (composerRef.current) composerRef.current.style.height = "42px";
       if (!response.body) throw new Error("A resposta do assistente veio vazia.");
@@ -650,72 +678,76 @@ export function AssistantWorkspace({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await sendMessage(draft, attachedImage);
+    await sendMessage(draft, attachedImages.map((image) => image.dataUrl));
   }
 
-  async function prepareChatImage(file: File | null) {
-    if (!file) {
-      setAttachedImageError("Não foi possível ler a imagem copiada.");
-      return;
-    }
+  async function prepareChatImages(files: File[]) {
+    if (!files.length) return;
     setAttachedImageError("");
     if (status?.provider !== "chatgpt_plan") {
       setAttachedImageError("A análise de imagens funciona com o ChatGPT conectado.");
       return;
     }
-    if (!(file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp")) {
-      setAttachedImageError("Escolha uma imagem JPEG, PNG ou WebP.");
-      return;
-    }
-    if (file.size > 25 * 1024 * 1024) {
-      setAttachedImageError("A imagem precisa ter até 25 MB.");
+    if (attachedImages.length + files.length > 4) {
+      setAttachedImageError("Envie no máximo 4 imagens por mensagem.");
       return;
     }
     try {
-      const bitmap = await createImageBitmap(file);
-      if (bitmap.width * bitmap.height > 48_000_000) {
+      const preparedImages: string[] = [];
+      for (const file of files) {
+        if (!(file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp")) {
+          throw new Error("Escolha imagens JPEG, PNG ou WebP.");
+        }
+        if (file.size > 25 * 1024 * 1024) throw new Error("Cada imagem precisa ter até 25 MB.");
+        const bitmap = await createImageBitmap(file);
+        if (bitmap.width * bitmap.height > 48_000_000) {
+          bitmap.close();
+          throw new Error("Uma imagem excede 48 megapixels. Envie uma versão reduzida.");
+        }
+        const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          bitmap.close();
+          throw new Error("Não foi possível preparar uma das imagens.");
+        }
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
         bitmap.close();
-        throw new Error("A imagem original excede 48 megapixels. Envie uma versão reduzida.");
+        const normalized = canvas.toDataURL("image/webp", 0.82);
+        if (normalized.length > 3_000_000) throw new Error("Não foi possível reduzir uma imagem o suficiente. Tente uma captura menor.");
+        preparedImages.push(normalized);
       }
-      const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-      const context = canvas.getContext("2d");
-      if (!context) {
-        bitmap.close();
-        throw new Error("Não foi possível preparar essa imagem.");
-      }
-      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      bitmap.close();
-      const normalized = canvas.toDataURL("image/webp", 0.88);
-      if (normalized.length > 3_000_000) throw new Error("Não foi possível reduzir a imagem o suficiente. Tente uma captura de tela menor.");
-      setAttachedImage(normalized);
+      setAttachedImages((current) => [
+        ...current,
+        ...preparedImages.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl })),
+      ]);
     } catch (imageError) {
       setAttachedImageError(imageError instanceof Error ? imageError.message : "Não foi possível ler essa imagem.");
     }
   }
 
   async function selectChatImage(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0] ?? null;
+    const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
-    await prepareChatImage(file);
+    await prepareChatImages(files);
   }
 
   function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const imageItem = Array.from(event.clipboardData.items).find(
+    const imageItems = Array.from(event.clipboardData.items).filter(
       (item) => item.kind === "file" && item.type.startsWith("image/"),
     );
-    if (!imageItem) return;
+    if (!imageItems.length) return;
 
     event.preventDefault();
-    void prepareChatImage(imageItem.getAsFile());
+    void prepareChatImages(imageItems.map((item) => item.getAsFile()).filter((file): file is File => file !== null));
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void sendMessage(draft, attachedImage);
+      void sendMessage(draft, attachedImages.map((image) => image.dataUrl));
     }
   }
 
@@ -906,8 +938,8 @@ export function AssistantWorkspace({
   ) : null;
   const composer = aiAvailable ? (
     <form className={showWelcome ? "assistant-composer assistant-composer-inline" : "assistant-composer"} onSubmit={(event) => void handleSubmit(event)}>
-      <input accept="image/jpeg,image/png,image/webp" aria-label="Anexar foto" className="assistant-attachment-input" onChange={(event) => void selectChatImage(event)} ref={attachmentInputRef} type="file" />
-      {attachedImage && <div className="assistant-attachment-preview"><Image alt="Prévia da imagem anexada" height={52} src={attachedImage} unoptimized width={52} /><span>Imagem pronta para análise<span>Será enviada ao ChatGPT conectado e não ficará armazenada no histórico.</span></span><button aria-label="Remover imagem" onClick={() => { setAttachedImage(null); setAttachedImageError(""); }} type="button"><X aria-hidden="true" size={16} /></button></div>}
+      <input accept="image/jpeg,image/png,image/webp" aria-label="Anexar fotos" className="assistant-attachment-input" multiple onChange={(event) => void selectChatImage(event)} ref={attachmentInputRef} type="file" />
+      {attachedImages.length > 0 && <div className="assistant-attachment-preview"><div className="assistant-attachment-thumbnails">{attachedImages.map((image, index) => <div className="assistant-attachment-thumbnail" key={image.id}><Image alt={`Prévia da imagem ${index + 1}`} height={52} src={image.dataUrl} unoptimized width={52} /><button aria-label={`Remover imagem ${index + 1}`} onClick={() => { setAttachedImages((current) => current.filter((item) => item.id !== image.id)); setAttachedImageError(""); }} type="button"><X aria-hidden="true" size={14} /></button></div>)}</div><span>{attachedImages.length} {attachedImages.length === 1 ? "imagem pronta" : "imagens prontas"} para análise<span>Serão enviadas ao ChatGPT conectado e removidas do armazenamento após a análise.</span></span></div>}
       {attachedImageError && <p className="assistant-attachment-error" role="alert">{attachedImageError}</p>}
       <textarea
         aria-label="Mensagem para o assistente"
@@ -926,12 +958,12 @@ export function AssistantWorkspace({
         value={draft}
       />
       <div className="assistant-composer-footer">
-        <span id="assistant-composer-hint">Ctrl/⌘ + V cola imagem · Enter envia · Shift + Enter quebra linha</span>
+        <span id="assistant-composer-hint">Até 4 imagens · Ctrl/⌘ + V cola imagens · Enter envia</span>
         <div className="assistant-composer-actions">
           <button aria-label="Anexar foto para análise" className="assistant-attach-button" disabled={sending || status?.provider !== "chatgpt_plan"} onClick={() => attachmentInputRef.current?.click()} title={status?.provider === "chatgpt_plan" ? "Anexar foto" : "Fotos funcionam com o ChatGPT conectado"} type="button"><ImagePlus aria-hidden="true" size={18} /></button>
           {sending
             ? <button aria-label="Parar resposta" className="assistant-stop-button" onClick={stopGenerating} title="Parar a resposta" type="button"><Square aria-hidden="true" fill="currentColor" size={14} /></button>
-            : <button aria-label="Enviar mensagem" disabled={!draft.trim() && !attachedImage} type="submit"><ArrowUp aria-hidden="true" size={19} /></button>}
+            : <button aria-label="Enviar mensagem" disabled={!draft.trim() && attachedImages.length === 0} type="submit"><ArrowUp aria-hidden="true" size={19} /></button>}
         </div>
       </div>
     </form>
@@ -1153,10 +1185,11 @@ export function AssistantWorkspace({
                     <p className="assistant-welcome-copy">Como posso ajudar com suas finanças hoje?</p>
                     {dashboard && (contextAccounts.length > 0 || dashboard.monthly_expenses !== "0.00") && (
                       <div className="assistant-home-summary">
-                        {contextAccounts.length > 0 && dashboard.total_balance !== null && <span>Saldo total <strong>{formatCurrency(dashboard.total_balance)}</strong></span>}
-                        {contextAccounts.length > 0 && dashboard.total_balance === null && (
-                          <span>Saldo consolidado <strong>Incompleto</strong><small>{dashboard.incomplete_account_count} {dashboard.incomplete_account_count === 1 ? "conta precisa" : "contas precisam"} de saldo inicial e data-base</small></span>
+                        {contextAccounts.length > 0 && dashboard.checking_balance !== null && <span>Saldo em contas correntes <strong>{formatCurrency(dashboard.checking_balance)}</strong></span>}
+                        {contextAccounts.length > 0 && dashboard.checking_balance === null && (
+                          <span>Saldo em contas correntes <strong>{dashboard.incomplete_checking_account_count > 0 ? "Incompleto" : "Não cadastrado"}</strong><small>{dashboard.incomplete_checking_account_count} {dashboard.incomplete_checking_account_count === 1 ? "conta corrente precisa" : "contas correntes precisam"} de saldo inicial e data-base</small></span>
                         )}
+                        {dashboard.account_type_balances.filter((group) => group.account_type !== "CHECKING").map((group) => <span key={group.account_type}>Saldo em {accountTypeLabel(group.account_type).toLocaleLowerCase("pt-BR")} <strong>{group.balance === null ? "Pendente" : formatCurrency(group.balance)}</strong></span>)}
                         <span>Gastos no mês <strong>{formatCurrency(dashboard.monthly_expenses)}</strong></span>
                       </div>
                     )}
@@ -1256,7 +1289,7 @@ function MessageBubble({
       <div className="message-body">
         <div className="message-author">{userMessage ? "Você" : "SophIA"}</div>
         {message.content && <p className="message-text">{userMessage ? message.content : renderAssistantText(message.content)}</p>}
-        {message.imagePreview ? <Image alt="Imagem enviada para análise" className="assistant-message-image" height={240} src={message.imagePreview} unoptimized width={420} /> : userMessage && message.structured_content?.some((item) => item.type === "image_attachment") ? <span className="assistant-image-not-stored">Imagem analisada e removida do armazenamento da conversa.</span> : null}
+        {message.imagePreviews?.length ? <div className="assistant-message-images">{message.imagePreviews.map((image, index) => <Image alt={`Imagem ${index + 1} enviada para análise`} className="assistant-message-image" height={240} key={image.id} src={image.dataUrl} unoptimized width={420} />)}</div> : userMessage && message.structured_content?.some((item) => item.type === "image_attachment") ? <span className="assistant-image-not-stored">{message.structured_content.filter((item) => item.type === "image_attachment").length} {message.structured_content.filter((item) => item.type === "image_attachment").length === 1 ? "imagem analisada" : "imagens analisadas"} e removidas do armazenamento da conversa.</span> : null}
         {message.pending && <div aria-live="polite" className="assistant-pending-card" role="status">
           <span aria-hidden="true" className="assistant-pending-icon"><LoaderCircle size={20} strokeWidth={2} /></span>
           <span className="assistant-pending-copy"><strong>{pendingLabel || "Preparando sua resposta…"}</strong><small>A SophIA está trabalhando nos seus dados.</small></span>
@@ -1595,7 +1628,8 @@ function ContextPanel({
           </section>
         </> : accounts.length ? <section className="context-cards"><div className="context-section-heading"><span>Saldos das contas</span></div>{accounts.slice(0, 4).map((account) => <div className="context-card-row" key={account.id}><span>{account.name}</span><strong>{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</strong></div>)}</section> : <p className="context-empty">Nenhuma conta cadastrada.</p>
       ) : mode === "spending" ? <>
-        <section className="context-balance"><span>Saldo atual das contas</span><strong>{dashboard.total_balance === null ? "Incompleto" : formatCurrency(dashboard.total_balance)}</strong><small>{dashboard.total_balance === null ? `${dashboard.incomplete_account_count} conta(s) precisam de saldo inicial e data-base` : "Soma dos saldos atuais das contas"}</small></section>
+        <section className="context-balance"><span>Saldo em contas correntes</span><strong>{dashboard.checking_balance === null ? (dashboard.incomplete_checking_account_count ? "Incompleto" : "Não cadastrado") : formatCurrency(dashboard.checking_balance)}</strong><small>{dashboard.checking_balance === null ? `${dashboard.incomplete_checking_account_count} conta(s) corrente(s) precisam de saldo inicial e data-base` : "Poupança e outros tipos aparecem separados"}</small></section>
+        <ForecastContext dashboard={dashboard} />
         {previousMonthRequested && !previousDashboard ? <p className="context-empty">{previousDashboardLoading ? "Carregando o mês passado…" : "Resumo do mês passado indisponível."}</p> : <>
         <div className="context-metrics context-period-comparison">
           <div><span>{previousMonthRequested ? displayMonth(spendingDashboard?.period_start ?? "") : displayMonth(dashboard.period_start)}</span><strong>{formatCurrency(spendingDashboard?.monthly_expenses ?? "0.00")}</strong></div>
@@ -1608,12 +1642,14 @@ function ContextPanel({
         {recentExpenses.length > 0 && <section className="context-cards context-recent-list"><div className="context-section-heading"><span>Despesas recentes</span></div>{recentExpenses.slice(0, 3).map((transaction) => <ContextMovementRow key={transaction.id} transaction={transaction} />)}</section>}
         </>}
       </> : <>
-        <section className="context-balance"><span>Saldo total em contas</span><strong>{dashboard.total_balance === null ? (dashboard.incomplete_account_count > 0 ? "Incompleto" : "Indisponível") : formatCurrency(dashboard.total_balance)}</strong><small>{dashboard.total_balance === null ? `${dashboard.incomplete_account_count} conta(s) precisam de saldo inicial e data-base` : "Soma dos saldos atuais das contas"}</small></section>
+        <section className="context-balance"><span>Saldo em contas correntes</span><strong>{dashboard.checking_balance === null ? (dashboard.incomplete_checking_account_count > 0 ? "Incompleto" : "Não cadastrado") : formatCurrency(dashboard.checking_balance)}</strong><small>{dashboard.checking_balance === null ? `${dashboard.incomplete_checking_account_count} conta(s) corrente(s) precisam de saldo inicial e data-base` : "Somente contas correntes"}</small></section>
         <div className="context-metrics context-overview-metrics">
           <div><span>Gastos em {displayMonth(dashboard.period_start)}</span><strong>{formatCurrency(dashboard.monthly_expenses)}</strong></div>
           <div><span>Contas acompanhadas</span><strong>{accounts.length}</strong></div>
         </div>
-        {accounts.length > 0 && <section className="context-cards"><div className="context-section-heading"><span>Saldos por conta</span></div>{accounts.slice(0, 4).map((account) => <div className="context-card-row" key={account.id}><span>{account.name}</span><strong>{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</strong></div>)}</section>}
+        {dashboard.account_type_balances.filter((group) => group.account_type !== "CHECKING").length > 0 && <section className="context-cards"><div className="context-section-heading"><span>Outros saldos, separados</span></div>{dashboard.account_type_balances.filter((group) => group.account_type !== "CHECKING").map((group) => <div className="context-card-row" key={group.account_type}><span>{accountTypeLabel(group.account_type)}<small>Saldo real · projeção {group.projected_balance === null ? "indisponível" : formatCurrency(group.projected_balance)}</small></span><strong>{group.balance === null ? "Pendente" : formatCurrency(group.balance)}</strong></div>)}</section>}
+        {accounts.length > 0 && <section className="context-cards"><div className="context-section-heading"><span>Saldos por conta</span></div>{accounts.slice(0, 4).map((account) => <div className="context-card-row" key={account.id}><span>{account.name}<small>{accountTypeLabel(account.type)}</small></span><strong>{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</strong></div>)}</section>}
+        <ForecastContext dashboard={dashboard} />
         {dashboard.recent_transactions.length > 0 && <section className="context-cards context-recent-list"><div className="context-section-heading"><span>Últimos movimentos</span></div>{dashboard.recent_transactions.slice(0, 3).map((transaction) => <ContextMovementRow key={transaction.id} transaction={transaction} />)}</section>}
       </>}
       {dashboard && <p className="context-truth-note"><span aria-hidden="true">✓</span> Valores do Finance Engine</p>}
@@ -1634,6 +1670,24 @@ function ContextMovementRow({ transaction }: { transaction: Dashboard["recent_tr
     <span className="context-transaction-copy"><strong>{transaction.description}</strong><small>{label} · {displayDate(transaction.occurred_at)}</small></span>
     <strong className={`context-transaction-amount ${tone}`}>{prefix}{formatCurrency(transaction.amount)}</strong>
   </div>;
+}
+
+function ForecastContext({ dashboard }: { dashboard: Dashboard }) {
+  const checkingProjection = dashboard.account_type_balances.find((group) => group.account_type === "CHECKING")?.projected_balance;
+  const expenses = dashboard.forecast_items.filter((item) => item.type === "EXPENSE").slice(0, 5);
+  return (
+    <section className="context-cards context-forecast">
+      <div className="context-section-heading"><span>A pagar até {displayDate(dashboard.forecast_end)}</span></div>
+      <div className="context-metrics">
+        <div><span>Total previsto</span><strong>{formatCurrency(dashboard.forecast_payables_total)}</strong></div>
+        <div><span>Em atraso</span><strong>{formatCurrency(dashboard.forecast_overdue_total)}</strong></div>
+        <div><span>Próximos 7 dias</span><strong>{formatCurrency(dashboard.forecast_next_7_days_total)}</strong></div>
+        <div><span>Saldo corrente projetado</span><strong>{checkingProjection == null ? "Indisponível" : formatCurrency(checkingProjection)}</strong></div>
+      </div>
+      {dashboard.forecast_unassigned_invoice_total !== "0.00" && <p className="forecast-unassigned-note">Faturas sem conta pagadora: {formatCurrency(dashboard.forecast_unassigned_invoice_total)}.</p>}
+      {expenses.length ? expenses.map((item) => <div className="context-card-row" key={item.id}><span>{item.description}<small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}</small></span><strong>{formatCurrency(item.amount)}</strong></div>) : <p>Nenhum pagamento previsto até o fim do mês.</p>}
+    </section>
+  );
 }
 
 function SettingsView({
