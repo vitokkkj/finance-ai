@@ -13,6 +13,7 @@ import {
   ImagePlus,
   Landmark,
   LayoutDashboard,
+  LoaderCircle,
   LogOut,
   Menu,
   MessageSquare,
@@ -26,6 +27,7 @@ import {
   ReceiptText,
   Repeat2,
   SlidersHorizontal,
+  Square,
   Sun,
   Tags,
   WalletCards,
@@ -65,6 +67,7 @@ type AssistantMessage = {
   structured_content?: StructuredItem[] | null;
   imagePreview?: string;
   pending?: boolean;
+  interrupted?: boolean;
 };
 
 let optimisticMessageSequence = 0;
@@ -350,6 +353,7 @@ export function AssistantWorkspace({
   const [loading, setLoading] = useState(true);
   const [firstUseRequired, setFirstUseRequired] = useState<boolean | null>(null);
   const [sending, setSending] = useState(false);
+  const [responseProgress, setResponseProgress] = useState("");
   const [loadingSettings, setLoadingSettings] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [activeTool, setActiveTool] = useState("");
@@ -365,6 +369,7 @@ export function AssistantWorkspace({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const conversationRenameRef = useRef<HTMLInputElement>(null);
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
 
   const loadConversations = useCallback(async () => {
     const rows = await apiRequest<Conversation[]>("/api/ai/conversations");
@@ -486,7 +491,10 @@ export function AssistantWorkspace({
       return;
     }
     setError("");
+    const requestController = new AbortController();
+    activeRequestControllerRef.current = requestController;
     setSending(true);
+    setResponseProgress(pendingLabelFor(messageContent));
     setActiveTool("");
     let activeConversationId = conversationId;
     let optimisticMessageIds: [string, string] | null = null;
@@ -497,6 +505,7 @@ export function AssistantWorkspace({
           "/api/ai/conversations",
           { method: "POST", body: JSON.stringify({}) },
         );
+        if (requestController.signal.aborted) throw new DOMException("Resposta interrompida", "AbortError");
         activeConversationId = created.id;
         setConversationId(created.id);
       }
@@ -525,6 +534,7 @@ export function AssistantWorkspace({
         },
         body: JSON.stringify({ content: messageContent, ...(imageDataUrl ? { image_data_url: imageDataUrl } : {}) }),
         cache: "no-store",
+        signal: requestController.signal,
       });
       if (!response.ok) {
         let message = "Não foi possível enviar a mensagem.";
@@ -590,7 +600,13 @@ export function AssistantWorkspace({
           } else if (eventName === "tool_status") {
             const name = stringValue(payload.name) ?? "uma ferramenta financeira";
             const toolStatus = stringValue(payload.status);
-            setActiveTool(toolStatus === "running" ? `Consultando ${toolLabel(name)}…` : "");
+            setActiveTool(
+              toolStatus === "running"
+                ? `Consultando ${toolLabel(name)}…`
+                : toolStatus === "complete"
+                  ? "Organizando os resultados…"
+                  : "",
+            );
           } else if (eventName === "done") {
             setActiveTool("");
           }
@@ -599,6 +615,17 @@ export function AssistantWorkspace({
 
       await Promise.all([loadConversation(activeConversationId), loadConversations(), loadDashboard()]);
     } catch (sendError) {
+      if (isAbortError(sendError)) {
+        const assistantId = optimisticMessageIds?.[1];
+        if (assistantId) {
+          updateAssistantMessage(assistantId, (message) => ({
+            ...message,
+            pending: false,
+            interrupted: true,
+          }));
+        }
+        return;
+      }
       const message = sendError instanceof Error ? sendError.message : "Não foi possível concluir a mensagem.";
       setError(message);
       const failedMessageIds = optimisticMessageIds;
@@ -608,9 +635,17 @@ export function AssistantWorkspace({
         setMessages((current) => current.filter((item) => !failedMessageIds.includes(item.id)));
       }
     } finally {
+      if (activeRequestControllerRef.current === requestController) {
+        activeRequestControllerRef.current = null;
+      }
       setActiveTool("");
+      setResponseProgress("");
       setSending(false);
     }
+  }
+
+  function stopGenerating() {
+    activeRequestControllerRef.current?.abort();
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -894,7 +929,9 @@ export function AssistantWorkspace({
         <span id="assistant-composer-hint">Ctrl/⌘ + V cola imagem · Enter envia · Shift + Enter quebra linha</span>
         <div className="assistant-composer-actions">
           <button aria-label="Anexar foto para análise" className="assistant-attach-button" disabled={sending || status?.provider !== "chatgpt_plan"} onClick={() => attachmentInputRef.current?.click()} title={status?.provider === "chatgpt_plan" ? "Anexar foto" : "Fotos funcionam com o ChatGPT conectado"} type="button"><ImagePlus aria-hidden="true" size={18} /></button>
-          <button aria-label="Enviar mensagem" disabled={sending || (!draft.trim() && !attachedImage)} type="submit">{sending ? <span className="assistant-spinner" /> : <ArrowUp aria-hidden="true" size={19} />}</button>
+          {sending
+            ? <button aria-label="Parar resposta" className="assistant-stop-button" onClick={stopGenerating} title="Parar a resposta" type="button"><Square aria-hidden="true" fill="currentColor" size={14} /></button>
+            : <button aria-label="Enviar mensagem" disabled={!draft.trim() && !attachedImage} type="submit"><ArrowUp aria-hidden="true" size={19} /></button>}
         </div>
       </div>
     </form>
@@ -1142,11 +1179,12 @@ export function AssistantWorkspace({
                   <MessageBubble
                     key={message.id}
                     message={message}
+                    pendingLabel={activeTool || responseProgress}
+                    onStop={stopGenerating}
                     onPendingAction={(id, action) => void handlePendingAction(id, action)}
                     pendingAction={pendingAction}
                   />
                 ))}
-                {activeTool && <div className="assistant-tool-progress"><span className="assistant-spinner" />{activeTool}</div>}
               </div>
               {!showWelcome && providerPausedNotice}
               {!showWelcome && composer}
@@ -1183,12 +1221,31 @@ function toolLabel(name: string): string {
   return labels[name] ?? "seus dados financeiros";
 }
 
+function pendingLabelFor(content: string): string {
+  const normalized = normalizeForMatch(content);
+  if (/(gasto|gastei|despesa|categoria|combustivel|alimentacao|mercado)/.test(normalized)) {
+    return "Preparando a consulta dos seus gastos…";
+  }
+  if (/(fatura|cartao|limite)/.test(normalized)) return "Preparando a consulta da fatura…";
+  if (/(saldo|conta|extrato)/.test(normalized)) return "Preparando a consulta do saldo…";
+  if (/(receita|recebi|salario|entrada)/.test(normalized)) return "Preparando a consulta das receitas…";
+  return "Entendendo seu pedido…";
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+}
+
 function MessageBubble({
   message,
+  pendingLabel,
+  onStop,
   onPendingAction,
   pendingAction,
 }: {
   message: AssistantMessage;
+  pendingLabel: string;
+  onStop: () => void;
   onPendingAction: (id: string, action: "confirm" | "cancel") => void;
   pendingAction: PendingAction;
 }) {
@@ -1200,7 +1257,12 @@ function MessageBubble({
         <div className="message-author">{userMessage ? "Você" : "SophIA"}</div>
         {message.content && <p className="message-text">{userMessage ? message.content : renderAssistantText(message.content)}</p>}
         {message.imagePreview ? <Image alt="Imagem enviada para análise" className="assistant-message-image" height={240} src={message.imagePreview} unoptimized width={420} /> : userMessage && message.structured_content?.some((item) => item.type === "image_attachment") ? <span className="assistant-image-not-stored">Imagem analisada e removida do armazenamento da conversa.</span> : null}
-        {message.pending && !message.content && <span className="assistant-pending" role="status"><span className="assistant-spinner" />Respondendo</span>}
+        {message.pending && <div aria-live="polite" className="assistant-pending-card" role="status">
+          <span aria-hidden="true" className="assistant-pending-icon"><LoaderCircle size={20} strokeWidth={2} /></span>
+          <span className="assistant-pending-copy"><strong>{pendingLabel || "Preparando sua resposta…"}</strong><small>A SophIA está trabalhando nos seus dados.</small></span>
+          <button aria-label="Parar resposta" className="assistant-stop-inline" onClick={onStop} title="Parar a resposta" type="button"><Square aria-hidden="true" fill="currentColor" size={12} /><span>Parar</span></button>
+        </div>}
+        {message.interrupted && <p className="assistant-interrupted-note" role="status">Resposta interrompida por você.</p>}
         {message.structured_content?.map((item) => (
           <StructuredCard
             item={item}
