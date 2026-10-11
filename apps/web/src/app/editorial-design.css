@@ -3755,6 +3755,10 @@ textarea:focus-visible {
   color: var(--color-sidebar-text);
 }
 
+.assistant-sidebar .assistant-nav .assistant-nav-group .assistant-nav-item {
+  color: var(--color-brand);
+}
+
 .assistant-sidebar .history-marker {
   flex: none;
   margin-top: 5px;
