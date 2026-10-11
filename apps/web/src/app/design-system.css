@@ -3160,7 +3160,7 @@ button {
 }
 
 .assistant-notifications {
-  position: relative;
+  position: static;
   flex: 0 0 auto;
 }
 
@@ -3219,7 +3219,7 @@ button {
   position: absolute;
   z-index: 20;
   top: calc(100% + 11px);
-  right: 0;
+  right: clamp(18px, 2.3vw, 32px);
   width: min(410px, calc(100vw - 28px));
   max-height: min(72dvh, 560px);
   padding: 18px;
