@@ -51,6 +51,7 @@ type Conversation = {
 type StructuredItem = {
   type: string;
   data?: unknown;
+  snapshot_kind?: string;
   tool_call_id?: string;
   status?: string;
 };
@@ -1112,7 +1113,7 @@ function MessageBubble({
         {message.structured_content?.map((item) => (
           <StructuredCard
             item={item}
-            key={`${message.id}-${item.tool_call_id ?? `${item.type}-${JSON.stringify(item.data)}`}`}
+            key={`${message.id}-${item.tool_call_id ?? `${item.type}-${item.snapshot_kind ?? ""}-${JSON.stringify(item.data)}`}`}
             onPendingAction={onPendingAction}
             pendingAction={pendingAction}
           />
@@ -1186,15 +1187,16 @@ function StructuredCard({
   }
   if (item.type === "account_card") {
     const accounts = Array.isArray(item.data) ? item.data : data ? [data] : [];
+    const postMovement = item.snapshot_kind === "after_movement";
     return (
       <section className="assistant-data-card">
-        <div className="assistant-data-card-heading"><span>{accounts.length === 1 ? "Saldo da conta" : "Contas"}</span></div>
+        <div className="assistant-data-card-heading"><span>{postMovement ? accounts.length === 1 ? "Saldo após esta movimentação" : "Saldos após esta movimentação" : accounts.length === 1 ? "Saldo da conta" : "Contas"}</span></div>
         <div className="assistant-transaction-list">
           {accounts.map((entry, index) => {
             const account = record(entry);
             if (!account) return null;
             const balance = stringValue(account.balance);
-            return <div className="assistant-transaction-row" key={stringValue(account.id) ?? index}><span><strong>{stringValue(account.name) ?? "Conta"}</strong><small>{balance ? "Saldo disponível" : "Saldo inicial não informado"}</small></span><b>{balance ? formatCurrency(balance) : "Pendente"}</b></div>;
+            return <div className="assistant-transaction-row" key={stringValue(account.id) ?? index}><span><strong>{stringValue(account.name) ?? "Conta"}</strong><small>{balance ? postMovement ? "Recalculado após o registro" : "Saldo consultado nesta resposta" : "Saldo inicial não informado"}</small></span><b>{balance ? formatCurrency(balance) : "Pendente"}</b></div>;
           })}
         </div>
       </section>

@@ -33,20 +33,24 @@ from app.models import AIMessage, User
 
 
 class FakeAIProvider:
-    def __init__(self, responses: list[list[ProviderEvent]]) -> None:
+    def __init__(
+        self, responses: list[list[ProviderEvent]], title_responses: list[str] | None = None
+    ) -> None:
         self.responses = responses
+        self.title_responses = title_responses or []
         self.requests: list[ProviderRequest] = []
 
     def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderEvent]:
         self.requests.append(request)
         if any(tool.get("name") == "suggest_conversation_title" for tool in request.tools):
+            title = self.title_responses.pop(0) if self.title_responses else "Resumo financeiro"
             response = [
                 ProviderEvent(
                     type="function_call",
                     function_call=FunctionCall(
                         "call_title",
                         "suggest_conversation_title",
-                        json.dumps({"title": "Resumo financeiro"}),
+                        json.dumps({"title": title}),
                     ),
                 ),
                 _completed(3, 2),
@@ -121,6 +125,28 @@ def test_conversation_can_be_created_renamed_and_archived(client: TestClient) ->
     archived = client.post(f"/api/ai/conversations/{conversation['id']}/archive")
     assert archived.status_code == 204
     assert client.get("/api/ai/conversations").json() == []
+
+
+def test_custom_conversation_title_is_preserved_after_messages(client: TestClient) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    renamed = client.patch(
+        f"/api/ai/conversations/{conversation['id']}", json={"title": "Meu título"}
+    )
+    assert renamed.status_code == 200
+    fake = FakeAIProvider([[ProviderEvent(type="text_delta", text="Resposta."), _completed()]])
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages", json={"content": "Oi"}
+    )
+
+    assert response.status_code == 200
+    assert client.get(f"/api/ai/conversations/{conversation['id']}").json()["title"] == "Meu título"
+    assert not any(
+        any(tool.get("name") == "suggest_conversation_title" for tool in request.tools)
+        for request in fake.requests
+    )
 
 
 def test_conversation_cannot_be_read_by_a_different_user(
@@ -547,6 +573,52 @@ def test_sse_response_persists_messages_context_and_usage(client: TestClient) ->
     assert usage["output_tokens_today"] == 19
 
 
+def test_conversation_title_refreshes_from_recent_messages(client: TestClient) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [
+            [ProviderEvent(type="text_delta", text="Resposta um."), _completed()],
+            [ProviderEvent(type="text_delta", text="Resposta dois."), _completed()],
+            [ProviderEvent(type="text_delta", text="Resposta três."), _completed()],
+            [ProviderEvent(type="text_delta", text="Resposta quatro."), _completed()],
+        ],
+        title_responses=["Primeiro assunto", "Resumo atualizado"],
+    )
+    _set_fake_provider(client, fake)
+    user_messages = [
+        "Vamos organizar minhas contas.",
+        "Quero acompanhar também os gastos com combustível.",
+        "Falamos de R$ 97 em combustível em 08/10/2026.",
+        "Também quero acompanhar as contas bancárias.",
+    ]
+
+    responses = [
+        client.post(
+            f"/api/ai/conversations/{conversation['id']}/messages", json={"content": content}
+        )
+        for content in user_messages
+    ]
+
+    title_requests = [
+        request
+        for request in fake.requests
+        if any(tool.get("name") == "suggest_conversation_title" for tool in request.tools)
+    ]
+    assert all(response.status_code == 200 for response in responses)
+    assert len(title_requests) == 2
+    refreshed_context = str(title_requests[-1].input_items[0]["content"])
+    assert "Vamos organizar minhas contas" in refreshed_context
+    assert "gastos com combustível" in refreshed_context
+    assert "Falamos de [valor] em combustível em [data]" in refreshed_context
+    assert "R$ 97" not in refreshed_context
+    assert "08/10/2026" not in refreshed_context
+    assert client.get(f"/api/ai/conversations/{conversation['id']}").json()["title"] == (
+        "Resumo atualizado"
+    )
+    assert '"title": "Resumo atualizado"' in responses[-1].text
+
+
 def test_month_summary_uses_finance_engine_and_returns_structured_card(client: TestClient) -> None:
     _sign_up(client)
     account_id, category_id = _create_assistant_basics(client)
@@ -664,6 +736,144 @@ def test_ai_created_amount_is_exact_decimal_and_tool_failure_cannot_claim_succes
     assert "Não consegui concluir essa operação" in messages[-1]["content"]
     assert "Lançamento registrado" not in messages[-1]["content"]
     assert len(transactions) == 1
+
+
+def test_transaction_tool_returns_a_recalculated_balance_card(client: TestClient) -> None:
+    _sign_up(client)
+    today = _today().isoformat()
+    account = client.post(
+        "/api/accounts",
+        json={
+            "name": "Conta principal",
+            "type": "CHECKING",
+            "opening_balance": "100.00",
+            "opening_balance_date": today,
+        },
+    )
+    category = client.post("/api/categories", json={"name": "Alimentação", "type": "EXPENSE"})
+    assert account.status_code == category.status_code == 201
+    account_id = account.json()["id"]
+    category_id = category.json()["id"]
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_balance",
+                        "get_account_balance",
+                        json.dumps({"account_id": account_id}),
+                    ),
+                ),
+                _completed(),
+            ],
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_expense",
+                        "create_transaction",
+                        json.dumps(
+                            {
+                                "account_id": account_id,
+                                "category_id": category_id,
+                                "movement_type": "EXPENSE",
+                                "description": "Almoço",
+                                "amount": "20.00",
+                                "occurred_at": today,
+                            }
+                        ),
+                    ),
+                ),
+                _completed(),
+            ],
+            [ProviderEvent(type="text_delta", text="Registrei o almoço."), _completed()],
+        ]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Mostre o saldo e registre uma despesa que vou indicar."},
+    )
+
+    assert response.status_code == 200
+    message = client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"][-1]
+    account_cards = [
+        card
+        for card in message["structured_content"]
+        if card["type"] == "account_card"
+    ]
+    assert len(account_cards) == 1
+    assert account_cards[0]["snapshot_kind"] == "after_movement"
+    assert account_cards[0]["data"][0]["balance"] == "80.00"
+    assert '"snapshot_kind": "after_movement"' in response.text
+
+
+def test_transfer_tool_returns_both_recalculated_account_balances(client: TestClient) -> None:
+    _sign_up(client)
+    today = _today().isoformat()
+    source = client.post(
+        "/api/accounts",
+        json={
+            "name": "Conta de origem",
+            "type": "CHECKING",
+            "opening_balance": "100.00",
+            "opening_balance_date": today,
+        },
+    )
+    destination = client.post(
+        "/api/accounts",
+        json={
+            "name": "Conta de destino",
+            "type": "SAVINGS",
+            "opening_balance": "25.00",
+            "opening_balance_date": today,
+        },
+    )
+    assert source.status_code == destination.status_code == 201
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_transfer",
+                        "create_transfer",
+                        json.dumps(
+                            {
+                                "source_account_id": source.json()["id"],
+                                "destination_account_id": destination.json()["id"],
+                                "amount": "40.00",
+                                "occurred_at": today,
+                            }
+                        ),
+                    ),
+                ),
+                _completed(),
+            ],
+            [ProviderEvent(type="text_delta", text="Transferência registrada."), _completed()],
+        ]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Transfira 40 reais da conta de origem para a conta de destino."},
+    )
+
+    assert response.status_code == 200
+    message = client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"][-1]
+    account_card = next(
+        card
+        for card in message["structured_content"]
+        if card["type"] == "account_card"
+    )
+    balances = {account["id"]: account["balance"] for account in account_card["data"]}
+    assert balances == {source.json()["id"]: "60.00", destination.json()["id"]: "65.00"}
+    assert account_card["snapshot_kind"] == "after_movement"
 
 
 @pytest.mark.parametrize(

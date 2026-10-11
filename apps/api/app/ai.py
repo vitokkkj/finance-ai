@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -52,6 +52,7 @@ from app.models import AIConversation, AIMemory, AIMessage, AIToolCall, User
 
 router = APIRouter(prefix="/api/ai", tags=["assistente"])
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
+TITLE_REFRESH_INTERVAL = 3
 chatgpt_credentials = ChatGPTCredentialStore(settings.chatgpt_auth_dir)
 
 
@@ -166,6 +167,22 @@ def _conversation_messages(
     ]
 
 
+def _conversation_title_context(
+    db: Session, user: User, conversation: AIConversation
+) -> str:
+    recent_messages = db.scalars(
+        select(AIMessage.content)
+        .where(
+            AIMessage.user_id == user.id,
+            AIMessage.conversation_id == conversation.id,
+            AIMessage.role == "USER",
+        )
+        .order_by(AIMessage.created_at.desc(), AIMessage.id.desc())
+        .limit(6)
+    ).all()
+    return "\n".join(f"Pedido: {content[:500]}" for content in reversed(recent_messages))
+
+
 @router.get("/status", response_model=AIStatusResponse)
 async def ai_status(user: Annotated[User, Depends(get_current_user)]) -> AIStatusResponse:
     _ = user
@@ -212,6 +229,7 @@ def create_conversation(
     conversation = AIConversation(
         user_id=user.id,
         title=payload.title or "Nova conversa",
+        title_is_custom=payload.title is not None,
     )
     db.add(conversation)
     db.commit()
@@ -244,6 +262,7 @@ def rename_conversation(
 ) -> ConversationResponse:
     conversation = _get_conversation(db, user, conversation_id)
     conversation.title = payload.title
+    conversation.title_is_custom = True
     conversation.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(conversation)
@@ -271,16 +290,20 @@ def send_message(
     provider: Annotated[AIProvider, Depends(get_ai_provider)],
 ) -> StreamingResponse:
     conversation = _get_conversation(db, user, conversation_id)
-    has_user_message = db.scalar(
-        select(AIMessage.id)
+    previous_user_message_count = db.scalar(
+        select(func.count(AIMessage.id))
         .where(
             AIMessage.user_id == user.id,
             AIMessage.conversation_id == conversation.id,
             AIMessage.role == "USER",
         )
-        .limit(1)
+    ) or 0
+    user_message_number = previous_user_message_count + 1
+    generate_title = not conversation.title_is_custom and (
+        user_message_number == 1
+        or user_message_number - conversation.title_generated_for_message_count
+        >= TITLE_REFRESH_INTERVAL
     )
-    generate_title = has_user_message is None and conversation.title == "Nova conversa"
     message = AIMessage(
         user_id=user.id,
         conversation_id=conversation.id,
@@ -289,7 +312,7 @@ def send_message(
         created_at=datetime.now(UTC),
     )
     db.add(message)
-    if generate_title:
+    if previous_user_message_count == 0 and not conversation.title_is_custom:
         conversation.title = _conversation_title_from_message(payload.content)
     conversation.updated_at = datetime.now(UTC)
     db.commit()
@@ -318,13 +341,24 @@ def send_message(
             return
         try:
             generated_title, title_input_tokens, title_output_tokens = (
-                await suggest_conversation_title(provider, payload.content)
+                await suggest_conversation_title(
+                    provider, _conversation_title_context(db, user, conversation)
+                )
             )
         except AIProviderError:
             return
         if generated_title is None:
             return
+        try:
+            db.refresh(conversation)
+        except SQLAlchemyError:
+            db.rollback()
+            return
+        if conversation.title_is_custom or conversation.archived_at is not None:
+            return
+        title_changed = conversation.title != generated_title
         conversation.title = generated_title
+        conversation.title_generated_for_message_count = user_message_number
         conversation.updated_at = datetime.now(UTC)
         if title_input_tokens is not None:
             assistant_message.input_tokens = (
@@ -339,7 +373,8 @@ def send_message(
         except SQLAlchemyError:
             db.rollback()
             return
-        yield sse_event("conversation_title", {"title": generated_title})
+        if title_changed:
+            yield sse_event("conversation_title", {"title": generated_title})
 
     return StreamingResponse(
         events(),

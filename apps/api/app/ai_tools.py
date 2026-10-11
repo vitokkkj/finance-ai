@@ -933,6 +933,47 @@ def sanitize_for_provider(value: object, key: str = "") -> object:
     return value
 
 
+def _post_movement_account_card(
+    name: str,
+    result: object,
+    previous_account_ids: set[UUID],
+    user: User,
+    db: Session,
+) -> dict[str, object] | None:
+    """Return Finance Engine balances recalculated after a successful account movement."""
+    account_ids = set(previous_account_ids)
+    result_data = _serialize(result)
+    if isinstance(result_data, dict):
+        fields = (
+            ("source_account_id", "destination_account_id")
+            if name == "create_transfer"
+            else ("account_id",)
+        )
+        for field in fields:
+            value = result_data.get(field)
+            if isinstance(value, str):
+                try:
+                    account_ids.add(UUID(value))
+                except ValueError:
+                    continue
+
+    if not account_ids:
+        return None
+
+    accounts = [
+        account
+        for account in list_accounts(user, db, include_archived=True)
+        if account.id in account_ids
+    ]
+    if not accounts:
+        return None
+    return {
+        "type": "account_card",
+        "data": _serialize(accounts),
+        "snapshot_kind": "after_movement",
+    }
+
+
 def execute_finance_tool(
     name: str,
     arguments: object,
@@ -964,12 +1005,35 @@ def execute_finance_tool(
                 output={"ok": True, "status": "pending_confirmation", "data": _serialize(preview)},
                 cards=[card],
             )
+        previous_account_ids: set[UUID] = set()
+        if name == "update_transaction" and confirmed:
+            transaction_id = input_data.get("transaction_id")
+            if isinstance(transaction_id, str):
+                try:
+                    transaction_uuid = UUID(transaction_id)
+                except ValueError:
+                    transaction_uuid = None
+                if transaction_uuid is not None:
+                    previous_account_id = db.scalar(
+                        select(Transaction.account_id).where(
+                            Transaction.id == transaction_uuid,
+                            Transaction.user_id == user.id,
+                        )
+                    )
+                    if previous_account_id is not None:
+                        previous_account_ids.add(previous_account_id)
         handler = definition.confirmed_handler if confirmed else None
         result, card_type = (handler or definition.handler)(db, user, payload)
         serialized = _serialize(result)
         cards: list[dict[str, object]] = []
         if card_type is not None:
             cards.append({"type": card_type, "data": serialized})
+        if name in {"create_transaction", "update_transaction", "create_transfer"}:
+            account_card = _post_movement_account_card(
+                name, result, previous_account_ids, user, db
+            )
+            if account_card is not None:
+                cards.append(account_card)
         return ToolResult(
             status="SUCCEEDED",
             input_data=input_data,

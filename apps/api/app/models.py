@@ -204,6 +204,12 @@ class AIConversation(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
     title: Mapped[str] = mapped_column(String(120), nullable=False, default="Nova conversa")
+    title_is_custom: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    title_generated_for_message_count: Mapped[int] = mapped_column(
+        default=0, server_default="0", nullable=False
+    )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
