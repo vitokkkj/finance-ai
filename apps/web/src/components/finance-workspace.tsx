@@ -797,8 +797,8 @@ export function FinanceWorkspace({
                   {categories.length === 0 ? <EmptyState actionLabel="Criar categoria" message="Crie categorias para classificar receitas e despesas." onAction={() => { setCategoryName(""); setCategoryEditingId(null); setCategoryFormOpen(true); }} /> : (
                     <div className="category-groups">
                       {([
-                        { type: "EXPENSE" as const, label: "Despesas", items: categories.filter((category) => category.type === "EXPENSE") },
                         { type: "INCOME" as const, label: "Receitas", items: categories.filter((category) => category.type === "INCOME") },
+                        { type: "EXPENSE" as const, label: "Despesas", items: categories.filter((category) => category.type === "EXPENSE") },
                       ]).filter((group) => group.items.length > 0).map((group) => (
                         <section aria-label={`Categorias de ${group.label.toLowerCase()}`} className={`category-group category-group-${group.type.toLowerCase()}`} key={group.type}>
                           <div className="category-group-heading"><h3>{group.label}</h3><span>{group.items.length} {group.items.length === 1 ? "categoria" : "categorias"}</span></div>
