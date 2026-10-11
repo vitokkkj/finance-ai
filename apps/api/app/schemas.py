@@ -490,6 +490,7 @@ class AccountTypeBalanceSummary(BaseModel):
 class ForecastItem(BaseModel):
     id: str
     source: Literal["RECURRENCE", "COMMITMENT", "CARD_INVOICE"]
+    credit_card_id: UUID | None = None
     description: str
     type: Literal["INCOME", "EXPENSE"]
     due_date: date

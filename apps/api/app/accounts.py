@@ -208,10 +208,39 @@ def archive_account(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> AccountResponse:
-    account = db.scalar(select(Account).where(Account.id == account_id, Account.user_id == user.id))
+    account = db.scalar(
+        select(Account)
+        .where(Account.id == account_id, Account.user_id == user.id)
+        .with_for_update()
+    )
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta não encontrada.")
+
+    transactions = db.scalars(
+        select(Transaction).where(
+            Transaction.user_id == user.id,
+            or_(
+                Transaction.account_id == account.id,
+                Transaction.source_account_id == account.id,
+                Transaction.destination_account_id == account.id,
+            ),
+            Transaction.status == "CONFIRMED",
+            Transaction.occurred_at < financial_day_after(current_financial_date()),
+        )
+    ).all()
+    movements = tuple(movements_for_account(transactions))
+    account_response = _account_response(account, movements)
+    if account_response.balance is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Informe o saldo inicial e a data-base antes de arquivar a conta.",
+        )
+    if account_response.balance != 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Transfira ou concilie o saldo até R$ 0,00 antes de arquivar a conta.",
+        )
     account.is_active = False
     db.commit()
     db.refresh(account)
-    return _account_response(account)
+    return _account_response(account, movements)

@@ -17,6 +17,7 @@ import {
 
 import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
+import type { FinanceFocusTarget } from "@/lib/finance-types";
 import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { CalendarMonthInput } from "@/components/calendar-month-input";
@@ -94,7 +95,7 @@ type Dashboard = {
   forecast_rest_of_month_total: string;
   forecast_income_total: string;
   forecast_unassigned_invoice_total: string;
-  forecast_items: { id: string; source: "RECURRENCE" | "COMMITMENT" | "CARD_INVOICE"; description: string; type: MovementType; due_date: string; amount: string; account_type: AccountType | null; account_name: string | null; card_name: string | null; status: "OVERDUE" | "DUE_SOON" | "PLANNED" }[];
+  forecast_items: { id: string; source: "RECURRENCE" | "COMMITMENT" | "CARD_INVOICE"; credit_card_id: string | null; description: string; type: MovementType; due_date: string; amount: string; account_type: AccountType | null; account_name: string | null; card_name: string | null; status: "OVERDUE" | "DUE_SOON" | "PLANNED" }[];
 };
 
 type AccountForm = {
@@ -266,12 +267,14 @@ export function FinanceWorkspace({
   onOpenAssistant,
   embedded = false,
   initialSection = "overview",
+  focusTarget = null,
 }: {
   displayName: string;
   onLogout: () => void;
   onOpenAssistant?: (prompt: string) => void;
   embedded?: boolean;
   initialSection?: Section;
+  focusTarget?: FinanceFocusTarget | null;
 }) {
   const [section, setSection] = useState<Section>(initialSection);
   const [month, setMonth] = useState(monthInSaoPaulo);
@@ -388,7 +391,15 @@ export function FinanceWorkspace({
   }
 
   async function archiveAccount(account: Account) {
-    if (!window.confirm(`Arquivar a conta “${account.name}”?`)) return;
+    if (account.balance === null) {
+      setNotice({ kind: "error", message: "Informe o saldo inicial e a data-base antes de arquivar esta conta." });
+      return;
+    }
+    if (account.balance !== "0.00") {
+      setNotice({ kind: "error", message: `Transfira ou concilie o saldo de ${formatCurrency(account.balance)} até R$ 0,00 antes de arquivar esta conta.` });
+      return;
+    }
+    if (!window.confirm(`Arquivar a conta “${account.name}” com saldo zerado?`)) return;
     setBusy(true);
     try {
       await apiRequest<Account>(`/api/accounts/${account.id}/archive`, { method: "POST" });
@@ -733,7 +744,7 @@ export function FinanceWorkspace({
                       <div><span>Saldo corrente projetado</span><strong>{projectedCheckingLabel(dashboard)}</strong></div>
                     </div>
                     {dashboard.forecast_unassigned_invoice_total !== "0.00" && <p className="forecast-unassigned-note">Faturas sem conta pagadora definida: {formatCurrency(dashboard.forecast_unassigned_invoice_total)}. Elas aparecem na lista, mas não reduzem o saldo projetado.</p>}
-                    {dashboard.forecast_items.filter((item) => item.type === "EXPENSE").length === 0 ? <p className="forecast-empty">Nenhuma conta ou fatura prevista para pagar até o fim do mês.</p> : <div className="forecast-list">{dashboard.forecast_items.filter((item) => item.type === "EXPENSE").slice(0, 8).map((item) => <div className="forecast-row" key={item.id}><span><strong>{item.description}</strong><small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}{item.account_name ? ` · ${item.account_name}` : ""}</small></span><b>{formatCurrency(item.amount)}</b></div>)}</div>}
+                    {dashboard.forecast_items.filter((item) => item.type === "EXPENSE").length === 0 ? <p className="forecast-empty">Nenhuma conta ou fatura prevista até {displayDate(dashboard.forecast_end)}.</p> : <div className="forecast-list">{dashboard.forecast_items.filter((item) => item.type === "EXPENSE").slice(0, 8).map((item) => <div className="forecast-row" key={item.id}><span><strong>{item.description}</strong><small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}{item.account_name ? ` · ${item.account_name}` : ""}</small></span><b>{formatCurrency(item.amount)}</b></div>)}</div>}
                   </section>
 
                   <div className="overview-grid">
@@ -783,7 +794,7 @@ export function FinanceWorkspace({
                 </>
               )}
 
-              {section === "recurrences" && <RecurrenceWorkspace onFinanceChanged={loadFinance} />}
+              {section === "recurrences" && <RecurrenceWorkspace focusTarget={focusTarget} onFinanceChanged={loadFinance} />}
 
               {section === "accounts" && (
                 <section className="surface-card data-card">
@@ -903,6 +914,7 @@ export function FinanceWorkspace({
                 <CreditCardWorkspace
                   accounts={accounts}
                   categories={categories}
+                  focusTarget={focusTarget?.source === "CARD_INVOICE" ? focusTarget : null}
                   onFinanceChanged={loadFinance}
                 />
               )}

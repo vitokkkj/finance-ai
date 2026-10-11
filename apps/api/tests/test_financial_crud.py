@@ -48,15 +48,15 @@ def test_transactions_and_accounts_can_be_edited_and_history_deleted(client: Tes
     assert client.get("/api/accounts").json()[0]["balance"] == "875.00"
 
     account_update = client.patch(
-        f"/api/accounts/{account['id']}", json={"opening_balance": "2000.00"}
+        f"/api/accounts/{account['id']}", json={"opening_balance": "125.00"}
     )
     assert account_update.status_code == 200
-    assert account_update.json()["balance"] == "1875.00"
+    assert account_update.json()["balance"] == "0.00"
 
     archived = client.post(f"/api/accounts/{account['id']}/archive")
     assert archived.status_code == 200
     assert client.get("/api/accounts").json() == []
-    assert client.get("/api/accounts?include_archived=true").json()[0]["balance"] == "1875.00"
+    assert client.get("/api/accounts?include_archived=true").json()[0]["balance"] == "0.00"
 
     deleted = client.delete(f"/api/transactions/{transaction_id}")
     assert deleted.status_code == 204

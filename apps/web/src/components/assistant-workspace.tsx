@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from "react";
 import Image from "next/image";
 import {
   Archive,
@@ -42,6 +42,7 @@ import { FinanceWorkspace } from "@/components/finance-workspace";
 import { FirstUseSetup } from "@/components/first-use-setup";
 import { BrandMark } from "@/components/brand-mark";
 import { ApiError, apiRequest } from "@/lib/api";
+import type { FinanceFocusTarget } from "@/lib/finance-types";
 import { formatCurrency } from "@/lib/money";
 
 type FinanceSection = "overview" | "transactions" | "accounts" | "categories" | "cards" | "recurrences";
@@ -171,7 +172,7 @@ type Dashboard = {
   forecast_rest_of_month_total: string;
   forecast_income_total: string;
   forecast_unassigned_invoice_total: string;
-  forecast_items: { id: string; source: "RECURRENCE" | "COMMITMENT" | "CARD_INVOICE"; description: string; type: "INCOME" | "EXPENSE"; due_date: string; amount: string; account_type: "CHECKING" | "SAVINGS" | "CASH" | "OTHER" | null; account_name: string | null; card_name: string | null; status: "OVERDUE" | "DUE_SOON" | "PLANNED" }[];
+  forecast_items: { id: string; source: "RECURRENCE" | "COMMITMENT" | "CARD_INVOICE"; credit_card_id: string | null; description: string; type: "INCOME" | "EXPENSE"; due_date: string; amount: string; account_type: "CHECKING" | "SAVINGS" | "CASH" | "OTHER" | null; account_name: string | null; card_name: string | null; status: "OVERDUE" | "DUE_SOON" | "PLANNED" }[];
 };
 
 type ContextAccount = { id: string; name: string; type: "CHECKING" | "SAVINGS" | "CASH" | "OTHER"; balance: string | null; is_active: boolean };
@@ -266,7 +267,7 @@ function DueNotifications({
   refreshDashboard,
 }: {
   dashboard: Dashboard | null;
-  openForecast: () => void;
+  openForecast: (item?: Dashboard["forecast_items"][number]) => void;
   refreshDashboard: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -301,7 +302,7 @@ function DueNotifications({
   const renderItems = (items: Dashboard["forecast_items"]) => items.map((item) => {
     const overdue = item.status === "OVERDUE";
     return (
-      <button className={`notification-item${overdue ? " urgent" : ""}`} key={item.id} onClick={() => { setOpen(false); openForecast(); }} type="button">
+      <button className={`notification-item${overdue ? " urgent" : ""}`} key={item.id} onClick={() => { setOpen(false); openForecast(item); }} type="button">
         <span className={`notification-icon${overdue ? " urgent" : ""}`} aria-hidden="true">
           {overdue ? <TriangleAlert size={17} /> : <Bell size={16} />}
         </span>
@@ -356,7 +357,7 @@ function DueNotifications({
           )}
           <footer className="notifications-footer">
             <span>Atualizado em {dashboard ? displayDate(dashboard.as_of) : "—"}</span>
-            <button onClick={openForecast} type="button">Ver previsão completa</button>
+            <button onClick={() => openForecast()} type="button">Ver previsão completa</button>
           </footer>
         </section>
       )}
@@ -475,6 +476,8 @@ export function AssistantWorkspace({
 }) {
   const [view, setView] = useState<WorkspaceView>("chat");
   const [financeSection, setFinanceSection] = useState<FinanceSection>("overview");
+  const [financeFocusTarget, setFinanceFocusTarget] = useState<FinanceFocusTarget | null>(null);
+  const financeFocusRequestId = useRef(0);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
@@ -505,10 +508,74 @@ export function AssistantWorkspace({
   const [conversationTitleDraft, setConversationTitleDraft] = useState("");
   const [busyConversationId, setBusyConversationId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarTouchStartRef = useRef<{ x: number; y: number; insideSidebar: boolean } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const conversationRenameRef = useRef<HTMLInputElement>(null);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen || window.matchMedia("(min-width: 761px)").matches) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusable = sidebarRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    const first = focusable?.[0];
+    const last = focusable?.[focusable.length - 1];
+    first?.focus();
+
+    function handleDrawerKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileMenuOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleDrawerKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleDrawerKeyDown);
+      document.body.style.overflow = previousOverflow;
+      requestAnimationFrame(() => menuToggleRef.current?.focus());
+    };
+  }, [mobileMenuOpen]);
+
+  function handleSidebarTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
+    if (!window.matchMedia("(max-width: 760px)").matches || event.touches.length !== 1) {
+      sidebarTouchStartRef.current = null;
+      return;
+    }
+    const touch = event.touches[0];
+    const target = event.target;
+    const insideSidebar = target instanceof Element && target.closest(".assistant-sidebar") !== null;
+    sidebarTouchStartRef.current = (!mobileMenuOpen && touch.clientX <= 24) || (mobileMenuOpen && insideSidebar)
+      ? { x: touch.clientX, y: touch.clientY, insideSidebar }
+      : null;
+  }
+
+  function handleSidebarTouchEnd(event: ReactTouchEvent<HTMLDivElement>) {
+    const start = sidebarTouchStartRef.current;
+    sidebarTouchStartRef.current = null;
+    if (!start || !window.matchMedia("(max-width: 760px)").matches) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (Math.abs(deltaX) < 52 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) return;
+    if (deltaX > 0 && !mobileMenuOpen && start.x <= 24) setMobileMenuOpen(true);
+    if (deltaX < 0 && mobileMenuOpen && start.insideSidebar) setMobileMenuOpen(false);
+  }
 
   const loadConversations = useCallback(async () => {
     const rows = await apiRequest<Conversation[]>("/api/ai/conversations");
@@ -585,6 +652,7 @@ export function AssistantWorkspace({
 
   function openCardsFromFirstUse() {
     setFirstUseRequired(false);
+    setFinanceFocusTarget(null);
     setFinanceSection("cards");
     setView("finance");
     void loadDashboard();
@@ -603,6 +671,7 @@ export function AssistantWorkspace({
 
   async function selectConversation(id: string) {
     setError("");
+    setFinanceFocusTarget(null);
     setView("chat");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
@@ -618,6 +687,7 @@ export function AssistantWorkspace({
 
   function startConversation() {
     setError("");
+    setFinanceFocusTarget(null);
     setView("chat");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
@@ -903,6 +973,7 @@ export function AssistantWorkspace({
   }
 
   async function openSettings() {
+    setFinanceFocusTarget(null);
     setView("settings");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
@@ -1000,6 +1071,7 @@ export function AssistantWorkspace({
 
   function chooseNavigation(item: (typeof NAV_ITEMS)[number]) {
     setError("");
+    setFinanceFocusTarget(null);
     setConversationMenuId(null);
     setEditingConversationId(null);
     if (item.view === "settings") {
@@ -1011,16 +1083,30 @@ export function AssistantWorkspace({
     }
   }
 
-  function openForecast() {
+  function openForecast(item?: Dashboard["forecast_items"][number]) {
     setError("");
     setView("finance");
-    setFinanceSection("overview");
+    if (item) {
+      const separator = item.id.indexOf(":");
+      financeFocusRequestId.current += 1;
+      setFinanceFocusTarget({
+        source: item.source,
+        id: separator >= 0 ? item.id.slice(separator + 1) : item.id,
+        credit_card_id: item.credit_card_id,
+        request_id: financeFocusRequestId.current,
+      });
+      setFinanceSection(item.source === "CARD_INVOICE" ? "cards" : "recurrences");
+    } else {
+      setFinanceFocusTarget(null);
+      setFinanceSection("overview");
+    }
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
     void loadDashboard();
   }
 
   function openAccount() {
+    setFinanceFocusTarget(null);
     setView("account");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
@@ -1141,10 +1227,15 @@ export function AssistantWorkspace({
   }
 
   return (
-    <div className={sidebarCollapsed ? "assistant-layout sidebar-collapsed" : "assistant-layout"} data-theme={theme}>
-      {mobileMenuOpen && <button aria-label="Fechar menu" className="assistant-backdrop" onClick={() => setMobileMenuOpen(false)} type="button" />}
+    <div className={sidebarCollapsed ? "assistant-layout sidebar-collapsed" : "assistant-layout"} data-theme={theme} onTouchEnd={handleSidebarTouchEnd} onTouchStart={handleSidebarTouchStart}>
+      {mobileMenuOpen && <button aria-label="Fechar menu" className="assistant-backdrop" onClick={() => setMobileMenuOpen(false)} tabIndex={-1} type="button" />}
       {contextPanelOpen && contextPanelAvailable && <button aria-label="Fechar contexto" className="assistant-context-backdrop" onClick={() => setContextPanelOpen(false)} type="button" />}
-      <aside className={mobileMenuOpen ? "assistant-sidebar mobile-open" : "assistant-sidebar"}>
+      <aside
+        aria-label="Navegação principal"
+        className={mobileMenuOpen ? "assistant-sidebar mobile-open" : "assistant-sidebar"}
+        id="primary-navigation-drawer"
+        ref={sidebarRef}
+      >
         <button aria-label="Ir para a visão geral" className="assistant-brand" onClick={() => chooseNavigation(NAV_ITEMS[0])} type="button">
           <BrandMark />
           <span className="assistant-brand-name">SophIA</span>
@@ -1243,9 +1334,9 @@ export function AssistantWorkspace({
         </div>
       </aside>
 
-      <main className="assistant-main">
+      <main className="assistant-main" inert={mobileMenuOpen}>
         <header className="assistant-topbar">
-          <button aria-label="Abrir menu" className="assistant-menu-toggle" onClick={() => setMobileMenuOpen(true)} type="button"><Menu aria-hidden="true" size={20} /></button>
+          <button aria-controls="primary-navigation-drawer" aria-expanded={mobileMenuOpen} aria-label="Abrir menu de navegação" className="assistant-menu-toggle" onClick={() => setMobileMenuOpen(true)} ref={menuToggleRef} type="button"><Menu aria-hidden="true" size={20} /></button>
           <div className="assistant-topbar-title">
             <strong>{view === "chat" ? conversations.find((conversation) => conversation.id === conversationId)?.title ?? "Nova conversa" : view === "settings" ? "Preferências" : view === "account" ? "Minha conta" : "Finanças"}</strong>
             <span>{view === "chat" ? "SophIA · sua assistente financeira" : view === "account" ? "Perfil, segurança e sessões" : "Dados calculados pelo sistema"}</span>
@@ -1288,6 +1379,7 @@ export function AssistantWorkspace({
             <FinanceWorkspace
               displayName={displayName}
               embedded
+              focusTarget={financeFocusTarget}
               initialSection={financeSection}
               onOpenAssistant={(prompt) => { startConversation(); setDraft(prompt); }}
               onLogout={onLogout}
@@ -1829,7 +1921,7 @@ function ForecastContext({ dashboard }: { dashboard: Dashboard }) {
         <div><span>Saldo corrente projetado</span><strong>{checkingProjection == null ? "Indisponível" : formatCurrency(checkingProjection)}</strong></div>
       </div>
       {dashboard.forecast_unassigned_invoice_total !== "0.00" && <p className="forecast-unassigned-note">Faturas sem conta pagadora: {formatCurrency(dashboard.forecast_unassigned_invoice_total)}.</p>}
-      {expenses.length ? expenses.map((item) => <div className="context-card-row" key={item.id}><span>{item.description}<small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}</small></span><strong>{formatCurrency(item.amount)}</strong></div>) : <p>Nenhum pagamento previsto até o fim do mês.</p>}
+      {expenses.length ? expenses.map((item) => <div className="context-card-row" key={item.id}><span>{item.description}<small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}</small></span><strong>{formatCurrency(item.amount)}</strong></div>) : <p>Nenhum pagamento previsto até {displayDate(dashboard.forecast_end)}.</p>}
     </section>
   );
 }

@@ -9,6 +9,7 @@ import { CurrencyInput } from "@/components/currency-input";
 import { HelpTip } from "@/components/help-tip";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { BrandMark } from "@/components/brand-mark";
+import type { FinanceFocusTarget } from "@/lib/finance-types";
 
 type MovementType = "INCOME" | "EXPENSE";
 type Frequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
@@ -130,7 +131,13 @@ function statusLabel(status: OccurrenceStatus): string {
   return labels[status];
 }
 
-export function RecurrenceWorkspace({ onFinanceChanged }: { onFinanceChanged?: () => void | Promise<void> }) {
+export function RecurrenceWorkspace({
+  focusTarget,
+  onFinanceChanged,
+}: {
+  focusTarget?: FinanceFocusTarget | null;
+  onFinanceChanged?: () => void | Promise<void>;
+}) {
   const [rules, setRules] = useState<RecurrenceRule[]>([]);
   const [occurrences, setOccurrences] = useState<RecurrenceOccurrence[]>([]);
   const [commitments, setCommitments] = useState<PlannedCommitment[]>([]);
@@ -157,15 +164,20 @@ export function RecurrenceWorkspace({ onFinanceChanged }: { onFinanceChanged?: (
   const loadData = useCallback(async (showLoader = true) => {
     if (showLoader) setLoading(true);
     try {
-      const [ruleRows, occurrenceRows, commitmentRows, accountRows, categoryRows] = await Promise.all([
+      const [ruleRows, occurrenceRows, focusedOccurrenceRows, commitmentRows, accountRows, categoryRows] = await Promise.all([
         apiRequest<RecurrenceRule[]>("/api/recurrences"),
         apiRequest<RecurrenceOccurrence[]>("/api/recurrences/occurrences"),
+        focusTarget?.source === "RECURRENCE"
+          ? apiRequest<RecurrenceOccurrence[]>(`/api/recurrences/occurrences?occurrence_id=${encodeURIComponent(focusTarget.id)}`)
+          : Promise.resolve([] as RecurrenceOccurrence[]),
         apiRequest<PlannedCommitment[]>("/api/commitments"),
         apiRequest<Account[]>("/api/accounts?include_archived=true"),
         apiRequest<Category[]>("/api/categories?include_archived=true"),
       ]);
       setRules(ruleRows);
-      setOccurrences(occurrenceRows);
+      setOccurrences(Array.from(
+        new Map([...occurrenceRows, ...focusedOccurrenceRows].map((item) => [item.id, item])).values(),
+      ).sort((left, right) => left.due_date.localeCompare(right.due_date)));
       setCommitments(commitmentRows);
       setAccounts(accountRows);
       setCategories(categoryRows);
@@ -181,11 +193,26 @@ export function RecurrenceWorkspace({ onFinanceChanged }: { onFinanceChanged?: (
     } finally {
       if (showLoader) setLoading(false);
     }
-  }, []);
+  }, [focusTarget]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!focusTarget || loading || focusTarget.source === "CARD_INVOICE") return;
+    const targetExists = focusTarget.source === "RECURRENCE"
+      ? occurrences.some((item) => item.id === focusTarget.id)
+      : commitments.some((item) => item.id === focusTarget.id);
+    if (!targetExists) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const row = document.getElementById(`notification-target-${focusTarget.source}-${focusTarget.id}`);
+      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+      row?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [commitments, focusTarget, loading, occurrences]);
 
   const activeAccounts = accounts.filter((account) => account.is_active);
   const currentCategories = categories.filter(
@@ -194,9 +221,16 @@ export function RecurrenceWorkspace({ onFinanceChanged }: { onFinanceChanged?: (
   const currentCommitmentCategories = categories.filter(
     (category) => !category.is_archived && category.type === commitmentForm.type,
   );
-  const visibleOccurrences = occurrences
-    .filter((item) => showHistory || !["PAID", "SKIPPED", "CANCELLED"].includes(item.status))
-    .slice(0, showHistory ? 60 : 18);
+  const eligibleOccurrences = occurrences
+    .filter((item) => showHistory || !["PAID", "SKIPPED", "CANCELLED"].includes(item.status));
+  const visibleOccurrences = eligibleOccurrences.slice(0, showHistory ? 60 : 18);
+  if (focusTarget?.source === "RECURRENCE") {
+    const focusedOccurrence = eligibleOccurrences.find((item) => item.id === focusTarget.id);
+    if (focusedOccurrence && !visibleOccurrences.some((item) => item.id === focusedOccurrence.id)) {
+      visibleOccurrences.push(focusedOccurrence);
+      visibleOccurrences.sort((left, right) => left.due_date.localeCompare(right.due_date));
+    }
+  }
 
   function openNewRule() {
     setEditingRuleId(null);
@@ -495,7 +529,9 @@ export function RecurrenceWorkspace({ onFinanceChanged }: { onFinanceChanged?: (
             {commitments.length === 0 ? <div className="recurrence-empty"><CalendarClock aria-hidden="true" size={22} /><div><strong>Nenhum pagamento avulso cadastrado</strong><p>Use esta área para despesas pontuais com vencimento, além das faturas e recorrências.</p></div></div> : <div className="recurrence-occurrence-list">{commitments.map((item) => {
               const account = accounts.find((row) => row.id === item.account_id)?.name ?? "Conta arquivada";
               const category = categories.find((row) => row.id === item.category_id)?.name ?? "Categoria arquivada";
-              return <article className="recurrence-occurrence-row" key={item.id}><time className="recurrence-date" dateTime={item.due_date}>{displayDate(item.due_date)}</time><div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account} · {category} · {item.type === "INCOME" ? "Receita" : "Despesa"}</span></div><strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong><span className={`recurrence-status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="recurrence-actions"><button aria-label={`Editar ${item.description}`} className="table-action" disabled={busy} onClick={() => openCommitmentEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeCommitment(item, "pay")} type="button"><Check size={15} /><span>{item.type === "INCOME" ? "Marcar como recebido" : "Marcar como pago"}</span></button><button aria-label={`Cancelar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeCommitment(item, "cancel")} type="button">Cancelar</button></div></article>;
+              const canAct = ["PLANNED", "OVERDUE"].includes(item.status);
+              const isFocused = focusTarget?.source === "COMMITMENT" && focusTarget.id === item.id;
+              return <article aria-label={`${item.description}, ${statusLabel(item.status).toLocaleLowerCase("pt-BR")}, vencimento ${displayDate(item.due_date)}`} className={`recurrence-occurrence-row${isFocused ? " notification-target" : ""}`} id={`notification-target-COMMITMENT-${item.id}`} key={item.id} tabIndex={-1}><time className="recurrence-date" dateTime={item.due_date}>{displayDate(item.due_date)}</time><div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account} · {category} · {item.type === "INCOME" ? "Receita" : "Despesa"}</span></div><strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong><span className={`recurrence-status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span>{canAct && <div className="recurrence-actions"><button aria-label={`Editar ${item.description}`} className="table-action" disabled={busy} onClick={() => openCommitmentEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeCommitment(item, "pay")} type="button"><Check size={15} /><span>{item.type === "INCOME" ? "Marcar como recebido" : "Marcar como pago"}</span></button><button aria-label={`Cancelar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeCommitment(item, "cancel")} type="button">Cancelar</button></div>}</article>;
             })}</div>}
           </section>
 
@@ -512,7 +548,7 @@ export function RecurrenceWorkspace({ onFinanceChanged }: { onFinanceChanged?: (
                   const account = accounts.find((row) => row.id === item.account_id)?.name ?? "Conta arquivada";
                   const canAct = ["PLANNED", "PENDING", "OVERDUE"].includes(item.status);
                   return (
-                    <article className="recurrence-occurrence-row" key={item.id}>
+                    <article aria-label={`${item.description}, ${statusLabel(item.status).toLocaleLowerCase("pt-BR")}, vencimento ${displayDate(item.due_date)}`} className={`recurrence-occurrence-row${focusTarget?.source === "RECURRENCE" && focusTarget.id === item.id ? " notification-target" : ""}`} id={`notification-target-RECURRENCE-${item.id}`} key={item.id} tabIndex={-1}>
                       <time className="recurrence-date" dateTime={item.due_date}>{displayDate(item.due_date)}</time>
                       <div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account}{item.type === "INCOME" ? " · Receita" : " · Despesa"}</span></div>
                       <strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong>

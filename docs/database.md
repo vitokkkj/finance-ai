@@ -38,6 +38,8 @@ O banco aplica chaves estrangeiras compostas para que contas, categorias e fatur
 
 O saldo inicial de fatura é adicionado de forma incremental por `0010_card_invoice_open_balance`, com valor padrão zero e restrição não negativa. A migration impede downgrade quando há saldo inicial positivo, para não descartar dívida importada.
 
+A migration `0016_totp_replay` acrescenta em `users` o contador mais recente de TOTP consumido. O login, pareamento MFA e reautenticação atualizam o contador com uma condição atômica; códigos antigos ou já usados não podem ser repetidos.
+
 ## Convenções financeiras
 
 - PostgreSQL usa `NUMERIC(14,2)`; Python usa `Decimal`; valores de resposta da API são strings decimais com duas casas.
@@ -45,6 +47,7 @@ O saldo inicial de fatura é adicionado de forma incremental por `0010_card_invo
 - Quando informados, `opening_balance` e `opening_balance_date` representam o saldo no início do dia indicado. Os lançamentos confirmados dessa data em diante compõem o saldo. Quando ambos são nulos, o saldo daquela conta é desconhecido e a API o retorna como `null`.
 - `checking_balance` soma somente contas correntes ativas e fica `null` se não houver corrente ativa ou se uma delas não tiver saldo/data-base. `account_type_balances` mantém saldos e contagens incompletas separados por tipo; uma poupança sem base não altera o saldo de contas correntes.
 - Saldo de conta ativa = saldo inicial + receitas confirmadas + transferências recebidas − despesas confirmadas − transferências enviadas − pagamentos de fatura. Compras no cartão não alteram saldos bancários. Não há coluna mutável `current_balance`.
+- Arquivar uma conta exige saldo conhecido igual a zero. Se o saldo for desconhecido ou diferente de zero, a API pede que o proprietário informe a base ou transfira/concilie o saldo antes, para o total ativo não ocultar dinheiro.
 - Datas informadas pelo usuário são datas civis em `America/Sao_Paulo`. Para consultas, o início do dia/mês local vira o limite inferior inclusivo e o início do dia/mês seguinte vira o limite superior exclusivo, convertido para UTC.
 - Uma categoria arquivada não pode ser usada em novo lançamento; lançamentos existentes continuam consultáveis pelo nome histórico da categoria.
 - Todos os registros financeiros são sempre consultados e gravados no escopo do usuário autenticado.

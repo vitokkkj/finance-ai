@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -31,6 +32,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_totp_counter: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     avatar_revision: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

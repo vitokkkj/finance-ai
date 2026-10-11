@@ -127,7 +127,9 @@ def test_owner_can_pair_authenticator_with_one_time_enrollment_token(
     client.cookies.clear()
     monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
     monkeypatch.setattr(settings, "mfa_enrollment_token", "m" * 64)
-    monkeypatch.setattr(auth, "_verify_owner_totp", lambda code: code == "123456")
+    monkeypatch.setattr(
+        auth, "_owner_totp_counter", lambda code: 123456 if code == "123456" else None
+    )
 
     checked = client.post(
         "/api/auth/login/check",
@@ -194,7 +196,7 @@ def test_mfa_enrollment_requires_the_server_token(
     client.cookies.clear()
     monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
     monkeypatch.setattr(settings, "mfa_enrollment_token", "m" * 64)
-    monkeypatch.setattr(auth, "_verify_owner_totp", lambda code: False)
+    monkeypatch.setattr(auth, "_owner_totp_counter", lambda code: None)
 
     response = client.post(
         "/api/auth/mfa/enrollment/start",
@@ -206,6 +208,38 @@ def test_mfa_enrollment_requires_the_server_token(
     )
     assert response.status_code == 401
     assert "qr_code_data_url" not in response.json()
+
+
+def test_totp_code_cannot_create_two_sessions(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import auth
+
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    client.cookies.clear()
+    monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+    monkeypatch.setattr(
+        auth, "_owner_totp_counter", lambda code: 123456 if code == "123456" else None
+    )
+    login_payload = {
+        "email": "usuario@example.com",
+        "password": "uma-senha-local-segura",
+        "totp_code": "123456",
+    }
+
+    first_login = client.post("/api/auth/login", json=login_payload)
+    assert first_login.status_code == 200
+    client.cookies.clear()
+
+    replay = client.post("/api/auth/login", json=login_payload)
+    assert replay.status_code == 401
 
 
 def test_login_rate_limit_blocks_repeated_failures(client: TestClient) -> None:
@@ -368,7 +402,7 @@ def test_profile_avatar_is_private_normalized_and_removable(client: TestClient) 
     )
 
     image_buffer = BytesIO()
-    Image.new("RGB", (32, 20), color=(49, 94, 73)).save(image_buffer, format="PNG")
+    Image.new("RGB", (3000, 3000), color=(49, 94, 73)).save(image_buffer, format="PNG")
     image_data_url = f"data:image/png;base64,{base64.b64encode(image_buffer.getvalue()).decode()}"
 
     updated = client.put("/api/auth/me/avatar", json={"image_data_url": image_data_url})
@@ -383,7 +417,7 @@ def test_profile_avatar_is_private_normalized_and_removable(client: TestClient) 
     assert avatar.headers["x-content-type-options"] == "nosniff"
     with Image.open(BytesIO(avatar.content)) as normalized:
         assert normalized.format == "WEBP"
-        assert normalized.size == (32, 20)
+        assert normalized.size == (512, 512)
 
     invalid = client.put(
         "/api/auth/me/avatar",
@@ -502,7 +536,9 @@ def test_production_bootstrap_needs_owner_token_and_totp(
     monkeypatch.setattr(settings, "app_env", "production")
     monkeypatch.setattr(settings, "initial_setup_token", "a" * 64)
     monkeypatch.setattr(settings, "owner_totp_secret", "A" * 32)
-    monkeypatch.setattr(auth, "_verify_owner_totp", lambda code: code == "123456")
+    monkeypatch.setattr(
+        auth, "_owner_totp_counter", lambda code: 123456 if code == "123456" else None
+    )
 
     invalid = client.post(
         "/api/auth/setup",

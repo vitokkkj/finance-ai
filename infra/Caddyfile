@@ -1,5 +1,8 @@
 http://{$APP_DOMAIN} {
 	encode zstd gzip
+	request_body {
+		max_size 16MiB
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000"

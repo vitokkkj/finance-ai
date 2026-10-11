@@ -53,9 +53,7 @@ class SlidingWindowRateLimiter:
     def allow_attempt(self, keys: Iterable[str], now: float) -> bool:
         with self._lock:
             unique_keys = tuple(dict.fromkeys(keys))
-            attempts_by_key = {
-                key: self._recent_attempts(key, now) for key in unique_keys
-            }
+            attempts_by_key = {key: self._recent_attempts(key, now) for key in unique_keys}
             if any(len(attempts) >= self._max_attempts for attempts in attempts_by_key.values()):
                 return False
 
@@ -88,19 +86,19 @@ class SlidingWindowRateLimiter:
 LoginRateLimiter = SlidingWindowRateLimiter
 
 
-def verify_totp(secret: str, code: str | None, *, now: float | None = None) -> bool:
-    """Valida código TOTP de 6 dígitos com uma janela de ±30 segundos."""
+def matching_totp_counter(secret: str, code: str | None, *, now: float | None = None) -> int | None:
+    """Retorna o contador do TOTP válido na janela de ±30 segundos."""
     if code is None or len(code) != 6 or not code.isascii() or not code.isdigit():
-        return False
+        return None
 
     normalized = secret.strip().upper().rstrip("=")
     padded = normalized + "=" * ((8 - len(normalized) % 8) % 8)
     try:
         key = base64.b32decode(padded, casefold=False)
     except (binascii.Error, ValueError):
-        return False
+        return None
     if len(key) < 20:
-        return False
+        return None
 
     current_counter = int((time.time() if now is None else now) // 30)
     for counter in (current_counter - 1, current_counter, current_counter + 1):
@@ -109,5 +107,10 @@ def verify_totp(secret: str, code: str | None, *, now: float | None = None) -> b
         binary = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
         expected = f"{binary % 1_000_000:06d}"
         if hmac.compare_digest(expected, code):
-            return True
-    return False
+            return counter
+    return None
+
+
+def verify_totp(secret: str, code: str | None, *, now: float | None = None) -> bool:
+    """Valida código TOTP de 6 dígitos com uma janela de ±30 segundos."""
+    return matching_totp_counter(secret, code, now=now) is not None

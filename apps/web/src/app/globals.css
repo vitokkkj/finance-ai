@@ -508,14 +508,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .assistant-chat-layout { grid-template-columns: minmax(0, 1fr); }
   .assistant-context-panel { display: none; }
 }
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   .assistant-layout { display: block; }
-  .assistant-sidebar { position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: min(280px, 84vw); height: 100dvh; min-height: 0; transform: translateX(-105%); transition: transform 170ms ease; box-shadow: 15px 0 40px rgb(17 42 34 / 15%); }
-  .assistant-sidebar.mobile-open { transform: translateX(0); }
+  .assistant-sidebar { position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: min(280px, 84vw); height: 100dvh; min-height: 0; transform: translateX(-105%); transition: transform 170ms ease, visibility 0s linear 170ms; visibility: hidden; box-shadow: 15px 0 40px rgb(17 42 34 / 15%); }
+  .assistant-sidebar.mobile-open { transform: translateX(0); transition-delay: 0s; visibility: visible; }
   .assistant-backdrop { position: fixed; z-index: 19; inset: 0; display: block; border: 0; background: rgb(23 41 33 / 37%); }
   .assistant-main { height: 100dvh; min-height: 0; }
   .assistant-topbar { min-height: 58px; padding: 0 14px; }
-  .assistant-menu-toggle { display: grid; place-items: center; }
+  .assistant-menu-toggle { display: grid; width: 44px; min-width: 44px; height: 44px; place-items: center; }
   .assistant-connection { font-size: 8px; }
   .assistant-message-list { padding: 22px 15px; }
   .assistant-welcome { padding-top: 24px; }

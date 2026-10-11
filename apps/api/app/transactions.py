@@ -395,15 +395,14 @@ def dashboard_summary(
         else:
             group["balance"] += account_balance_by_id[account.id]
 
-    forecast_end = (
-        period_end
-        if (selected_year, selected_month) == (today.year, today.month)
-        else (
+    if (selected_year, selected_month) == (today.year, today.month):
+        forecast_end = max(period_end, today + timedelta(days=6))
+    else:
+        forecast_end = (
             date(today.year + 1, 1, 1) - timedelta(days=1)
             if today.month == 12
             else date(today.year, today.month + 1, 1) - timedelta(days=1)
         )
-    )
     account_by_id = {
         account.id: account
         for account in db.scalars(select(Account).where(Account.user_id == user.id)).all()
@@ -421,6 +420,7 @@ def dashboard_summary(
         amount: Decimal,
         account: Account | None = None,
         card_name: str | None = None,
+        credit_card_id: UUID | None = None,
     ) -> None:
         due_status = (
             "OVERDUE"
@@ -433,6 +433,7 @@ def dashboard_summary(
             ForecastItem(
                 id=item_id,
                 source=source,
+                credit_card_id=credit_card_id,
                 description=description,
                 type=movement_type,
                 due_date=due_date,
@@ -511,6 +512,7 @@ def dashboard_summary(
             amount=invoice_summary.outstanding,
             account=payment_account,
             card_name=card.name,
+            credit_card_id=card.id,
         )
 
     forecast_items.sort(key=lambda item: (item.due_date, item.description.casefold(), item.id))

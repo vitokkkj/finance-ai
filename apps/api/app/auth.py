@@ -22,10 +22,10 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 from qrcode.image.svg import SvgPathImage
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.orm import Session
 
-from app.auth_security import LoginRateLimiter, verify_totp
+from app.auth_security import LoginRateLimiter, matching_totp_counter
 from app.config import settings
 from app.database import get_db
 from app.models import AuthSession, User
@@ -64,10 +64,29 @@ def _totp_is_required() -> bool:
     return bool(settings.owner_totp_secret)
 
 
-def _verify_owner_totp(code: str | None) -> bool:
+def _owner_totp_counter(code: str | None) -> int | None:
     if not _totp_is_required():
-        return settings.app_env.casefold() != "production"
-    return verify_totp(settings.owner_totp_secret or "", code)
+        return -1 if settings.app_env.casefold() != "production" else None
+    return matching_totp_counter(settings.owner_totp_secret or "", code)
+
+
+def _consume_totp_counter(db: Session, user: User, counter: int) -> bool:
+    if counter < 0:
+        return True
+    consumed_user_id = db.scalar(
+        update(User)
+        .where(
+            User.id == user.id,
+            or_(User.last_totp_counter.is_(None), User.last_totp_counter < counter),
+        )
+        .values(last_totp_counter=counter)
+        .returning(User.id)
+        .execution_options(synchronize_session=False)
+    )
+    if consumed_user_id is None:
+        return False
+    user.last_totp_counter = counter
+    return True
 
 
 def _client_rate_keys(request: Request, action: str, email: str) -> tuple[str, ...]:
@@ -93,8 +112,7 @@ def _password_authenticated_user(db: Session, email: str, password: str) -> User
 def _mfa_enrollment_token_matches(candidate: str) -> bool:
     configured = settings.mfa_enrollment_token
     return bool(
-        configured
-        and hmac.compare_digest(candidate.encode("utf-8"), configured.encode("utf-8"))
+        configured and hmac.compare_digest(candidate.encode("utf-8"), configured.encode("utf-8"))
     )
 
 
@@ -177,7 +195,7 @@ def _normalized_avatar(data_url: str) -> bytes:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format != expected_format:
                 raise ValueError("O conteúdo não corresponde ao formato da imagem.")
-            if source.width * source.height > 8_000_000:
+            if source.width * source.height > 48_000_000:
                 raise ValueError("A imagem excede a resolução permitida.")
             source.verify()
 
@@ -192,15 +210,20 @@ def _normalized_avatar(data_url: str) -> bytes:
             return output.getvalue()
 
 
-def _reauthentication_matches(
-    db: Session, user: User, payload: ReauthenticationRequest
-) -> bool:
+def _reauthentication_matches(db: Session, user: User, payload: ReauthenticationRequest) -> bool:
     authenticated_user = _password_authenticated_user(db, user.email, payload.current_password)
     password_matches = authenticated_user is not None and authenticated_user.id == user.id
-    mfa_matches = not _totp_is_required() or (
-        user.mfa_enrolled_at is not None and _verify_owner_totp(payload.totp_code)
+    if not password_matches:
+        return False
+    if not _totp_is_required():
+        return True
+    counter = _owner_totp_counter(payload.totp_code)
+    mfa_matches = (
+        user.mfa_enrolled_at is not None
+        and counter is not None
+        and _consume_totp_counter(db, user, counter)
     )
-    return password_matches and mfa_matches
+    return mfa_matches
 
 
 def _session_is_active(session: AuthSession, now: datetime) -> bool:
@@ -277,8 +300,8 @@ def create_first_user(
             settings.initial_setup_token.encode("utf-8"),
         )
 
-    credentials_match = token_matches and _verify_owner_totp(payload.totp_code)
-    if not credentials_match:
+    totp_counter = _owner_totp_counter(payload.totp_code)
+    if not token_matches or totp_counter is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível validar os dados do primeiro acesso.",
@@ -296,6 +319,9 @@ def create_first_user(
             display_name=payload.display_name,
             password_hash=password_hasher.hash(payload.password),
             mfa_enrolled_at=datetime.now(UTC) if _totp_is_required() else None,
+            last_totp_counter=totp_counter
+            if totp_counter is not None and totp_counter >= 0
+            else None,
         )
         db.add(user)
         db.flush()
@@ -398,7 +424,8 @@ def confirm_mfa_enrollment(
             status_code=status.HTTP_410_GONE,
             detail="O QR expirou. Gere um novo para continuar.",
         )
-    if not _verify_owner_totp(payload.totp_code):
+    totp_counter = _owner_totp_counter(payload.totp_code)
+    if totp_counter is None or not _consume_totp_counter(db, user, totp_counter):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Código inválido. Confira o Authy e tente novamente.",
@@ -425,8 +452,8 @@ def login(
         _raise_rate_limit()
 
     user = _password_authenticated_user(db, payload.email, payload.password)
-    totp_matches = _verify_owner_totp(payload.totp_code)
-    if user is None or not totp_matches:
+    totp_counter = _owner_totp_counter(payload.totp_code)
+    if user is None or totp_counter is None or not _consume_totp_counter(db, user, totp_counter):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="E-mail, senha ou código inválidos.",
@@ -501,7 +528,7 @@ def update_current_user_avatar(
     ) as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Escolha uma imagem PNG, JPEG ou WebP válida, de até 8 megapixels.",
+            detail="Escolha uma imagem PNG, JPEG ou WebP válida, de até 48 megapixels.",
         ) from error
     user.avatar_revision = uuid4()
     db.commit()

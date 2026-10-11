@@ -56,4 +56,4 @@ def normalize_chat_image(data_url: str) -> str:
     output = BytesIO()
     image.save(output, format="WEBP", quality=88, method=4)
     normalized = base64.b64encode(output.getvalue()).decode("ascii")
-    return prefix + normalized
+    return f"data:image/webp;base64,{normalized}"

@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
+import type { FinanceFocusTarget } from "@/lib/finance-types";
 
 type Account = { id: string; name: string; is_active: boolean };
 type Category = { id: string; name: string; type: "INCOME" | "EXPENSE"; is_archived: boolean };
@@ -93,10 +94,12 @@ function statusLabel(status: CardInvoice["status"]): string {
 export function CreditCardWorkspace({
   accounts,
   categories,
+  focusTarget,
   onFinanceChanged,
 }: {
   accounts: Account[];
   categories: Category[];
+  focusTarget?: FinanceFocusTarget | null;
   onFinanceChanged: () => void;
 }) {
   const [cards, setCards] = useState<CreditCard[]>([]);
@@ -120,6 +123,7 @@ export function CreditCardWorkspace({
   const [openingInvoiceForm, setOpeningInvoiceForm] = useState({ closing_month: localMonth(), amount: "" });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const invoiceDetailsRef = useRef<HTMLDivElement>(null);
 
   const activeCards = useMemo(() => cards.filter((card) => card.is_active), [cards]);
   const activeAccounts = useMemo(() => accounts.filter((account) => account.is_active), [accounts]);
@@ -128,6 +132,33 @@ export function CreditCardWorkspace({
     [categories],
   );
   const selectedInvoice = invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null;
+
+  useEffect(() => {
+    if (focusTarget?.source !== "CARD_INVOICE" || !focusTarget.credit_card_id) return;
+    const card = cards.find((item) => item.id === focusTarget.credit_card_id);
+    if (!card) return;
+    if (selectedCardId !== card.id) {
+      setSelectedCardId(card.id);
+      setSelectedInvoiceId("");
+      return;
+    }
+    const invoice = invoices.find((item) => item.id === focusTarget.id);
+    if (!invoice) return;
+    setSelectedInvoiceId(invoice.id);
+    const defaultAccountId = card.payment_account_id && activeAccounts.some((item) => item.id === card.payment_account_id)
+      ? card.payment_account_id
+      : activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "";
+    setPaymentForm({ account_id: defaultAccountId, amount: invoice.outstanding, occurred_at: localDate() });
+  }, [activeAccounts, cards, focusTarget, invoices, selectedCardId]);
+
+  useEffect(() => {
+    if (focusTarget?.source !== "CARD_INVOICE" || selectedInvoiceId !== focusTarget.id || !selectedInvoice) return;
+    const frame = window.requestAnimationFrame(() => {
+      invoiceDetailsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      invoiceDetailsRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusTarget, selectedInvoice, selectedInvoiceId]);
 
   const loadCards = useCallback(async () => {
     try {
@@ -373,11 +404,11 @@ export function CreditCardWorkspace({
           }
         }} /> : (
           <div className="table-wrap"><table className="data-table"><thead><tr><th>Ciclo</th><th>Fechamento</th><th>Vencimento</th><th>Total</th><th>Pago</th><th>Em aberto</th><th>Status</th><th /></tr></thead><tbody>
-            {invoices.map((invoice) => <tr key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions"><button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button></td></tr>)}
+            {invoices.map((invoice) => <tr className={focusTarget?.source === "CARD_INVOICE" && focusTarget.id === invoice.id ? "notification-target" : undefined} key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions"><button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button></td></tr>)}
           </tbody></table></div>
         )}
         {selectedInvoice && (
-          <div className="invoice-details">
+          <section aria-label="Detalhes da fatura e registro de pagamento" className="invoice-details" ref={invoiceDetailsRef} tabIndex={-1}>
             <div className="surface-heading invoice-details-heading">
               <div className="invoice-details-title">
                 <p className="eyebrow">{selectedInvoice.credit_card_name}</p>
@@ -425,7 +456,7 @@ export function CreditCardWorkspace({
                 <div className="form-actions"><button className="primary-button compact-button" disabled={busy || activeAccounts.length === 0} type="submit">{busy ? "Salvando…" : "Registrar pagamento"}</button><span className="form-note">O pagamento reduz o saldo da conta sem repetir a despesa.</span></div>
               </form>
             )}
-          </div>
+          </section>
         )}
       </section>
     </div>

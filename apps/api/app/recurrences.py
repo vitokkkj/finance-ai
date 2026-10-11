@@ -322,9 +322,7 @@ def create_recurrence_for_user(
     )
     db.add(rule)
     db.flush()
-    ensure_occurrences(
-        rule, current_financial_date() + timedelta(days=OCCURRENCE_HORIZON_DAYS), db
-    )
+    ensure_occurrences(rule, current_financial_date() + timedelta(days=OCCURRENCE_HORIZON_DAYS), db)
     db.commit()
     db.refresh(rule)
     return _rule_response(rule)
@@ -347,22 +345,26 @@ def list_recurrences(
 def list_occurrences(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    occurrence_id: UUID | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> list[RecurrenceOccurrenceResponse]:
-    today = current_financial_date()
-    start = start_date or today - timedelta(days=30)
-    end = end_date or today + timedelta(days=OCCURRENCE_HORIZON_DAYS)
-    if end < start or (end - start).days > 366:
-        raise HTTPException(status_code=422, detail="O período deve ter até 366 dias.")
-    occurrences = db.scalars(
-        select(RecurrenceOccurrence)
-        .where(
+    statement = select(RecurrenceOccurrence).where(RecurrenceOccurrence.user_id == user.id)
+    if occurrence_id is not None:
+        statement = statement.where(RecurrenceOccurrence.id == occurrence_id)
+    else:
+        today = current_financial_date()
+        start = start_date or today - timedelta(days=30)
+        end = end_date or today + timedelta(days=OCCURRENCE_HORIZON_DAYS)
+        if end < start or (end - start).days > 366:
+            raise HTTPException(status_code=422, detail="O período deve ter até 366 dias.")
+        statement = statement.where(
             RecurrenceOccurrence.user_id == user.id,
             RecurrenceOccurrence.due_date >= start,
             RecurrenceOccurrence.due_date <= end,
         )
-        .order_by(RecurrenceOccurrence.due_date, RecurrenceOccurrence.created_at)
+    occurrences = db.scalars(
+        statement.order_by(RecurrenceOccurrence.due_date, RecurrenceOccurrence.created_at)
     ).all()
     return [_occurrence_response(occurrence) for occurrence in occurrences]
 

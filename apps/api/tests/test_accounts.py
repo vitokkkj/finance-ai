@@ -163,3 +163,52 @@ def test_clearing_opening_balance_makes_balance_unavailable_until_reentered(
     assert completed.status_code == 200
     assert completed.json()["balance"] == "1250.00"
     assert client.get("/api/dashboard/summary").json()["checking_balance"] == "1250.00"
+
+
+def test_account_with_nonzero_balance_cannot_be_archived(client: TestClient) -> None:
+    sign_in(client)
+    account = client.post(
+        "/api/accounts",
+        json={
+            "name": "Sicredi",
+            "type": "CHECKING",
+            "opening_balance": "125.00",
+            "opening_balance_date": "2026-01-01",
+        },
+    ).json()
+
+    archived = client.post(f"/api/accounts/{account['id']}/archive")
+
+    assert archived.status_code == 409
+    assert "R$ 0,00" in archived.json()["detail"]
+    assert client.get("/api/accounts").json()[0]["is_active"] is True
+
+
+def test_account_with_unknown_balance_cannot_be_archived(client: TestClient) -> None:
+    sign_in(client)
+    account = client.post("/api/accounts", json={"name": "Poupança", "type": "SAVINGS"}).json()
+
+    archived = client.post(f"/api/accounts/{account['id']}/archive")
+
+    assert archived.status_code == 409
+    assert "saldo inicial" in archived.json()["detail"]
+    assert client.get("/api/accounts").json()[0]["is_active"] is True
+
+
+def test_account_with_zero_balance_can_be_archived(client: TestClient) -> None:
+    sign_in(client)
+    account = client.post(
+        "/api/accounts",
+        json={
+            "name": "Conta encerrada",
+            "type": "CHECKING",
+            "opening_balance": "0.00",
+            "opening_balance_date": "2026-01-01",
+        },
+    ).json()
+
+    archived = client.post(f"/api/accounts/{account['id']}/archive")
+
+    assert archived.status_code == 200
+    assert archived.json()["balance"] == "0.00"
+    assert client.get("/api/accounts").json() == []

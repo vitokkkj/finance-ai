@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth import password_hasher
 from app.finance_engine import current_financial_date
-from app.models import RecurrenceRule, User
+from app.models import RecurrenceOccurrence, RecurrenceRule, User
 from app.recurrences import extend_active_occurrences, scheduled_dates
 
 
@@ -151,6 +151,52 @@ def test_occurrence_status_tracks_sao_paulo_local_date(
     ).json()
     assert rows[0]["status"] == "OVERDUE"
     assert all(row["status"] == "PLANNED" for row in rows[1:])
+
+
+def test_occurrence_lookup_by_id_includes_old_overdue_items(
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.recurrences as recurrence_module
+
+    today = date(2026, 10, 11)
+    monkeypatch.setattr(recurrence_module, "current_financial_date", lambda: today)
+    setup_user(client)
+    account_id, category_id = setup_references(client, today)
+    create_recurrence(
+        client,
+        account_id=account_id,
+        category_id=category_id,
+        starts_on=today,
+    )
+    current_occurrence = client.get(
+        "/api/recurrences/occurrences",
+        params={"start_date": today.isoformat(), "end_date": today.isoformat()},
+    ).json()[0]
+    old_due_date = today - timedelta(days=60)
+    with test_session_factory() as db:
+        occurrence = db.get(RecurrenceOccurrence, UUID(cast(str, current_occurrence["id"])))
+        assert occurrence is not None
+        occurrence.due_date = old_due_date
+        db.commit()
+
+    old_rows = client.get(
+        "/api/recurrences/occurrences",
+        params={"start_date": old_due_date.isoformat(), "end_date": old_due_date.isoformat()},
+    ).json()
+    old_occurrence = old_rows[0]
+    assert old_occurrence["status"] == "OVERDUE"
+    assert old_occurrence["id"] not in {
+        item["id"] for item in client.get("/api/recurrences/occurrences").json()
+    }
+
+    focused_rows = client.get(
+        "/api/recurrences/occurrences",
+        params={"occurrence_id": old_occurrence["id"]},
+    )
+    assert focused_rows.status_code == 200
+    assert [item["id"] for item in focused_rows.json()] == [old_occurrence["id"]]
 
 
 def test_paying_an_occurrence_creates_one_confirmed_transaction(

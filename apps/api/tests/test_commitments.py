@@ -1,6 +1,7 @@
 from calendar import monthrange
 from datetime import timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.finance_engine import current_financial_date
@@ -98,6 +99,44 @@ def test_planned_commitments_are_forecast_then_recorded_once_when_paid(client: T
     assert blocked_delete.status_code == 409
 
 
+def test_dashboard_keeps_seven_day_due_alerts_across_month_end(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.commitments as commitments_module
+    import app.transactions as transactions_module
+
+    current_day = current_financial_date()
+    today = current_day.replace(day=monthrange(current_day.year, current_day.month)[1] - 2)
+    monkeypatch.setattr(commitments_module, "current_financial_date", lambda: today)
+    monkeypatch.setattr(transactions_module, "current_financial_date", lambda: today)
+    account_id, expense_category, _, _ = setup_commitment_finances(client)
+    due_soon = today.replace(day=monthrange(today.year, today.month)[1]) + timedelta(days=1)
+    due_later = due_soon + timedelta(days=6)
+
+    commitments = (
+        ("Conta no início do mês", due_soon),
+        ("Conta além dos sete dias", due_later),
+    )
+    for description, due_date in commitments:
+        response = client.post(
+            "/api/commitments",
+            json={
+                "account_id": account_id,
+                "category_id": expense_category,
+                "type": "EXPENSE",
+                "description": description,
+                "amount": "70.00",
+                "due_date": due_date.isoformat(),
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    summary = client.get("/api/dashboard/summary").json()
+    assert summary["forecast_end"] == (today + timedelta(days=6)).isoformat()
+    assert summary["forecast_next_7_days_total"] == "70.00"
+    assert [item["description"] for item in summary["forecast_items"]] == ["Conta no início do mês"]
+
+
 def test_planned_commitment_requires_owned_active_account_and_matching_category(
     client: TestClient,
 ) -> None:
@@ -152,6 +191,9 @@ def test_open_card_invoice_is_forecast_and_reduces_only_its_selected_account_typ
     )
     assert checking["projected_balance"] == "750.00"
     assert any(
-        item["source"] == "CARD_INVOICE" and item["amount"] == "250.00"
+        item["source"] == "CARD_INVOICE"
+        and item["amount"] == "250.00"
+        and item["credit_card_id"] == card.json()["id"]
+        and item["id"] == f"invoice:{invoice.json()['id']}"
         for item in summary["forecast_items"]
     )
