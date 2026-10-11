@@ -10,7 +10,9 @@ Next.js encaminha `/api/*` para FastAPI. API e worker acessam PostgreSQL pela re
 
 Na implantação, Next.js recebe `API_INTERNAL_URL=http://api:8000` durante o build para que o proxy de `/api/*` alcance a API pela rede Docker. API, web, worker, Caddy e `cloudflared` usam sistema de arquivos raiz somente leitura e `/tmp` temporário. O worker não recebe o segredo TOTP do proprietário.
 
-A API roda com um único worker para manter o limitador de tentativas de login consistente. Esta instalação foi projetada para uma instância de API; não escale réplicas sem antes mover o limitador para um mecanismo compartilhado.
+A API roda com um único worker para manter o limitador de tentativas de login consistente. A validação de senha e a etapa de MFA compartilham o mesmo orçamento de tentativas por conta e origem. Bloqueios ativos não são expulsos por novas origens: se a tabela de chaves atingir a capacidade configurada, novas chaves recebem 429 até que entradas expirem. Esta instalação foi projetada para uma instância de API; não escale réplicas sem antes mover o limitador para um mecanismo compartilhado.
+
+Fotos de perfil aceitam JPEG, PNG ou WebP até 8 MB no navegador. A API decodifica e valida o conteúdo, limita a imagem a 8 megapixels, normaliza orientação e dimensões para no máximo 512 px e armazena WebP associado ao usuário. A leitura exige uma sessão autenticada e envia `Cache-Control: no-store`; a migration `0013_profile_avatar` só acrescenta os campos opcionais do perfil.
 
 O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai), sob licença MIT. Endereços privados da VM, arquivos `.env`, tokens de túnel, credenciais OAuth e dados financeiros não pertencem ao GitHub.
 

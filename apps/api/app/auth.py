@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import io
 import secrets
 import threading
 import time
+import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote, urlencode
+from uuid import uuid4
 
 import qrcode
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from PIL import Image, ImageOps, UnidentifiedImageError
 from qrcode.image.svg import SvgPathImage
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -26,6 +30,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import AuthSession, User
 from app.schemas import (
+    AvatarUpdate,
     LoginCheckResponse,
     LoginRequest,
     MFAEnrollmentConfirmRequest,
@@ -147,7 +152,44 @@ def _user_response(user: User) -> UserResponse:
         display_name=user.display_name,
         mfa_required=_totp_is_required(),
         mfa_enrolled=user.mfa_enrolled_at is not None,
+        avatar_url=(
+            f"/api/auth/me/avatar/{user.avatar_revision}" if user.avatar_revision else None
+        ),
     )
+
+
+def _normalized_avatar(data_url: str) -> bytes:
+    media_type, _, encoded = data_url.partition(",")
+    expected_format = {
+        "data:image/png;base64": "PNG",
+        "data:image/jpeg;base64": "JPEG",
+        "data:image/webp;base64": "WEBP",
+    }.get(media_type)
+    if expected_format is None:
+        raise ValueError("Formato de imagem não permitido.")
+
+    raw = base64.b64decode(encoded, validate=True)
+    if not raw or len(raw) > 1_500_000:
+        raise ValueError("A imagem excede o tamanho permitido.")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        with Image.open(io.BytesIO(raw)) as source:
+            if source.format != expected_format:
+                raise ValueError("O conteúdo não corresponde ao formato da imagem.")
+            if source.width * source.height > 8_000_000:
+                raise ValueError("A imagem excede a resolução permitida.")
+            source.verify()
+
+        with Image.open(io.BytesIO(raw)) as source:
+            source.load()
+            normalized = ImageOps.exif_transpose(source)
+            normalized.thumbnail((512, 512), Image.Resampling.LANCZOS)
+            mode = "RGBA" if "A" in normalized.getbands() else "RGB"
+            normalized = normalized.convert(mode)
+            output = io.BytesIO()
+            normalized.save(output, format="WEBP", quality=82, method=4)
+            return output.getvalue()
 
 
 def _reauthentication_matches(
@@ -271,7 +313,7 @@ def check_login_password(
     db: Annotated[Session, Depends(get_db)],
 ) -> LoginCheckResponse:
     """Valida a primeira etapa para que a interface só peça MFA depois da senha."""
-    keys = _client_rate_keys(request, "login-check", payload.email)
+    keys = _client_rate_keys(request, "login", payload.email)
     now = time.monotonic()
     if not login_rate_limiter.allow_attempt(keys, now):
         _raise_rate_limit()
@@ -281,7 +323,6 @@ def check_login_password(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível validar o e-mail e a senha.",
         )
-    login_rate_limiter.clear(keys)
     return LoginCheckResponse(
         mfa_required=_totp_is_required(),
         mfa_enrolled=user.mfa_enrolled_at is not None,
@@ -437,6 +478,62 @@ def update_current_user(
     user: Annotated[User, Depends(get_current_user)],
 ) -> UserResponse:
     user.display_name = payload.display_name
+    db.commit()
+    db.refresh(user)
+    return _user_response(user)
+
+
+@router.put("/me/avatar", response_model=UserResponse)
+def update_current_user_avatar(
+    payload: AvatarUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
+    try:
+        user.avatar_data = _normalized_avatar(payload.image_data_url)
+    except (
+        binascii.Error,
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        UnidentifiedImageError,
+    ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Escolha uma imagem PNG, JPEG ou WebP válida, de até 8 megapixels.",
+        ) from error
+    user.avatar_revision = uuid4()
+    db.commit()
+    db.refresh(user)
+    return _user_response(user)
+
+
+@router.get("/me/avatar/{revision}")
+def get_current_user_avatar(
+    revision: str,
+    user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    if str(user.avatar_revision) != revision or user.avatar_data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Foto não encontrada.")
+    return Response(
+        content=user.avatar_data,
+        media_type="image/webp",
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": 'inline; filename="perfil.webp"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.delete("/me/avatar", response_model=UserResponse)
+def delete_current_user_avatar(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
+    user.avatar_data = None
+    user.avatar_revision = None
     db.commit()
     db.refresh(user)
     return _user_response(user)

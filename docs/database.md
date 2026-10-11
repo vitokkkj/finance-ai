@@ -13,7 +13,7 @@ As chamadas de IA não recebem `user_id` como argumento. A API injeta o usuário
 
 ### Identidade e sessões
 
-- `users`: UUID, e-mail único normalizado, nome de exibição, hash Argon2id da senha e data de criação.
+- `users`: UUID, e-mail único normalizado, nome de exibição, hash Argon2id da senha, foto WebP otimizada opcional com revisão UUID e data de criação. A foto é servida somente pela API autenticada e não é incluída em respostas de lista ou logs.
 - `auth_sessions`: digest SHA-256 do token de sessão, `user_id` com chave estrangeira e exclusão em cascata, validade e data de criação.
 
 ### Fase 2A — núcleo financeiro manual

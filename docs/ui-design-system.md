@@ -2,16 +2,16 @@
 
 A SophIA — sua assistente financeira — começa pela conversa: ao entrar, a pessoa vê uma saudação curta, sugestões relacionadas às contas e cartões cadastrados e o campo para perguntar. A conversa anterior não abre automaticamente; fica disponível em **Conversas recentes**. Uma nova conversa só é persistida quando a primeira mensagem é enviada.
 
-A visão geral financeira permanece como uma área própria. Na conversa, o painel lateral fica oculto quando não há assunto financeiro identificável, e pode ser recolhido quando está aberto. Quando existe contexto, muda conforme o assunto:
+A visão geral financeira permanece como uma área própria. Na conversa, o painel lateral fica oculto quando não há assunto financeiro identificável, e pode ser recolhido quando está aberto. Os controles de recolher a navegação e abrir o contexto financeiro ficam no próprio menu lateral, com rótulos explícitos. Quando existe contexto, muda conforme o assunto:
 
 - cartão: limite, fechamento, vencimento e fatura mais recente;
 - conta: saldo e movimentações associadas;
 - gastos: total, categorias e comparação com o mês anterior; quando a conversa pede outro período, o painel segue esse período;
 - sem assunto identificável: o painel não é exibido; a home mantém apenas um resumo compacto.
 
-Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta.
+Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta. A lista de conversas mantém títulos em uma linha com reticências, marcador próprio alinhado ao texto e estado selecionado visível nos temas claro e escuro. O menu mantém rótulos à direita dos ícones. A conta pode receber uma foto circular, redimensionada no navegador e normalizada no servidor.
 
-A Visão Geral destaca o saldo total e agrupa receitas, despesas e resultado no fluxo mensal. Conversas recentes recebem um título curto: o provedor sugere o título quando o modelo atende a primeira mensagem, e o parser local usa um resumo determinístico quando já consegue interpretá-la. A sugestão do modelo usa uma chamada breve da mesma conexão ChatGPT e conta no limite de uso do Plus, sem cobrança da API. O usuário pode renomear ou arquivar conversas pela sidebar; títulos longos quebram em várias linhas para permanecerem legíveis por inteiro.
+A Visão Geral destaca o saldo total e agrupa receitas, despesas e resultado no fluxo mensal. Conversas recentes recebem um título curto: o provedor sugere o título quando o modelo atende a primeira mensagem, e o parser local usa um resumo determinístico quando já consegue interpretá-la. A sugestão do modelo usa uma chamada breve da mesma conexão ChatGPT e conta no limite de uso do Plus, sem cobrança da API. O usuário pode renomear ou arquivar conversas pela sidebar; títulos longos ficam em uma linha e são truncados visualmente.
 
 ## Componentes de resposta
 

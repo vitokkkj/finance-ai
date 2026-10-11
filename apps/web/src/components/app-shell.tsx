@@ -248,10 +248,12 @@ export function AppShell() {
   if (gate === "authenticated" && user) {
     return (
       <AssistantWorkspace
+        avatarUrl={user.avatar_url ?? null}
         displayName={user.display_name}
         email={user.email}
         mfaRequired={user.mfa_required}
         mfaEnrolled={user.mfa_enrolled}
+        onAvatarUrlChange={(nextAvatarUrl) => setUser((current) => current ? { ...current, avatar_url: nextAvatarUrl } : current)}
         onDisplayNameChange={(nextDisplayName) => setUser((current) => current ? { ...current, display_name: nextDisplayName } : current)}
         onLogout={() => void handleLogout()}
         onThemeChange={changeTheme}

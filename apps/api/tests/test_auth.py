@@ -1,5 +1,9 @@
+import base64
+from io import BytesIO
+
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.config import settings
 
@@ -249,6 +253,31 @@ def test_login_rate_limit_blocks_repeated_failures(client: TestClient) -> None:
     assert valid_from_another_ip.status_code == 429
 
 
+def test_login_password_check_and_mfa_share_one_rate_limit(client: TestClient) -> None:
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    client.cookies.clear()
+
+    for _ in range(5):
+        response = client.post(
+            "/api/auth/login/check",
+            json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+        )
+        assert response.status_code == 401
+
+    blocked_second_stage = client.post(
+        "/api/auth/login",
+        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+    )
+    assert blocked_second_stage.status_code == 429
+
+
 def test_login_rate_limit_blocks_attempts_across_multiple_ips(client: TestClient) -> None:
     from app.main import app
 
@@ -328,6 +357,49 @@ def test_account_profile_and_active_sessions_can_be_managed(client: TestClient) 
     assert client.get("/api/auth/me").json()["display_name"] == "Vitor"
 
 
+def test_profile_avatar_is_private_normalized_and_removable(client: TestClient) -> None:
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+
+    image_buffer = BytesIO()
+    Image.new("RGB", (32, 20), color=(49, 94, 73)).save(image_buffer, format="PNG")
+    image_data_url = f"data:image/png;base64,{base64.b64encode(image_buffer.getvalue()).decode()}"
+
+    updated = client.put("/api/auth/me/avatar", json={"image_data_url": image_data_url})
+    assert updated.status_code == 200
+    avatar_url = updated.json()["avatar_url"]
+    assert avatar_url.startswith("/api/auth/me/avatar/")
+
+    avatar = client.get(avatar_url)
+    assert avatar.status_code == 200
+    assert avatar.headers["content-type"] == "image/webp"
+    assert avatar.headers["cache-control"] == "no-store"
+    assert avatar.headers["x-content-type-options"] == "nosniff"
+    with Image.open(BytesIO(avatar.content)) as normalized:
+        assert normalized.format == "WEBP"
+        assert normalized.size == (32, 20)
+
+    invalid = client.put(
+        "/api/auth/me/avatar",
+        json={"image_data_url": "data:image/png;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="},
+    )
+    assert invalid.status_code == 422
+
+    removed = client.delete("/api/auth/me/avatar")
+    assert removed.status_code == 200
+    assert removed.json()["avatar_url"] is None
+    assert client.get(avatar_url).status_code == 404
+
+    client.cookies.clear()
+    assert client.get(avatar_url).status_code == 401
+
+
 def test_password_change_requires_reauthentication_and_revokes_all_sessions(
     client: TestClient,
 ) -> None:
@@ -400,13 +472,16 @@ def test_login_rate_limiter_keeps_memory_bounded() -> None:
 
     limiter = LoginRateLimiter(max_attempts=2, window_seconds=60, max_keys=2)
     assert limiter.allow_attempt(("ip:1",), 1)
+    assert limiter.allow_attempt(("ip:1",), 2)
+    assert not limiter.allow_attempt(("ip:1",), 3)
     assert limiter.allow_attempt(("ip:2",), 2)
-    assert limiter.allow_attempt(("ip:3",), 3)
+    assert not limiter.allow_attempt(("ip:3",), 3)
 
     assert len(limiter._failures) == 2
-    assert limiter.allow_attempt(("ip:1",), 4)
-    assert limiter.allow_attempt(("ip:1",), 5)
-    assert not limiter.allow_attempt(("ip:1",), 6)
+    assert not limiter.allow_attempt(("ip:1",), 4)
+    assert limiter.allow_attempt(("ip:3",), 63)
+    assert limiter.allow_attempt(("ip:2",), 63)
+    assert len(limiter._failures) == 2
 
 
 def test_totp_accepts_current_and_neighboring_time_steps() -> None:

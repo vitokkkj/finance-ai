@@ -41,6 +41,15 @@ class UserResponse(BaseModel):
     display_name: str
     mfa_required: bool
     mfa_enrolled: bool
+    avatar_url: str | None
+
+
+class AvatarUpdate(BaseModel):
+    image_data_url: str = Field(
+        min_length=40,
+        max_length=2_000_000,
+        pattern=r"^data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$",
+    )
 
 
 class ProfileUpdate(BaseModel):

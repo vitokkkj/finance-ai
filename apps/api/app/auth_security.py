@@ -40,6 +40,16 @@ class LoginRateLimiter:
         self._failures.move_to_end(key)
         return attempts
 
+    def _discard_expired(self, now: float) -> None:
+        cutoff = now - self._window_seconds
+        expired = [
+            key
+            for key, attempts in self._failures.items()
+            if not attempts or attempts[-1] <= cutoff
+        ]
+        for key in expired:
+            self._failures.pop(key, None)
+
     def allow_attempt(self, keys: Iterable[str], now: float) -> bool:
         with self._lock:
             unique_keys = tuple(dict.fromkeys(keys))
@@ -49,10 +59,16 @@ class LoginRateLimiter:
             if any(len(attempts) >= self._max_attempts for attempts in attempts_by_key.values()):
                 return False
 
+            new_keys = tuple(key for key in unique_keys if key not in self._failures)
+            if new_keys:
+                self._discard_expired(now)
+                if len(self._failures) + len(new_keys) > self._max_keys:
+                    # Fail closed at capacity. Evicting an active bucket would let
+                    # a high-cardinality attack erase an existing lockout.
+                    return False
+
             for key, attempts in attempts_by_key.items():
                 if not attempts and key not in self._failures:
-                    while len(self._failures) >= self._max_keys:
-                        self._failures.popitem(last=False)
                     attempts = deque()
                     self._failures[key] = attempts
                 attempts.append(now)

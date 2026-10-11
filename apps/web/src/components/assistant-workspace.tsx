@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import Image from "next/image";
 import {
   Archive,
   ArrowDownLeft,
@@ -304,19 +305,23 @@ function parseAssistantPreferences(content: string | undefined): AssistantPrefer
 }
 
 export function AssistantWorkspace({
+  avatarUrl,
   displayName,
   email,
   mfaRequired,
   mfaEnrolled,
+  onAvatarUrlChange,
   onDisplayNameChange,
   onLogout,
   theme,
   onThemeChange,
 }: {
+  avatarUrl: string | null;
   displayName: string;
   email: string;
   mfaRequired: boolean;
   mfaEnrolled: boolean;
+  onAvatarUrlChange: (avatarUrl: string | null) => void;
   onDisplayNameChange: (displayName: string) => void;
   onLogout: () => void;
   theme: Theme;
@@ -841,9 +846,14 @@ export function AssistantWorkspace({
           <BrandMark />
           <span className="assistant-brand-name">SophIA</span>
         </button>
+        <button aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"} aria-pressed={sidebarCollapsed} className="assistant-sidebar-toggle" onClick={toggleDesktopSidebar} title={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"} type="button">
+          {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" size={16} /> : <PanelLeftClose aria-hidden="true" size={16} />}
+          <span>{sidebarCollapsed ? "Expandir menu" : "Recolher menu"}</span>
+        </button>
         <button className="assistant-new-chat" onClick={startConversation} type="button">
           <Plus aria-hidden="true" size={17} strokeWidth={2} /><span>Nova conversa</span>
         </button>
+        {view === "chat" && contextPanelAvailable && <button aria-expanded={contextPanelOpen} aria-label={contextPanelOpen ? "Recolher contexto financeiro" : "Abrir contexto financeiro"} className="assistant-context-sidebar-toggle" onClick={() => { setMobileMenuOpen(false); setContextPanelOpen((open) => !open); }} title="Contexto financeiro" type="button"><PanelRightOpen aria-hidden="true" size={16} /><span>Contexto financeiro</span></button>}
         <div className="assistant-history">
           <p>Conversas recentes</p>
           {loading ? <span className="history-placeholder">Carregando…</span> : conversations.length === 0 ? (
@@ -916,7 +926,7 @@ export function AssistantWorkspace({
         </nav>
         <div className="assistant-account">
           <button aria-current={view === "account" ? "page" : undefined} aria-label={`Minha conta de ${displayName}`} className={view === "account" ? "assistant-account-trigger selected" : "assistant-account-trigger"} onClick={openAccount} title="Minha conta" type="button">
-            <span className="assistant-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+            <span className="assistant-avatar" aria-hidden="true">{avatarUrl ? <Image alt="" decoding="async" height={36} src={avatarUrl} unoptimized width={36} /> : displayName.slice(0, 1).toUpperCase()}</span>
             <span className="assistant-account-name">{displayName}</span>
           </button>
           <button aria-label="Sair" className="assistant-logout" onClick={onLogout} title="Sair" type="button"><LogOut aria-hidden="true" size={16} /></button>
@@ -925,14 +935,12 @@ export function AssistantWorkspace({
 
       <main className="assistant-main">
         <header className="assistant-topbar">
-          <button aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"} aria-pressed={sidebarCollapsed} className="assistant-sidebar-toggle" onClick={toggleDesktopSidebar} title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} type="button">{sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" size={18} /> : <PanelLeftClose aria-hidden="true" size={18} />}</button>
           <button aria-label="Abrir menu" className="assistant-menu-toggle" onClick={() => setMobileMenuOpen(true)} type="button"><Menu aria-hidden="true" size={20} /></button>
           <div className="assistant-topbar-title">
             <strong>{view === "chat" ? conversations.find((conversation) => conversation.id === conversationId)?.title ?? "Nova conversa" : view === "settings" ? "Preferências" : view === "account" ? "Minha conta" : "Finanças"}</strong>
             <span>{view === "chat" ? "SophIA · sua assistente financeira" : view === "account" ? "Perfil, segurança e sessões" : "Dados calculados pelo sistema"}</span>
           </div>
           <div className="assistant-topbar-actions">
-          {view === "chat" && contextPanelAvailable && <button aria-expanded={contextPanelOpen} aria-label={contextPanelOpen ? "Recolher contexto financeiro" : "Abrir contexto financeiro"} className="assistant-context-toggle" onClick={() => { setMobileMenuOpen(false); setContextPanelOpen((open) => !open); }} type="button"><PanelRightOpen aria-hidden="true" size={18} /><span>Contexto</span></button>}
           <button
             aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
             className="assistant-theme-toggle"
@@ -977,10 +985,12 @@ export function AssistantWorkspace({
           />
         ) : view === "account" ? (
           <AccountView
+            avatarUrl={avatarUrl}
             displayName={displayName}
             email={email}
             mfaRequired={mfaRequired}
             mfaEnrolled={mfaEnrolled}
+            onAvatarUrlChange={onAvatarUrlChange}
             onDisplayNameChange={onDisplayNameChange}
             onLogout={onLogout}
           />
@@ -1712,21 +1722,27 @@ function formatAccountDate(value: string): string {
 }
 
 function AccountView({
+  avatarUrl,
   displayName,
   email,
   mfaRequired,
   mfaEnrolled,
+  onAvatarUrlChange,
   onDisplayNameChange,
   onLogout,
 }: {
+  avatarUrl: string | null;
   displayName: string;
   email: string;
   mfaRequired: boolean;
   mfaEnrolled: boolean;
+  onAvatarUrlChange: (avatarUrl: string | null) => void;
   onDisplayNameChange: (displayName: string) => void;
   onLogout: () => void;
 }) {
   const [nameDraft, setNameDraft] = useState(displayName);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [sessions, setSessions] = useState<AccountSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [sessionError, setSessionError] = useState("");
@@ -1784,6 +1800,70 @@ function AccountView({
       setAccountError(error instanceof Error ? error.message : "Não foi possível salvar seu nome.");
     } finally {
       setSavingProfile(false);
+    }
+  }
+
+  async function uploadAvatar(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setAccountError("");
+    setNotice("");
+    if (!("image/jpeg" === file.type || "image/png" === file.type || "image/webp" === file.type)) {
+      setAccountError("Escolha uma imagem JPEG, PNG ou WebP.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setAccountError("A foto precisa ter até 8 MB.");
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const bitmap = await createImageBitmap(file);
+      if (bitmap.width * bitmap.height > 8_000_000) {
+        bitmap.close();
+        throw new Error("A foto pode ter no máximo 8 megapixels.");
+      }
+      const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) {
+        bitmap.close();
+        throw new Error("Não foi possível preparar essa imagem.");
+      }
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const imageDataUrl = canvas.toDataURL("image/webp", 0.84);
+      const updated = await apiRequest<{ avatar_url: string | null }>("/api/auth/me/avatar", {
+        method: "PUT",
+        body: JSON.stringify({ image_data_url: imageDataUrl }),
+      });
+      onAvatarUrlChange(updated.avatar_url);
+      setNotice("Foto de perfil atualizada.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível salvar a foto.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  async function removeAvatar() {
+    setAccountError("");
+    setNotice("");
+    setUploadingAvatar(true);
+    try {
+      const updated = await apiRequest<{ avatar_url: string | null }>("/api/auth/me/avatar", {
+        method: "DELETE",
+      });
+      onAvatarUrlChange(updated.avatar_url);
+      setNotice("Foto removida.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível remover a foto.");
+    } finally {
+      setUploadingAvatar(false);
     }
   }
 
@@ -1861,6 +1941,18 @@ function AccountView({
       <div className="assistant-settings-grid account-grid">
         <section className="assistant-settings-card account-card">
           <h2>Perfil</h2>
+          <div className="account-avatar-editor">
+            <span className="account-avatar-preview" aria-hidden="true">{avatarUrl ? <Image alt="" decoding="async" height={58} src={avatarUrl} unoptimized width={58} /> : displayName.slice(0, 1).toUpperCase()}</span>
+            <div className="account-avatar-copy">
+              <strong>Foto de perfil</strong>
+              <p>JPEG, PNG ou WebP · até 8 MB. A imagem fica vinculada à sua conta.</p>
+              <input accept="image/jpeg,image/png,image/webp" aria-label="Escolher foto de perfil" hidden onChange={(event) => void uploadAvatar(event)} ref={avatarInputRef} type="file" />
+              <div className="account-avatar-actions">
+                <button className="secondary-button" disabled={uploadingAvatar} onClick={() => avatarInputRef.current?.click()} type="button">{uploadingAvatar ? "Salvando…" : avatarUrl ? "Trocar foto" : "Adicionar foto"}</button>
+                {avatarUrl && <button className="text-button account-avatar-remove" disabled={uploadingAvatar} onClick={() => void removeAvatar()} type="button">Remover</button>}
+              </div>
+            </div>
+          </div>
           <form className="account-form" onSubmit={(event) => void saveProfile(event)}>
             <label className="account-form-field" htmlFor="account-display-name">Nome de exibição
               <input id="account-display-name" autoComplete="name" maxLength={100} onChange={(event) => setNameDraft(event.target.value)} required value={nameDraft} />
