@@ -14,7 +14,7 @@ A API roda com um único worker para manter o limitador de tentativas de login c
 
 Fotos de perfil aceitam JPEG, PNG ou WebP até 25 MB e 48 megapixels no navegador. O navegador corrige a orientação e reduz a foto a no máximo 512 px antes do envio; a API valida novamente e armazena WebP associado ao usuário. A leitura exige uma sessão autenticada e envia Cache-Control: no-store; a migration 0013_profile_avatar só acrescenta os campos opcionais do perfil.
 
-Fotos do chat têm limite de 25 MB e 48 megapixels antes da redução no navegador. O cliente reencoda a imagem em WebP com até 2.048 px; a API limita o corpo da requisição a 4 MB, decodifica e valida as dimensões, remove metadados ao reencodar e encaminha somente ao provider ChatGPT conectado no turno atual. O conteúdo da imagem não é persistido no histórico financeiro. A API bloqueia anexos quando AI_PROVIDER=ollama.
+Fotos do chat podem ser selecionadas ou coladas da área de transferência; têm limite de 25 MB e 48 megapixels antes da redução no navegador. O cliente reencoda a imagem em WebP com até 2.048 px; a API limita o corpo da requisição a 4 MB, decodifica e valida as dimensões, remove metadados ao reencodar e encaminha somente ao provider ChatGPT conectado no turno atual. O conteúdo da imagem não é persistido no histórico financeiro. A API bloqueia anexos quando AI_PROVIDER=ollama.
 
 A API limita mensagens do chat a 20 por usuário a cada 60 segundos e mantém até três respostas simultâneas por processo. Os limites são locais à instância única descrita acima; a publicação continua exigindo rate limiting na Cloudflare.
 

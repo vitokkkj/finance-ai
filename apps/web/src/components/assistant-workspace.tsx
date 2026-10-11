@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import Image from "next/image";
 import {
   Archive,
@@ -618,11 +618,16 @@ export function AssistantWorkspace({
     await sendMessage(draft, attachedImage);
   }
 
-  async function selectChatImage(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) return;
+  async function prepareChatImage(file: File | null) {
+    if (!file) {
+      setAttachedImageError("Não foi possível ler a imagem copiada.");
+      return;
+    }
     setAttachedImageError("");
+    if (status?.provider !== "chatgpt_plan") {
+      setAttachedImageError("A análise de imagens funciona com o ChatGPT conectado.");
+      return;
+    }
     if (!(file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp")) {
       setAttachedImageError("Escolha uma imagem JPEG, PNG ou WebP.");
       return;
@@ -654,6 +659,22 @@ export function AssistantWorkspace({
     } catch (imageError) {
       setAttachedImageError(imageError instanceof Error ? imageError.message : "Não foi possível ler essa imagem.");
     }
+  }
+
+  async function selectChatImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null;
+    event.currentTarget.value = "";
+    await prepareChatImage(file);
+  }
+
+  function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const imageItem = Array.from(event.clipboardData.items).find(
+      (item) => item.kind === "file" && item.type.startsWith("image/"),
+    );
+    if (!imageItem) return;
+
+    event.preventDefault();
+    void prepareChatImage(imageItem.getAsFile());
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -863,13 +884,14 @@ export function AssistantWorkspace({
           setDraft(textarea.value);
         }}
         onKeyDown={handleComposerKeyDown}
+        onPaste={handleComposerPaste}
         placeholder="Pergunte sobre suas finanças…"
         ref={composerRef}
         rows={1}
         value={draft}
       />
       <div className="assistant-composer-footer">
-        <span>Enter envia · Shift + Enter quebra linha</span>
+        <span id="assistant-composer-hint">Ctrl/⌘ + V cola imagem · Enter envia · Shift + Enter quebra linha</span>
         <div className="assistant-composer-actions">
           <button aria-label="Anexar foto para análise" className="assistant-attach-button" disabled={sending || status?.provider !== "chatgpt_plan"} onClick={() => attachmentInputRef.current?.click()} title={status?.provider === "chatgpt_plan" ? "Anexar foto" : "Fotos funcionam com o ChatGPT conectado"} type="button"><ImagePlus aria-hidden="true" size={18} /></button>
           <button aria-label="Enviar mensagem" disabled={sending || (!draft.trim() && !attachedImage)} type="submit">{sending ? <span className="assistant-spinner" /> : <ArrowUp aria-hidden="true" size={19} />}</button>

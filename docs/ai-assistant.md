@@ -33,7 +33,7 @@ Todos os valores usados nos dados estruturados vêm da API e do Finance Engine. 
 
 ## Conversas, memória e privacidade
 
-Uma mensagem pode incluir uma foto JPEG, PNG ou WebP. O navegador reduz a imagem para até 2.048 px e a API valida e reencoda o conteúdo; a foto só é enviada ao provedor configurado para aquela resposta, sem fallback automático. Com AI_PROVIDER=chatgpt_plan, a imagem é enviada ao ChatGPT conectado. A SophIA grava no histórico apenas uma indicação de que havia uma imagem; os bytes e metadados não são persistidos nem reutilizados nos turnos seguintes. A interface avisa sobre o envio antes da análise.
+Uma mensagem pode incluir uma foto JPEG, PNG ou WebP, selecionada pelo botão de anexo ou colada no campo do chat com Ctrl+V/⌘+V. O navegador reduz a imagem para até 2.048 px e a API valida e reencoda o conteúdo; a foto só é enviada ao provedor configurado quando a mensagem é enviada, sem fallback automático. Com AI_PROVIDER=chatgpt_plan, a imagem é enviada ao ChatGPT conectado. A SophIA grava no histórico apenas uma indicação de que havia uma imagem; os bytes e metadados não são persistidos nem reutilizados nos turnos seguintes. A interface avisa sobre o envio antes da análise.
 
 O endpoint de mensagens aceita até 20 envios por usuário a cada 60 segundos e mantém no máximo três respostas do assistente em andamento por processo da API. Respostas limitadas retornam HTTP 429 e o cabeçalho Retry-After. Esses limites reduzem abuso e pressão sobre o provider; a Cloudflare continua responsável por limitar tráfego abusivo antes de chegar à aplicação.
 
