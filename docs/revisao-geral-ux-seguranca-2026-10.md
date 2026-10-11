@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Esta revisão cobre a API, regras financeiras, frontend, segurança e operação da SophIA, além dos fluxos de avisos, compromissos, cartões e imagens analisadas pela IA. O código foi corrigido e validado localmente. A publicação e a checagem pública do domínio ainda estão pendentes nesta versão do relatório; a configuração interna do Cloudflare também não foi inspecionada porque o executor de navegador exigido pela skill `agent-browser` não está instalado. O endereço público pode ser verificado por HTTP, mas isso não prova as regras de WAF e rate limit configuradas no painel.
+Esta revisão cobre a API, regras financeiras, frontend, segurança e operação da SophIA, além dos fluxos de avisos, compromissos, cartões e imagens analisadas pela IA. O código foi corrigido, validado e publicado. A configuração interna do Cloudflare não foi inspecionada porque o executor de navegador exigido pela skill `agent-browser` não está instalado. O domínio foi verificado por HTTP, mas isso não prova as regras de WAF e rate limit configuradas no painel.
 
 ## Prioridades tratadas
 
@@ -57,13 +57,12 @@ As referências consultadas mostram padrões úteis: [Organizze — alertas de c
 | Build Next.js | Passou; rotas estáticas geradas. |
 | Caddyfile 2.11.6 | Configuração validada no ambiente da VM. |
 | Compose da VM | Configuração validada sem imprimir valores interpolados. |
-| Site e migration publicados | A verificar após o deploy. |
+| Deploy e migration | Publicado no commit `f549df3`; API e web saudáveis; Alembic em `0016_totp_replay`; PostgreSQL sem porta publicada no host. O novo Caddyfile foi validado e recarregado. |
+| HTTP público | `/api/health/live` e `/api/health/ready` retornam 200; `/api/accounts` sem sessão retorna 401; `/api/docs` retorna 404; HTTP redireciona para HTTPS. HSTS, CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy e Permissions-Policy foram observados. |
 | UI no browser e painel Cloudflare | Pendentes: `agent-browser` não está instalado. |
 
 ## Próximos passos
 
-1. Publicar as correções e confirmar serviços saudáveis, migration `0016_totp_replay` e ausência de portas públicas do PostgreSQL.
-2. Conferir por HTTP o redirecionamento HTTPS, headers de segurança, endpoints de saúde, autenticação obrigatória e ausência de documentação da API em produção.
-3. Revisar no painel Cloudflare rate limits para login/bootstrap/MFA, WAF e proteção do hostname de origem.
-4. Fazer validação visual e de gestos no navegador automatizado e em iPhone; instalar `agent-browser` (`npm i -g agent-browser` e `agent-browser install`) para concluir esta etapa.
-5. Planejar push opt-in e automação E2E sem armazenar conversas financeiras em cache.
+1. Revisar no painel Cloudflare rate limits para login/bootstrap/MFA, WAF e proteção do hostname de origem.
+2. Fazer validação visual e de gestos no navegador automatizado e em iPhone; instalar `agent-browser` (`npm i -g agent-browser` e `agent-browser install`) para concluir esta etapa.
+3. Planejar push opt-in e automação E2E sem armazenar conversas financeiras em cache.
