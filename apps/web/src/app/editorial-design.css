@@ -4,28 +4,28 @@
   color-scheme: light;
   --color-canvas: #f5f3eb;
   --color-surface: #fffef9;
-  --color-surface-soft: #f0eee5;
-  --color-surface-inset: #e7e6dc;
-  --color-ink: #25362d;
-  --color-ink-soft: #4d5f54;
-  --color-muted: #718075;
-  --color-subtle: #929b8f;
-  --color-border: #deded2;
-  --color-border-strong: #b9c5b8;
+  --color-surface-soft: #efeee5;
+  --color-surface-inset: #e5e5da;
+  --color-ink: #08261c;
+  --color-ink-soft: #34463c;
+  --color-muted: #5e6d62;
+  --color-subtle: #7c877d;
+  --color-border: #d8d9cf;
+  --color-border-strong: #aeb9ae;
   --color-brand: #315e49;
   --color-brand-hover: #244b38;
-  --color-brand-soft: #e7eee5;
-  --color-accent: #bdcfb9;
-  --color-success: #347353;
-  --color-success-soft: #e6f0e5;
-  --color-warning: #95672e;
-  --color-warning-soft: #f5edd9;
-  --color-danger: #a65448;
-  --color-danger-soft: #f5e9e4;
-  --color-focus: #547e60;
+  --color-brand-soft: #e3ebdf;
+  --color-accent: #4e8068;
+  --color-success: #28704d;
+  --color-success-soft: #e4efe3;
+  --color-warning: #805719;
+  --color-warning-soft: #f3e9d2;
+  --color-danger: #a0443e;
+  --color-danger-soft: #f4e5df;
+  --color-focus: #315e49;
   --color-sidebar: #efeee5;
-  --color-sidebar-text: #26372d;
-  --color-sidebar-muted: #768276;
+  --color-sidebar-text: #27382e;
+  --color-sidebar-muted: #58685d;
   --color-hero-start: #315e49;
   --color-hero-end: #315e49;
   --color-hero-ink: #fffef7;
@@ -64,8 +64,8 @@
   --color-danger-soft: #432d29;
   --color-focus: #b3d2a6;
   --color-sidebar: #141a16;
-  --color-sidebar-text: #f0efe6;
-  --color-sidebar-muted: #9ca99b;
+  --color-sidebar-text: #edf1e9;
+  --color-sidebar-muted: #aab5a9;
   --color-hero-start: #2b4332;
   --color-hero-end: #2b4332;
   --color-hero-ink: #f1efe6;
@@ -3691,4 +3691,69 @@ textarea:focus-visible {
 .success-message {
   border-color: var(--color-success, #6ba77a);
   color: var(--color-success, #6ba77a);
+}
+
+/* Marca oficial e leitura integral do histórico da SophIA. */
+.assistant-brand-mark,
+.auth-brand-lockup .assistant-brand-mark {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 15%, transparent);
+  border-radius: 9px;
+  background: var(--color-surface);
+  object-fit: cover;
+}
+
+.message-avatar {
+  flex: none;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.loading-mark {
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 15%, transparent);
+  border-radius: 7px;
+  background: var(--color-surface);
+  object-fit: cover;
+}
+
+.assistant-sidebar .history-item {
+  min-height: 40px;
+  align-items: flex-start;
+  overflow: visible;
+  padding: 8px 7px;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.assistant-sidebar .history-item > .history-title {
+  min-width: 0;
+  flex: 1;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  color: var(--color-sidebar-text);
+  line-height: 1.45;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.assistant-sidebar .history-item:hover > .history-title,
+.assistant-sidebar .history-row.current .history-item > .history-title {
+  color: var(--color-ink);
+}
+
+.assistant-sidebar .history-row {
+  align-items: flex-start;
+}
+
+.assistant-sidebar .history-marker {
+  flex: none;
+  margin-top: 5px;
+}
+
+.assistant-sidebar .history-action-toggle {
+  align-self: center;
 }

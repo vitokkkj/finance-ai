@@ -11,7 +11,7 @@ A visão geral financeira permanece como uma área própria. Na conversa, o pain
 
 Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta.
 
-A Visão Geral destaca o saldo total e agrupa receitas, despesas e resultado no fluxo mensal. Conversas recentes recebem um título curto: o provedor sugere o título quando o modelo atende a primeira mensagem, e o parser local usa um resumo determinístico quando já consegue interpretá-la. A sugestão do modelo usa uma chamada breve da mesma conexão ChatGPT e conta no limite de uso do Plus, sem cobrança da API. O usuário pode renomear ou arquivar conversas pela sidebar; títulos longos aparecem com reticências e tooltip.
+A Visão Geral destaca o saldo total e agrupa receitas, despesas e resultado no fluxo mensal. Conversas recentes recebem um título curto: o provedor sugere o título quando o modelo atende a primeira mensagem, e o parser local usa um resumo determinístico quando já consegue interpretá-la. A sugestão do modelo usa uma chamada breve da mesma conexão ChatGPT e conta no limite de uso do Plus, sem cobrança da API. O usuário pode renomear ou arquivar conversas pela sidebar; títulos longos quebram em várias linhas para permanecerem legíveis por inteiro.
 
 ## Componentes de resposta
 
@@ -21,7 +21,7 @@ Respostas estruturadas usam um conjunto compacto de componentes para resumo fina
 
 A conversa permanece como a home, com o histórico no primeiro plano e sugestões apresentadas como linhas compactas. A direção visual usa fundo de papel quente, verde-floresta para ações, tons de argila para despesas e linhas finas em lugar de painéis decorativos. Geist Sans é usada em toda a interface, inclusive em títulos, controles e valores financeiros; os valores usam também algarismos tabulares para facilitar a comparação.
 
-Os tokens dessa direção ficam em `apps/web/src/app/editorial-design.css`, carregado depois das regras base em `globals.css` e `design-system.css`. Novas cores, fontes, bordas e estados devem usar os tokens semânticos existentes.
+Os tokens dessa direção ficam em `apps/web/src/app/editorial-design.css`, carregado depois das regras base em `globals.css` e `design-system.css`. A paleta oficial usa verde principal `#315E49`, verde escuro `#173B2C`, verde secundário `#4E8068`, creme `#F5F3EB`, branco quente `#FFFEF9` e texto escuro `#08261C`. A marca do símbolo vem da imagem oficial em `apps/web/public/sophia-logo-mark.png`; o favicon e o ícone instalável usam o símbolo em `apps/web/public/icon.svg`. Novas cores, fontes, bordas e estados devem usar os tokens semânticos existentes, com contraste de texto legível em ambos os temas.
 
 ## Tema
 

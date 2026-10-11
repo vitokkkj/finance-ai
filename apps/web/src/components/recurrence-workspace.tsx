@@ -8,6 +8,7 @@ import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
 import { HelpTip } from "@/components/help-tip";
 import { CalendarDateInput } from "@/components/calendar-date-input";
+import { BrandMark } from "@/components/brand-mark";
 
 type MovementType = "INCOME" | "EXPENSE";
 type Frequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
@@ -362,7 +363,7 @@ export function RecurrenceWorkspace() {
       )}
 
       {loading ? (
-        <div className="finance-loading" role="status"><span className="loading-mark">S</span>Carregando recorrências…</div>
+        <div className="finance-loading" role="status"><BrandMark className="loading-mark" size={30} />Carregando recorrências…</div>
       ) : (
         <>
           <section className="surface-card data-card recurrence-rules-card">

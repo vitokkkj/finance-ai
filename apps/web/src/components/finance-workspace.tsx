@@ -22,6 +22,7 @@ import { CalendarDateInput } from "@/components/calendar-date-input";
 import { CalendarMonthInput } from "@/components/calendar-month-input";
 import { CreditCardWorkspace } from "@/components/credit-card-workspace";
 import { RecurrenceWorkspace } from "@/components/recurrence-workspace";
+import { BrandMark } from "@/components/brand-mark";
 
 type Section = "overview" | "transactions" | "accounts" | "categories" | "cards" | "recurrences";
 type AccountType = "CHECKING" | "SAVINGS" | "CASH" | "OTHER";
@@ -674,7 +675,7 @@ export function FinanceWorkspace({
           {notice && <div className={`workspace-notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.message}</div>}
 
           {loading ? (
-            <div className="finance-loading" role="status"><span className="loading-mark">S</span>Carregando seus dados…</div>
+            <div className="finance-loading" role="status"><BrandMark className="loading-mark" size={30} />Carregando seus dados…</div>
           ) : (
             <>
               {section === "overview" && dashboard && (

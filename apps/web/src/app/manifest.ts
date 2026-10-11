@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Sua assistente financeira pessoal e privada.",
     start_url: "/",
     display: "standalone",
-    background_color: "#f4f4ef",
-    theme_color: "#0d3838",
+    background_color: "#f5f3eb",
+    theme_color: "#173b2c",
     icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
   };
 }

@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 import { toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
+import { BrandMark } from "@/components/brand-mark";
 
 type AccountType = "CHECKING" | "SAVINGS" | "CASH" | "OTHER";
 
@@ -65,7 +66,7 @@ export function FirstUseSetup({
   return (
     <main className="auth-page first-use-page">
       <section className="auth-brand-lockup" aria-label="SophIA — sua assistente financeira">
-        <span className="assistant-brand-mark" aria-hidden="true">S</span>
+        <BrandMark />
         <span className="auth-brand-copy"><strong>SophIA</strong><small>sua assistente financeira</small></span>
       </section>
 

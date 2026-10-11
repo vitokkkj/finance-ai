@@ -32,6 +32,7 @@ import {
 
 import { FinanceWorkspace } from "@/components/finance-workspace";
 import { FirstUseSetup } from "@/components/first-use-setup";
+import { BrandMark } from "@/components/brand-mark";
 import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency } from "@/lib/money";
 
@@ -820,7 +821,7 @@ export function AssistantWorkspace({
       {contextPanelOpen && contextPanelAvailable && <button aria-label="Fechar contexto" className="assistant-context-backdrop" onClick={() => setContextPanelOpen(false)} type="button" />}
       <aside className={mobileMenuOpen ? "assistant-sidebar mobile-open" : "assistant-sidebar"}>
         <button aria-label="Ir para a visão geral" className="assistant-brand" onClick={() => chooseNavigation(NAV_ITEMS[0])} type="button">
-          <span className="assistant-brand-mark" aria-hidden="true">S</span>
+          <BrandMark />
           <span className="assistant-brand-name">SophIA</span>
         </button>
         <button className="assistant-new-chat" onClick={startConversation} type="button">
@@ -1045,7 +1046,7 @@ function MessageBubble({
   const userMessage = message.role === "USER";
   return (
     <article className={userMessage ? "assistant-message user-message" : "assistant-message model-message"}>
-      {!userMessage && <span className="message-avatar" aria-hidden="true">S</span>}
+      {!userMessage && <BrandMark className="message-avatar" size={27} />}
       <div className="message-body">
         <div className="message-author">{userMessage ? "Você" : "SophIA"}</div>
         {message.content && <p className="message-text">{userMessage ? message.content : renderAssistantText(message.content)}</p>}

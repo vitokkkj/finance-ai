@@ -5,6 +5,7 @@ import Image from "next/image";
 
 import { ApiError, apiRequest } from "@/lib/api";
 import { AssistantWorkspace } from "@/components/assistant-workspace";
+import { BrandMark } from "@/components/brand-mark";
 
 type User = {
   id: string;
@@ -263,7 +264,7 @@ export function AppShell() {
   return (
     <main className="auth-page">
       <section className="auth-brand-lockup" aria-label="SophIA — sua assistente financeira">
-        <span className="assistant-brand-mark" aria-hidden="true">S</span>
+        <BrandMark />
         <span className="auth-brand-copy"><strong>SophIA</strong><small>sua assistente financeira</small></span>
       </section>
 
@@ -470,7 +471,7 @@ export function AppShell() {
 function LoadingState() {
   return (
     <div className="loading-state" role="status">
-      <span className="loading-mark">S</span>
+      <BrandMark className="loading-mark" size={30} />
       <p>Preparando seu espaço…</p>
     </div>
   );
