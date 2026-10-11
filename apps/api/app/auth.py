@@ -31,6 +31,11 @@ from app.schemas import (
     MFAEnrollmentConfirmRequest,
     MFAEnrollmentRequest,
     MFAEnrollmentResponse,
+    PasswordChangeRequest,
+    ProfileUpdate,
+    ReauthenticationRequest,
+    SessionRevocationResponse,
+    SessionSummary,
     SetupRequest,
     SetupStateResponse,
     UserResponse,
@@ -47,6 +52,7 @@ login_rate_limiter = LoginRateLimiter(
     max_attempts=settings.login_rate_limit_attempts,
     window_seconds=settings.login_rate_limit_window_seconds,
 )
+rate_limit_key = secrets.token_bytes(32)
 
 
 def _totp_is_required() -> bool:
@@ -59,9 +65,13 @@ def _verify_owner_totp(code: str | None) -> bool:
     return verify_totp(settings.owner_totp_secret or "", code)
 
 
-def _client_rate_keys(request: Request, action: str) -> tuple[str, ...]:
+def _client_rate_keys(request: Request, action: str, email: str) -> tuple[str, ...]:
     client_host = request.client.host if request.client else "unknown"
-    return (f"{action}:ip:{client_host}",)
+    normalized_email = email.strip().casefold()
+    account_digest = hmac.new(
+        rate_limit_key, normalized_email.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return (f"{action}:ip:{client_host}", f"{action}:account:{account_digest}")
 
 
 def _password_authenticated_user(db: Session, email: str, password: str) -> User | None:
@@ -131,7 +141,31 @@ def _exclusive_first_user_creation(db: Session) -> Iterator[None]:
 
 
 def _user_response(user: User) -> UserResponse:
-    return UserResponse(id=str(user.id), email=user.email, display_name=user.display_name)
+    return UserResponse(
+        id=str(user.id),
+        email=user.email,
+        display_name=user.display_name,
+        mfa_required=_totp_is_required(),
+        mfa_enrolled=user.mfa_enrolled_at is not None,
+    )
+
+
+def _reauthentication_matches(
+    db: Session, user: User, payload: ReauthenticationRequest
+) -> bool:
+    authenticated_user = _password_authenticated_user(db, user.email, payload.current_password)
+    password_matches = authenticated_user is not None and authenticated_user.id == user.id
+    mfa_matches = not _totp_is_required() or (
+        user.mfa_enrolled_at is not None and _verify_owner_totp(payload.totp_code)
+    )
+    return password_matches and mfa_matches
+
+
+def _session_is_active(session: AuthSession, now: datetime) -> bool:
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at > now
 
 
 def _set_session_cookie(response: Response, token: str, max_age: int) -> None:
@@ -181,7 +215,7 @@ def create_first_user(
     response: Response,
     db: Annotated[Session, Depends(get_db)],
 ) -> UserResponse:
-    setup_keys = _client_rate_keys(request, "setup")
+    setup_keys = _client_rate_keys(request, "setup", payload.email)
     now = time.monotonic()
     if not login_rate_limiter.allow_attempt(setup_keys, now):
         _raise_rate_limit()
@@ -237,7 +271,7 @@ def check_login_password(
     db: Annotated[Session, Depends(get_db)],
 ) -> LoginCheckResponse:
     """Valida a primeira etapa para que a interface só peça MFA depois da senha."""
-    keys = _client_rate_keys(request, "login-check")
+    keys = _client_rate_keys(request, "login-check", payload.email)
     now = time.monotonic()
     if not login_rate_limiter.allow_attempt(keys, now):
         _raise_rate_limit()
@@ -263,7 +297,7 @@ def start_mfa_enrollment(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
 ) -> MFAEnrollmentResponse:
-    keys = _client_rate_keys(request, "mfa-enrollment-start")
+    keys = _client_rate_keys(request, "mfa-enrollment-start", payload.email)
     now_monotonic = time.monotonic()
     if not login_rate_limiter.allow_attempt(keys, now_monotonic):
         _raise_rate_limit()
@@ -302,7 +336,7 @@ def confirm_mfa_enrollment(
     response: Response,
     db: Annotated[Session, Depends(get_db)],
 ) -> UserResponse:
-    keys = _client_rate_keys(request, "mfa-enrollment-confirm")
+    keys = _client_rate_keys(request, "mfa-enrollment-confirm", payload.email)
     now_monotonic = time.monotonic()
     if not login_rate_limiter.allow_attempt(keys, now_monotonic):
         _raise_rate_limit()
@@ -344,7 +378,7 @@ def login(
     response: Response,
     db: Annotated[Session, Depends(get_db)],
 ) -> UserResponse:
-    keys = _client_rate_keys(request, "login")
+    keys = _client_rate_keys(request, "login", payload.email)
     now = time.monotonic()
     if not login_rate_limiter.allow_attempt(keys, now):
         _raise_rate_limit()
@@ -394,6 +428,111 @@ def get_current_user(
 @router.get("/me", response_model=UserResponse)
 def current_user(user: Annotated[User, Depends(get_current_user)]) -> UserResponse:
     return _user_response(user)
+
+
+@router.patch("/me", response_model=UserResponse)
+def update_current_user(
+    payload: ProfileUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
+    user.display_name = payload.display_name
+    db.commit()
+    db.refresh(user)
+    return _user_response(user)
+
+
+@router.get("/sessions", response_model=list[SessionSummary])
+def list_current_user_sessions(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[SessionSummary]:
+    token = request.cookies.get(settings.session_cookie_name)
+    current_digest = hashlib.sha256(token.encode("utf-8")).hexdigest() if token else ""
+    now = datetime.now(UTC)
+    sessions = db.scalars(
+        select(AuthSession)
+        .where(AuthSession.user_id == user.id, AuthSession.expires_at > now)
+        .order_by(AuthSession.created_at.desc())
+    ).all()
+    return [
+        SessionSummary(
+            created_at=session.created_at,
+            expires_at=session.expires_at,
+            is_current=hmac.compare_digest(session.token_digest, current_digest),
+        )
+        for session in sessions
+    ]
+
+
+@router.post("/sessions/revoke-others", response_model=SessionRevocationResponse)
+def revoke_other_sessions(
+    payload: ReauthenticationRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> SessionRevocationResponse:
+    keys = _client_rate_keys(request, "session-revocation", user.email)
+    if not login_rate_limiter.allow_attempt(keys, time.monotonic()):
+        _raise_rate_limit()
+    if not _reauthentication_matches(db, user, payload):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Não foi possível confirmar sua identidade. Confira a senha e o código MFA.",
+        )
+
+    token = request.cookies.get(settings.session_cookie_name)
+    current_digest = hashlib.sha256(token.encode("utf-8")).hexdigest() if token else ""
+    sessions = db.scalars(select(AuthSession).where(AuthSession.user_id == user.id)).all()
+    revoked_count = 0
+    for session in sessions:
+        if hmac.compare_digest(session.token_digest, current_digest):
+            continue
+        db.delete(session)
+        if _session_is_active(session, datetime.now(UTC)):
+            revoked_count += 1
+    db.commit()
+    login_rate_limiter.clear(keys)
+    return SessionRevocationResponse(revoked_count=revoked_count)
+
+
+@router.post("/password/change", response_model=dict[str, str])
+def change_password(
+    payload: PasswordChangeRequest,
+    request: Request,
+    response: Response,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, str]:
+    keys = _client_rate_keys(request, "password-change", user.email)
+    if not login_rate_limiter.allow_attempt(keys, time.monotonic()):
+        _raise_rate_limit()
+    if not _reauthentication_matches(db, user, payload):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Não foi possível confirmar sua identidade. Confira a senha e o código MFA.",
+        )
+    if hmac.compare_digest(payload.current_password, payload.new_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Escolha uma senha diferente da atual.",
+        )
+
+    user.password_hash = password_hasher.hash(payload.new_password)
+    sessions = db.scalars(select(AuthSession).where(AuthSession.user_id == user.id)).all()
+    for session in sessions:
+        db.delete(session)
+    db.commit()
+    login_rate_limiter.clear(keys)
+    response.delete_cookie(
+        key=settings.session_cookie_name,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+    return {"status": "password_changed"}
 
 
 @router.post("/logout", response_model=dict[str, str])

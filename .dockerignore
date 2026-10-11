@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+secrets/
+**/secrets/
+.git/
 .venv
 venv
 **/__pycache__

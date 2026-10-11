@@ -4,14 +4,9 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 
 import { ApiError, apiRequest } from "@/lib/api";
+import type { AuthUser } from "@/lib/auth-types";
 import { AssistantWorkspace } from "@/components/assistant-workspace";
 import { BrandMark } from "@/components/brand-mark";
-
-type User = {
-  id: string;
-  email: string;
-  display_name: string;
-};
 
 type Gate = "loading" | "setup" | "login" | "authenticated" | "unavailable";
 type LoginStep = "credentials" | "mfa";
@@ -22,7 +17,7 @@ const THEME_STORAGE_KEY = "finance-ai-theme";
 export function AppShell() {
   const [gate, setGate] = useState<Gate>("loading");
   const [loginStep, setLoginStep] = useState<LoginStep>("credentials");
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -68,7 +63,7 @@ export function AppShell() {
           setGate("setup");
           return;
         }
-        const currentUser = await apiRequest<User>("/api/auth/me");
+        const currentUser = await apiRequest<AuthUser>("/api/auth/me");
         setUser(currentUser);
         setGate("authenticated");
       } catch (error) {
@@ -94,7 +89,7 @@ export function AppShell() {
         ...(totpCode ? { totp_code: totpCode } : {}),
       };
       if (gate === "setup") {
-        await apiRequest<User>("/api/auth/setup", {
+        await apiRequest<AuthUser>("/api/auth/setup", {
           method: "POST",
           body: JSON.stringify({
             ...payload,
@@ -135,7 +130,7 @@ export function AppShell() {
           return;
         }
       }
-      const signedInUser = await apiRequest<User>("/api/auth/login", {
+      const signedInUser = await apiRequest<AuthUser>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -187,7 +182,7 @@ export function AppShell() {
     setMessage("");
     setMessageKind("error");
     try {
-      const enrolledUser = await apiRequest<User>("/api/auth/mfa/enrollment/confirm", {
+      const enrolledUser = await apiRequest<AuthUser>("/api/auth/mfa/enrollment/confirm", {
         method: "POST",
         body: JSON.stringify({
           email,
@@ -254,6 +249,10 @@ export function AppShell() {
     return (
       <AssistantWorkspace
         displayName={user.display_name}
+        email={user.email}
+        mfaRequired={user.mfa_required}
+        mfaEnrolled={user.mfa_enrolled}
+        onDisplayNameChange={(nextDisplayName) => setUser((current) => current ? { ...current, display_name: nextDisplayName } : current)}
         onLogout={() => void handleLogout()}
         onThemeChange={changeTheme}
         theme={theme}

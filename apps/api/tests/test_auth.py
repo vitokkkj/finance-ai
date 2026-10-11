@@ -24,6 +24,8 @@ def test_first_account_setup_creates_a_development_session(client: TestClient) -
     )
     assert response.status_code == 201
     assert response.json()["email"] == "usuario@example.com"
+    assert response.json()["mfa_required"] is False
+    assert response.json()["mfa_enrolled"] is False
     assert response.cookies.get("finance_ai_session")
     assert client.get("/api/auth/me").json()["display_name"] == "Pessoa"
 
@@ -244,7 +246,142 @@ def test_login_rate_limit_blocks_repeated_failures(client: TestClient) -> None:
             "/api/auth/login",
             json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
         )
-    assert valid_from_another_ip.status_code == 200
+    assert valid_from_another_ip.status_code == 429
+
+
+def test_login_rate_limit_blocks_attempts_across_multiple_ips(client: TestClient) -> None:
+    from app.main import app
+
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    client.cookies.clear()
+
+    for index in range(5):
+        with TestClient(
+            app,
+            client=(f"203.0.113.{10 + index}", 1234),
+            headers={"X-SophIA-Request": "1"},
+        ) as remote_client:
+            response = remote_client.post(
+                "/api/auth/login",
+                json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+            )
+        assert response.status_code == 401
+
+    with TestClient(
+        app,
+        client=("203.0.113.20", 1234),
+        headers={"X-SophIA-Request": "1"},
+    ) as remote_client:
+        blocked = remote_client.post(
+            "/api/auth/login",
+            json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        )
+    assert blocked.status_code == 429
+
+
+def test_account_profile_and_active_sessions_can_be_managed(client: TestClient) -> None:
+    from app.main import app
+
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    with TestClient(
+        app,
+        client=("203.0.113.8", 1234),
+        headers={"X-SophIA-Request": "1"},
+    ) as other_client:
+        signed_in = other_client.post(
+            "/api/auth/login",
+            json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        )
+        assert signed_in.status_code == 200
+
+        sessions = client.get("/api/auth/sessions")
+        assert sessions.status_code == 200
+        assert len(sessions.json()) == 2
+        assert sum(session["is_current"] for session in sessions.json()) == 1
+        assert "token" not in sessions.json()[0]
+
+        revoked = client.post(
+            "/api/auth/sessions/revoke-others",
+            json={"current_password": "uma-senha-local-segura"},
+        )
+        assert revoked.status_code == 200
+        assert revoked.json() == {"revoked_count": 1}
+        assert other_client.get("/api/auth/me").status_code == 401
+
+    updated = client.patch("/api/auth/me", json={"display_name": "  Vitor  "})
+    assert updated.status_code == 200
+    assert updated.json()["display_name"] == "Vitor"
+    assert client.get("/api/auth/me").json()["display_name"] == "Vitor"
+
+
+def test_password_change_requires_reauthentication_and_revokes_all_sessions(
+    client: TestClient,
+) -> None:
+    from app.main import app
+
+    client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+        },
+    )
+    with TestClient(
+        app,
+        client=("203.0.113.9", 1234),
+        headers={"X-SophIA-Request": "1"},
+    ) as other_client:
+        other_client.post(
+            "/api/auth/login",
+            json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        )
+
+        rejected = client.post(
+            "/api/auth/password/change",
+            json={
+                "current_password": "senha-incorreta-123",
+                "new_password": "outra-senha-local-segura",
+            },
+        )
+        assert rejected.status_code == 401
+        assert len(client.get("/api/auth/sessions").json()) == 2
+
+        changed = client.post(
+            "/api/auth/password/change",
+            json={
+                "current_password": "uma-senha-local-segura",
+                "new_password": "outra-senha-local-segura",
+            },
+        )
+        assert changed.status_code == 200
+        assert client.get("/api/auth/me").status_code == 401
+        assert other_client.get("/api/auth/me").status_code == 401
+
+    old_password = client.post(
+        "/api/auth/login",
+        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+    )
+    assert old_password.status_code == 401
+    new_password = client.post(
+        "/api/auth/login",
+        json={"email": "usuario@example.com", "password": "outra-senha-local-segura"},
+    )
+    assert new_password.status_code == 200
 
 
 def test_state_changing_requests_require_the_same_origin_header(client: TestClient) -> None:

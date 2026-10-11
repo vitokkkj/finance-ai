@@ -23,6 +23,7 @@ O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokk
 - Segredo TOTP do proprietário em `OWNER_TOTP_SECRET`, no `.env` privado da VM. Gere-o em um terminal confiável com `python3 scripts/generate-owner-totp.py` e mantenha a chave fora do banco e do repositório. O QR de pareamento do Authy é exibido pela aplicação após a autenticação da senha e autorização temporária do servidor.
 - Token aleatório de primeiro pareamento em `MFA_ENROLLMENT_TOKEN`. Gere com `openssl rand -hex 32`, informe-o somente na tela privada de configuração do Authy e apague a variável do `.env` depois de confirmar o primeiro código. A tela não revela o QR sem esse token e a senha da conta.
 - Token aleatório e temporário para criar a primeira conta. Gere com `openssl rand -hex 32` e configure em `INITIAL_SETUP_TOKEN` somente durante o bootstrap.
+- O limitador combina endereço de origem e conta, mas fica em memória e reinicia junto com a API. Configure também rate limiting da Cloudflare para os endpoints de autenticação, especialmente login, bootstrap e pareamento MFA.
 - `POSTGRES_PASSWORD` aleatória, com letras e números para evitar codificação especial na URL do banco.
 
 Não reutilize valores de desenvolvimento do `.env.example` em produção. Não cole tokens, senhas, códigos TOTP, cookies ou credenciais OAuth no chat, em issues, logs ou workflows.

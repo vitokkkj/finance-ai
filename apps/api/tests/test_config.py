@@ -39,3 +39,16 @@ def test_production_api_rejects_short_mfa_enrollment_token() -> None:
             owner_totp_secret="A" * 32,
             mfa_enrollment_token="too-short",
         )
+
+
+def test_production_api_rejects_short_initial_setup_token() -> None:
+    with pytest.raises(ValidationError, match="INITIAL_SETUP_TOKEN"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            app_component="api",
+            database_url="sqlite+pysqlite:///:memory:",
+            session_cookie_secure=True,
+            owner_totp_secret="A" * 32,
+            initial_setup_token="too-short",
+        )

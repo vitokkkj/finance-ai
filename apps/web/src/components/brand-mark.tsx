@@ -12,7 +12,7 @@ export function BrandMark({ className = "assistant-brand-mark", size = 38 }: Bra
       aria-hidden="true"
       className={className}
       height={size}
-      src="/sophia-logo-mark.png"
+      src="/sophia-logo-mark.svg"
       unoptimized
       width={size}
     />

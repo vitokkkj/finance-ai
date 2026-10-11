@@ -34,6 +34,11 @@ class Settings(BaseSettings):
             if self.session_ttl_hours > 24:
                 raise ValueError("SESSION_TTL_HOURS não pode passar de 24 horas em produção.")
             if self.app_component == "api":
+                setup_token = (self.initial_setup_token or "").strip()
+                if setup_token and len(setup_token) < 32:
+                    raise ValueError(
+                        "INITIAL_SETUP_TOKEN precisa ter ao menos 32 caracteres."
+                    )
                 secret = (self.owner_totp_secret or "").strip().upper()
                 valid_base32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567="
                 if len(secret.rstrip("=")) < 32 or any(

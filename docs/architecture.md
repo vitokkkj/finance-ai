@@ -64,7 +64,9 @@ O worker é um processo simples separado que executa a extensão diária do hori
 
 A criação da primeira conta exige um token aleatório temporário e o TOTP do proprietário em produção. Um lock consultivo transacional do PostgreSQL protege o bootstrap entre processos; a rota retorna conflito depois da primeira conta. Não existe cadastro público contínuo. A migration de produção revoga as sessões antigas para exigir nova autenticação.
 
-O limitador mantém memória limitada e bloqueia novas verificações de senha após falhas repetidas da mesma origem. Cloudflare substitui o cabeçalho `CF-Connecting-IP`; Caddy encaminha esse valor como IP do cliente e Uvicorn só aceita cabeçalhos de proxy vindos de redes privadas do Compose. Como o estado é local ao processo, o perfil público mantém uma única instância/worker da API. Ainda não há trilha persistente de auditoria financeira; alterações continuam visíveis no histórico de lançamentos, mas exclusões não formam um livro imutável.
+O limitador mantém memória limitada e aplica cotas por endereço de origem e por conta (identificador derivado com HMAC e segredo efêmero do processo) nos fluxos de autenticação e reautenticação. Reiniciar a API reinicia as cotas; Cloudflare também deve limitar tentativas nos endpoints de autenticação. O perfil público mantém uma única instância/worker da API. Ainda não há trilha persistente de auditoria financeira; alterações continuam visíveis no histórico de lançamentos, mas exclusões não formam um livro imutável.
+
+A área “Minha conta” permite alterar o nome de exibição, consultar sessões ativas, encerrar outras sessões e trocar a senha. Revogar sessões e trocar senha exigem a senha atual e o TOTP, quando configurado. A troca de senha encerra todas as sessões, inclusive a atual. O TOTP é administrado no servidor; a interface não revela sua chave nem oferece redefinição self-service.
 
 ## Assistente conversacional
 

@@ -37,7 +37,7 @@ import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency } from "@/lib/money";
 
 type FinanceSection = "overview" | "transactions" | "accounts" | "categories" | "cards" | "recurrences";
-type WorkspaceView = "chat" | "finance" | "settings";
+type WorkspaceView = "chat" | "finance" | "settings" | "account";
 type Theme = "light" | "dark";
 
 type Conversation = {
@@ -305,11 +305,19 @@ function parseAssistantPreferences(content: string | undefined): AssistantPrefer
 
 export function AssistantWorkspace({
   displayName,
+  email,
+  mfaRequired,
+  mfaEnrolled,
+  onDisplayNameChange,
   onLogout,
   theme,
   onThemeChange,
 }: {
   displayName: string;
+  email: string;
+  mfaRequired: boolean;
+  mfaEnrolled: boolean;
+  onDisplayNameChange: (displayName: string) => void;
   onLogout: () => void;
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
@@ -713,6 +721,15 @@ export function AssistantWorkspace({
     }
   }
 
+  function openAccount() {
+    setView("account");
+    setMobileMenuOpen(false);
+    setContextPanelOpen(false);
+    setConversationMenuId(null);
+    setEditingConversationId(null);
+    setError("");
+  }
+
   const currentNav = activeNav(view, financeSection);
   const firstName = displayName.trim().split(/\s+/)[0] || displayName;
   const latestUserMessage = [...messages].reverse().find((message) => message.role === "USER")?.content ?? "";
@@ -898,8 +915,10 @@ export function AssistantWorkspace({
           </div>
         </nav>
         <div className="assistant-account">
-          <span className="assistant-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
-          <span className="assistant-account-name">{displayName}</span>
+          <button aria-current={view === "account" ? "page" : undefined} aria-label={`Minha conta de ${displayName}`} className={view === "account" ? "assistant-account-trigger selected" : "assistant-account-trigger"} onClick={openAccount} title="Minha conta" type="button">
+            <span className="assistant-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+            <span className="assistant-account-name">{displayName}</span>
+          </button>
           <button aria-label="Sair" className="assistant-logout" onClick={onLogout} title="Sair" type="button"><LogOut aria-hidden="true" size={16} /></button>
         </div>
       </aside>
@@ -909,8 +928,8 @@ export function AssistantWorkspace({
           <button aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"} aria-pressed={sidebarCollapsed} className="assistant-sidebar-toggle" onClick={toggleDesktopSidebar} title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} type="button">{sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" size={18} /> : <PanelLeftClose aria-hidden="true" size={18} />}</button>
           <button aria-label="Abrir menu" className="assistant-menu-toggle" onClick={() => setMobileMenuOpen(true)} type="button"><Menu aria-hidden="true" size={20} /></button>
           <div className="assistant-topbar-title">
-            <strong>{view === "chat" ? conversations.find((conversation) => conversation.id === conversationId)?.title ?? "Nova conversa" : view === "settings" ? "Preferências" : "Finanças"}</strong>
-            <span>{view === "chat" ? "SophIA · sua assistente financeira" : "Dados calculados pelo sistema"}</span>
+            <strong>{view === "chat" ? conversations.find((conversation) => conversation.id === conversationId)?.title ?? "Nova conversa" : view === "settings" ? "Preferências" : view === "account" ? "Minha conta" : "Finanças"}</strong>
+            <span>{view === "chat" ? "SophIA · sua assistente financeira" : view === "account" ? "Perfil, segurança e sessões" : "Dados calculados pelo sistema"}</span>
           </div>
           <div className="assistant-topbar-actions">
           {view === "chat" && contextPanelAvailable && <button aria-expanded={contextPanelOpen} aria-label={contextPanelOpen ? "Recolher contexto financeiro" : "Abrir contexto financeiro"} className="assistant-context-toggle" onClick={() => { setMobileMenuOpen(false); setContextPanelOpen((open) => !open); }} type="button"><PanelRightOpen aria-hidden="true" size={18} /><span>Contexto</span></button>}
@@ -955,6 +974,15 @@ export function AssistantWorkspace({
             theme={theme}
             usage={usage}
             diagnostics={diagnostics}
+          />
+        ) : view === "account" ? (
+          <AccountView
+            displayName={displayName}
+            email={email}
+            mfaRequired={mfaRequired}
+            mfaEnrolled={mfaEnrolled}
+            onDisplayNameChange={onDisplayNameChange}
+            onLogout={onLogout}
           />
         ) : (
           <div className={contextPanelAvailable && contextPanelOpen ? "assistant-chat-layout" : "assistant-chat-layout context-hidden"}>
@@ -1663,6 +1691,249 @@ function SettingsView({
           )}
         </div>
       )}
+    </section>
+  );
+}
+
+type AccountSession = {
+  created_at: string;
+  expires_at: string;
+  is_current: boolean;
+};
+
+function formatAccountDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data indisponível";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Sao_Paulo",
+  }).format(date);
+}
+
+function AccountView({
+  displayName,
+  email,
+  mfaRequired,
+  mfaEnrolled,
+  onDisplayNameChange,
+  onLogout,
+}: {
+  displayName: string;
+  email: string;
+  mfaRequired: boolean;
+  mfaEnrolled: boolean;
+  onDisplayNameChange: (displayName: string) => void;
+  onLogout: () => void;
+}) {
+  const [nameDraft, setNameDraft] = useState(displayName);
+  const [sessions, setSessions] = useState<AccountSession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [sessionError, setSessionError] = useState("");
+  const [accountError, setAccountError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [passwordFormOpen, setPasswordFormOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordTotp, setPasswordTotp] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [sessionFormOpen, setSessionFormOpen] = useState(false);
+  const [sessionPassword, setSessionPassword] = useState("");
+  const [sessionTotp, setSessionTotp] = useState("");
+  const [revokingSessions, setRevokingSessions] = useState(false);
+
+  const loadSessions = useCallback(async () => {
+    setLoadingSessions(true);
+    setSessionError("");
+    try {
+      const activeSessions = await apiRequest<AccountSession[]>("/api/auth/sessions");
+      setSessions(activeSessions);
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "Não foi possível consultar as sessões.");
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setNameDraft(displayName);
+  }, [displayName]);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedName = nameDraft.trim();
+    if (!normalizedName || normalizedName === displayName) return;
+    setSavingProfile(true);
+    setAccountError("");
+    setNotice("");
+    try {
+      const updated = await apiRequest<{ display_name: string }>("/api/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify({ display_name: normalizedName }),
+      });
+      setNameDraft(updated.display_name);
+      onDisplayNameChange(updated.display_name);
+      setNotice("Nome atualizado.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível salvar seu nome.");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAccountError("");
+    setNotice("");
+    if (newPassword !== confirmPassword) {
+      setAccountError("As senhas novas não conferem.");
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await apiRequest<{ status: string }>("/api/auth/password/change", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+          ...(passwordTotp ? { totp_code: passwordTotp } : {}),
+        }),
+      });
+      setNotice("Senha alterada. Entre novamente com a nova senha e o MFA.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPasswordTotp("");
+      setPasswordFormOpen(false);
+      await onLogout();
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível alterar a senha.");
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  async function revokeOtherSessions(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAccountError("");
+    setNotice("");
+    setRevokingSessions(true);
+    try {
+      const result = await apiRequest<{ revoked_count: number }>("/api/auth/sessions/revoke-others", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: sessionPassword,
+          ...(sessionTotp ? { totp_code: sessionTotp } : {}),
+        }),
+      });
+      setNotice(result.revoked_count === 1 ? "1 sessão foi encerrada." : `${result.revoked_count} sessões foram encerradas.`);
+      setSessionPassword("");
+      setSessionTotp("");
+      setSessionFormOpen(false);
+      await loadSessions();
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível encerrar as outras sessões.");
+    } finally {
+      setRevokingSessions(false);
+    }
+  }
+
+  const otherSessionCount = sessions.filter((session) => !session.is_current).length;
+
+  return (
+    <section className="assistant-settings-page account-page">
+      <div className="assistant-settings-heading">
+        <p className="assistant-eyebrow">Acesso privado</p>
+        <h1>Minha conta</h1>
+        <p>Gerencie seu perfil, sua senha e os acessos ativos à SophIA.</p>
+      </div>
+      {(accountError || notice) && (
+        <div aria-live="polite" className={accountError ? "account-feedback error" : "account-feedback"} role={accountError ? "alert" : "status"}>
+          {accountError || notice}
+        </div>
+      )}
+      <div className="assistant-settings-grid account-grid">
+        <section className="assistant-settings-card account-card">
+          <h2>Perfil</h2>
+          <form className="account-form" onSubmit={(event) => void saveProfile(event)}>
+            <label className="account-form-field" htmlFor="account-display-name">Nome de exibição
+              <input id="account-display-name" autoComplete="name" maxLength={100} onChange={(event) => setNameDraft(event.target.value)} required value={nameDraft} />
+            </label>
+            <label className="account-form-field" htmlFor="account-email">E-mail de acesso
+              <input id="account-email" autoComplete="username" readOnly value={email} />
+            </label>
+            <div className="account-card-actions">
+              <span>O e-mail é usado para entrar na sua conta.</span>
+              <button className="settings-memory-save" disabled={savingProfile || !nameDraft.trim() || nameDraft.trim() === displayName} type="submit">{savingProfile ? "Salvando…" : "Salvar nome"}</button>
+            </div>
+          </form>
+        </section>
+
+        <section className="assistant-settings-card account-card">
+          <h2>Proteção da conta</h2>
+          <div className="settings-row"><span>Autenticação em duas etapas</span><strong className={mfaRequired && mfaEnrolled ? "settings-state ready" : "settings-state"}>{mfaRequired && mfaEnrolled ? "Ativa · TOTP" : mfaRequired ? "Configuração pendente" : "Não obrigatória neste ambiente"}</strong></div>
+          <p className="settings-help">{mfaRequired ? "O código do Authy é solicitado depois da senha. A chave do autenticador fica no servidor e nunca aparece nesta tela." : "O TOTP está configurado por ambiente. Em produção, mantenha a verificação obrigatória ativa."}</p>
+          {!passwordFormOpen ? (
+            <button className="secondary-button account-secondary-action" onClick={() => { setAccountError(""); setPasswordFormOpen(true); }} type="button">Alterar senha</button>
+          ) : (
+            <form className="account-form account-password-form" onSubmit={(event) => void changePassword(event)}>
+              <label className="account-form-field" htmlFor="account-current-password">Senha atual
+                <input autoComplete="current-password" id="account-current-password" minLength={12} onChange={(event) => setCurrentPassword(event.target.value)} required type="password" value={currentPassword} />
+              </label>
+              <label className="account-form-field" htmlFor="account-new-password">Nova senha
+                <input autoComplete="new-password" id="account-new-password" minLength={12} onChange={(event) => setNewPassword(event.target.value)} required type="password" value={newPassword} />
+              </label>
+              <label className="account-form-field" htmlFor="account-confirm-password">Confirme a nova senha
+                <input autoComplete="new-password" id="account-confirm-password" minLength={12} onChange={(event) => setConfirmPassword(event.target.value)} required type="password" value={confirmPassword} />
+              </label>
+              {mfaRequired && <label className="account-form-field" htmlFor="account-password-totp">Código atual do Authy
+                <input autoComplete="one-time-code" id="account-password-totp" inputMode="numeric" maxLength={6} minLength={6} onChange={(event) => setPasswordTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required value={passwordTotp} />
+              </label>}
+              <p className="settings-help">Ao trocar a senha, todos os acessos serão encerrados e você precisará entrar novamente.</p>
+              <div className="account-form-actions">
+                <button className="secondary-button" onClick={() => { setPasswordFormOpen(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordTotp(""); }} type="button">Cancelar</button>
+                <button className="settings-memory-save" disabled={changingPassword || currentPassword.length < 12 || newPassword.length < 12 || (mfaRequired && passwordTotp.length !== 6)} type="submit">{changingPassword ? "Alterando…" : "Trocar senha"}</button>
+              </div>
+            </form>
+          )}
+        </section>
+
+        <section className="assistant-settings-card account-card account-sessions-card">
+          <div className="account-section-heading"><div><h2>Sessões ativas</h2><p>A sessão atual permanece ativa quando você encerra os outros acessos.</p></div><span>{loadingSessions ? "…" : sessions.length}</span></div>
+          {sessionError ? <p className="account-inline-error" role="alert">{sessionError}</p> : loadingSessions ? <p className="settings-help">Consultando sessões…</p> : sessions.length === 0 ? <p className="settings-help">Nenhuma sessão ativa encontrada.</p> : (
+            <div className="account-session-list">
+              {sessions.map((session) => (
+                <div className="account-session-row" key={`${session.created_at}-${session.expires_at}`}>
+                  <span><strong>{session.is_current ? "Este dispositivo" : "Outro acesso"}</strong><small>Entrou em {formatAccountDate(session.created_at)} · expira em {formatAccountDate(session.expires_at)}</small></span>
+                  {session.is_current && <span className="account-current-badge">Atual</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {otherSessionCount > 0 && !sessionFormOpen && <button className="secondary-button account-secondary-action" onClick={() => { setAccountError(""); setSessionFormOpen(true); }} type="button">Encerrar outros acessos</button>}
+          {sessionFormOpen && (
+            <form className="account-form account-revoke-form" onSubmit={(event) => void revokeOtherSessions(event)}>
+              <p className="settings-help">Confirme sua identidade para encerrar {otherSessionCount === 1 ? "o outro acesso" : `os ${otherSessionCount} outros acessos`}.</p>
+              <label className="account-form-field" htmlFor="account-session-password">Senha atual
+                <input autoComplete="current-password" id="account-session-password" minLength={12} onChange={(event) => setSessionPassword(event.target.value)} required type="password" value={sessionPassword} />
+              </label>
+              {mfaRequired && <label className="account-form-field" htmlFor="account-session-totp">Código atual do Authy
+                <input autoComplete="one-time-code" id="account-session-totp" inputMode="numeric" maxLength={6} minLength={6} onChange={(event) => setSessionTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required value={sessionTotp} />
+              </label>}
+              <div className="account-form-actions">
+                <button className="secondary-button" onClick={() => { setSessionFormOpen(false); setSessionPassword(""); setSessionTotp(""); }} type="button">Cancelar</button>
+                <button className="settings-memory-save" disabled={revokingSessions || sessionPassword.length < 12 || (mfaRequired && sessionTotp.length !== 6)} type="submit">{revokingSessions ? "Encerrando…" : "Confirmar encerramento"}</button>
+              </div>
+            </form>
+          )}
+        </section>
+      </div>
     </section>
   );
 }

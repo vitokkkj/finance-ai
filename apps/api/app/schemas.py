@@ -39,6 +39,39 @@ class UserResponse(BaseModel):
     id: str
     email: str
     display_name: str
+    mfa_required: bool
+    mfa_enrolled: bool
+
+
+class ProfileUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Informe seu nome.")
+        return normalized
+
+
+class ReauthenticationRequest(BaseModel):
+    current_password: str = Field(min_length=12, max_length=128)
+    totp_code: str | None = Field(default=None, pattern=r"^\d{6}$")
+
+
+class PasswordChangeRequest(ReauthenticationRequest):
+    new_password: str = Field(min_length=12, max_length=128)
+
+
+class SessionSummary(BaseModel):
+    created_at: datetime
+    expires_at: datetime
+    is_current: bool
+
+
+class SessionRevocationResponse(BaseModel):
+    revoked_count: int
 
 
 class SetupStateResponse(BaseModel):
