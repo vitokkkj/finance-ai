@@ -1862,7 +1862,15 @@ textarea:focus-visible {
   }
 
   .overview-primary-grid {
-    grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.4fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .forecast-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .forecast-summary-grid > div:nth-child(2n) {
+    border-right: 0;
   }
 }
 
