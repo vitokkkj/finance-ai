@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "production"
+    app_component: Literal["api", "worker"] = "api"
     database_url: str
     session_cookie_name: str = "finance_ai_session"
     session_cookie_secure: bool = True
@@ -31,15 +32,16 @@ class Settings(BaseSettings):
                 raise ValueError("SESSION_COOKIE_SECURE precisa estar ativado em produção.")
             if self.session_ttl_hours > 24:
                 raise ValueError("SESSION_TTL_HOURS não pode passar de 24 horas em produção.")
-            secret = (self.owner_totp_secret or "").strip().upper()
-            valid_base32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567="
-            if len(secret.rstrip("=")) < 32 or any(
-                char not in valid_base32 for char in secret
-            ):
-                raise ValueError(
-                    "OWNER_TOTP_SECRET precisa ser uma chave Base32 aleatória com ao menos "
-                    "32 caracteres."
-                )
+            if self.app_component == "api":
+                secret = (self.owner_totp_secret or "").strip().upper()
+                valid_base32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567="
+                if len(secret.rstrip("=")) < 32 or any(
+                    char not in valid_base32 for char in secret
+                ):
+                    raise ValueError(
+                        "OWNER_TOTP_SECRET precisa ser uma chave Base32 aleatória com ao menos "
+                        "32 caracteres."
+                    )
         return self
 
 

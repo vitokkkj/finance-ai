@@ -13,9 +13,10 @@ EXPOSE 3000
 CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0"]
 
 FROM base AS builder
+ARG API_INTERNAL_URL=http://localhost:8000
 COPY --from=dependencies /workspace/apps/web/node_modules ./node_modules
 COPY apps/web ./
-RUN npm run build && npm prune --omit=dev
+RUN API_INTERNAL_URL="${API_INTERNAL_URL}" npm run build && npm prune --omit=dev
 
 FROM node:24-alpine AS runner
 ENV NODE_ENV=production \

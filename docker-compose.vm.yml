@@ -12,6 +12,7 @@ services:
       SESSION_COOKIE_NAME: __Host-sophia_session
       SESSION_COOKIE_SECURE: "true"
       SESSION_TTL_HOURS: "24"
+      APP_COMPONENT: api
       INITIAL_SETUP_TOKEN: ${INITIAL_SETUP_TOKEN:-}
       OWNER_TOTP_SECRET: ${OWNER_TOTP_SECRET:?Configure OWNER_TOTP_SECRET no .env}
     volumes: !override
@@ -25,6 +26,9 @@ services:
       - /tmp
 
   worker:
+    environment:
+      APP_ENV: production
+      APP_COMPONENT: worker
     volumes: !reset []
     security_opt:
       - no-new-privileges:true
@@ -37,6 +41,8 @@ services:
   web:
     build:
       target: runner
+      args:
+        API_INTERNAL_URL: http://api:8000
     command: ["npm", "run", "start", "--", "--hostname", "0.0.0.0"]
     ports: !reset []
     volumes: !reset []
