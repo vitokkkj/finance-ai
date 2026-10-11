@@ -156,7 +156,7 @@ export function CalendarDateInput({
         }}
         onChange={(event) => changeDraft(event.currentTarget.value)}
         onKeyDown={handleInputKeyDown}
-        pattern="\\d{2}/\\d{2}/\\d{4}"
+        pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}"
         placeholder="dd/mm/aaaa"
         required={required}
         type="text"
