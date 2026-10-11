@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -8,8 +10,9 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -44,6 +47,8 @@ from app.ai_schemas import (
 )
 from app.ai_tools import audit_summary, execute_finance_tool
 from app.auth import get_current_user
+from app.auth_security import SlidingWindowRateLimiter
+from app.chat_images import normalize_chat_image
 from app.chatgpt_plan import ChatGPTCredentialStore
 from app.config import settings
 from app.database import get_db
@@ -53,6 +58,16 @@ from app.models import AIConversation, AIMemory, AIMessage, AIToolCall, User
 router = APIRouter(prefix="/api/ai", tags=["assistente"])
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 TITLE_REFRESH_INTERVAL = 3
+MAX_MESSAGE_BODY_BYTES = 4_000_000
+AI_MESSAGE_RATE_LIMIT = 20
+AI_MESSAGE_RATE_WINDOW_SECONDS = 60
+MAX_CONCURRENT_AI_STREAMS = 3
+ai_message_rate_limiter = SlidingWindowRateLimiter(
+    max_attempts=AI_MESSAGE_RATE_LIMIT,
+    window_seconds=AI_MESSAGE_RATE_WINDOW_SECONDS,
+    max_keys=1024,
+)
+ai_message_stream_slots = threading.BoundedSemaphore(MAX_CONCURRENT_AI_STREAMS)
 chatgpt_credentials = ChatGPTCredentialStore(settings.chatgpt_auth_dir)
 
 
@@ -282,14 +297,62 @@ def archive_conversation(
 
 
 @router.post("/conversations/{conversation_id}/messages")
-def send_message(
+async def send_message(
     conversation_id: UUID,
-    payload: MessageCreate,
+    request: Request,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     provider: Annotated[AIProvider, Depends(get_ai_provider)],
 ) -> StreamingResponse:
+    if not ai_message_rate_limiter.allow_attempt((str(user.id),), time.monotonic()):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Você enviou muitas mensagens em pouco tempo. "
+                "Aguarde um minuto e tente novamente."
+            ),
+            headers={"Retry-After": str(AI_MESSAGE_RATE_WINDOW_SECONDS)},
+        )
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > MAX_MESSAGE_BODY_BYTES:
+                raise HTTPException(status_code=413, detail="A mensagem anexada excede o limite.")
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400, detail="Cabeçalho da mensagem inválido."
+            ) from error
+
+    raw_body = bytearray()
+    async for chunk in request.stream():
+        raw_body.extend(chunk)
+        if len(raw_body) > MAX_MESSAGE_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="A mensagem anexada excede o limite.")
+    try:
+        payload = MessageCreate.model_validate_json(bytes(raw_body))
+    except (ValidationError, ValueError) as error:
+        raise HTTPException(
+            status_code=422,
+            detail="A mensagem ou a imagem não passou pela validação.",
+        ) from error
+
     conversation = _get_conversation(db, user, conversation_id)
+    image_data_url: str | None = None
+    if payload.image_data_url is not None:
+        if settings.ai_provider != "chatgpt_plan":
+            raise HTTPException(
+                status_code=422,
+                detail="Análise de imagens requer o ChatGPT conectado; a imagem não foi enviada.",
+            )
+        try:
+            image_data_url = normalize_chat_image(payload.image_data_url)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    message_content = payload.content or (
+        "Analise esta imagem financeira e sugira o que posso registrar."
+    )
     previous_user_message_count = db.scalar(
         select(func.count(AIMessage.id))
         .where(
@@ -308,73 +371,97 @@ def send_message(
         user_id=user.id,
         conversation_id=conversation.id,
         role="USER",
-        content=payload.content,
+        content=message_content,
+        structured_content=(
+            [{"type": "image_attachment", "data": {"stored": False}}]
+            if image_data_url is not None
+            else None
+        ),
         created_at=datetime.now(UTC),
     )
+    if not ai_message_stream_slots.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "A SophIA está respondendo a outras mensagens. "
+                "Aguarde um instante e tente novamente."
+            ),
+            headers={"Retry-After": "10"},
+        )
+
     db.add(message)
     if previous_user_message_count == 0 and not conversation.title_is_custom:
-        conversation.title = _conversation_title_from_message(payload.content)
+        conversation.title = _conversation_title_from_message(message_content)
     conversation.updated_at = datetime.now(UTC)
-    db.commit()
-    db.refresh(message)
+    try:
+        db.commit()
+        db.refresh(message)
+    except Exception:
+        ai_message_stream_slots.release()
+        raise
 
     async def events() -> AsyncIterator[str]:
-        async for item in stream_assistant_reply(db, user, conversation, message, provider):
-            yield item
-        if not generate_title:
-            return
-        assistant_message = db.scalar(
-            select(AIMessage)
-            .where(
-                AIMessage.user_id == user.id,
-                AIMessage.conversation_id == conversation.id,
-                AIMessage.role == "ASSISTANT",
-            )
-            .order_by(AIMessage.created_at.desc(), AIMessage.id.desc())
-            .limit(1)
-        )
-        if (
-            assistant_message is None
-            or assistant_message.diagnostic_status == "FAILED"
-            or (assistant_message.model or "").startswith("local-")
-        ):
-            return
         try:
-            generated_title, title_input_tokens, title_output_tokens = (
-                await suggest_conversation_title(
-                    provider, _conversation_title_context(db, user, conversation)
+            async for item in stream_assistant_reply(
+                db, user, conversation, message, provider, image_data_url=image_data_url
+            ):
+                yield item
+            if not generate_title:
+                return
+            assistant_message = db.scalar(
+                select(AIMessage)
+                .where(
+                    AIMessage.user_id == user.id,
+                    AIMessage.conversation_id == conversation.id,
+                    AIMessage.role == "ASSISTANT",
                 )
+                .order_by(AIMessage.created_at.desc(), AIMessage.id.desc())
+                .limit(1)
             )
-        except AIProviderError:
-            return
-        if generated_title is None:
-            return
-        try:
-            db.refresh(conversation)
-        except SQLAlchemyError:
-            db.rollback()
-            return
-        if conversation.title_is_custom or conversation.archived_at is not None:
-            return
-        title_changed = conversation.title != generated_title
-        conversation.title = generated_title
-        conversation.title_generated_for_message_count = user_message_number
-        conversation.updated_at = datetime.now(UTC)
-        if title_input_tokens is not None:
-            assistant_message.input_tokens = (
-                (assistant_message.input_tokens or 0) + title_input_tokens
-            )
-        if title_output_tokens is not None:
-            assistant_message.output_tokens = (
-                (assistant_message.output_tokens or 0) + title_output_tokens
-            )
-        try:
-            db.commit()
-        except SQLAlchemyError:
-            db.rollback()
-            return
-        if title_changed:
-            yield sse_event("conversation_title", {"title": generated_title})
+            if (
+                assistant_message is None
+                or assistant_message.diagnostic_status == "FAILED"
+                or (assistant_message.model or "").startswith("local-")
+            ):
+                return
+            try:
+                generated_title, title_input_tokens, title_output_tokens = (
+                    await suggest_conversation_title(
+                        provider, _conversation_title_context(db, user, conversation)
+                    )
+                )
+            except AIProviderError:
+                return
+            if generated_title is None:
+                return
+            try:
+                db.refresh(conversation)
+            except SQLAlchemyError:
+                db.rollback()
+                return
+            if conversation.title_is_custom or conversation.archived_at is not None:
+                return
+            title_changed = conversation.title != generated_title
+            conversation.title = generated_title
+            conversation.title_generated_for_message_count = user_message_number
+            conversation.updated_at = datetime.now(UTC)
+            if title_input_tokens is not None:
+                assistant_message.input_tokens = (
+                    (assistant_message.input_tokens or 0) + title_input_tokens
+                )
+            if title_output_tokens is not None:
+                assistant_message.output_tokens = (
+                    (assistant_message.output_tokens or 0) + title_output_tokens
+                )
+            try:
+                db.commit()
+            except SQLAlchemyError:
+                db.rollback()
+                return
+            if title_changed:
+                yield sse_event("conversation_title", {"title": generated_title})
+        finally:
+            ai_message_stream_slots.release()
 
     return StreamingResponse(
         events(),
@@ -424,8 +511,12 @@ def confirm_tool_call(
             call.input_sanitized,
             result,
         )
-        if call.tool_name == "set_card_invoice_opening_balances":
+        if call.tool_name == "create_credit_card_with_invoices":
+            text = "Cartão e faturas cadastrados."
+        elif call.tool_name == "set_card_invoice_opening_balances":
             text = "Faturas registradas."
+        elif call.tool_name == "create_credit_card":
+            text = "Cartão cadastrado."
         elif call.tool_name == "create_recurrence":
             text = (
                 "Compromisso programado. "

@@ -12,7 +12,11 @@ Na implantação, Next.js recebe `API_INTERNAL_URL=http://api:8000` durante o bu
 
 A API roda com um único worker para manter o limitador de tentativas de login consistente. A validação de senha e a etapa de MFA compartilham o mesmo orçamento de tentativas por conta e origem. Bloqueios ativos não são expulsos por novas origens: se a tabela de chaves atingir a capacidade configurada, novas chaves recebem 429 até que entradas expirem. Esta instalação foi projetada para uma instância de API; não escale réplicas sem antes mover o limitador para um mecanismo compartilhado.
 
-Fotos de perfil aceitam JPEG, PNG ou WebP até 8 MB no navegador. A API decodifica e valida o conteúdo, limita a imagem a 8 megapixels, normaliza orientação e dimensões para no máximo 512 px e armazena WebP associado ao usuário. A leitura exige uma sessão autenticada e envia `Cache-Control: no-store`; a migration `0013_profile_avatar` só acrescenta os campos opcionais do perfil.
+Fotos de perfil aceitam JPEG, PNG ou WebP até 25 MB e 48 megapixels no navegador. O navegador corrige a orientação e reduz a foto a no máximo 512 px antes do envio; a API valida novamente e armazena WebP associado ao usuário. A leitura exige uma sessão autenticada e envia Cache-Control: no-store; a migration 0013_profile_avatar só acrescenta os campos opcionais do perfil.
+
+Fotos do chat têm limite de 25 MB e 48 megapixels antes da redução no navegador. O cliente reencoda a imagem em WebP com até 2.048 px; a API limita o corpo da requisição a 4 MB, decodifica e valida as dimensões, remove metadados ao reencodar e encaminha somente ao provider ChatGPT conectado no turno atual. O conteúdo da imagem não é persistido no histórico financeiro. A API bloqueia anexos quando AI_PROVIDER=ollama.
+
+A API limita mensagens do chat a 20 por usuário a cada 60 segundos e mantém até três respostas simultâneas por processo. Os limites são locais à instância única descrita acima; a publicação continua exigindo rate limiting na Cloudflare.
 
 O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai), sob licença MIT. Endereços privados da VM, arquivos `.env`, tokens de túnel, credenciais OAuth e dados financeiros não pertencem ao GitHub.
 

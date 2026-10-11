@@ -10,10 +10,12 @@ import {
   ArrowUpRight,
   ChartNoAxesCombined,
   CreditCard,
+  ImagePlus,
   Landmark,
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageSquare,
   MoreHorizontal,
   Moon,
   PanelLeftClose,
@@ -61,6 +63,7 @@ type AssistantMessage = {
   role: "USER" | "ASSISTANT";
   content: string;
   structured_content?: StructuredItem[] | null;
+  imagePreview?: string;
   pending?: boolean;
 };
 
@@ -341,6 +344,8 @@ export function AssistantWorkspace({
   const [diagnostics, setDiagnostics] = useState<AIDiagnostic[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [draft, setDraft] = useState("");
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [attachedImageError, setAttachedImageError] = useState("");
   const [greeting, setGreeting] = useState("Olá");
   const [loading, setLoading] = useState(true);
   const [firstUseRequired, setFirstUseRequired] = useState<boolean | null>(null);
@@ -358,6 +363,7 @@ export function AssistantWorkspace({
   const [busyConversationId, setBusyConversationId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const conversationRenameRef = useRef<HTMLInputElement>(null);
 
   const loadConversations = useCallback(async () => {
@@ -471,15 +477,20 @@ export function AssistantWorkspace({
     setMessages((current) => current.map((message) => (message.id === id ? update(message) : message)));
   }
 
-  async function sendMessage(content: string) {
+  async function sendMessage(content: string, imageDataUrl: string | null = null) {
     const clean = content.trim();
-    if (!clean || sending || status?.configured !== true) return;
+    const messageContent = clean || (imageDataUrl ? "Analise esta imagem financeira e me diga o que encontrou." : "");
+    if (!messageContent || sending || status?.configured !== true) return;
+    if (imageDataUrl && status.provider !== "chatgpt_plan") {
+      setError("A análise de imagens está disponível quando o ChatGPT conectado estiver ativo.");
+      return;
+    }
     setError("");
-    setDraft("");
-    if (composerRef.current) composerRef.current.style.height = "42px";
     setSending(true);
     setActiveTool("");
     let activeConversationId = conversationId;
+    let optimisticMessageIds: [string, string] | null = null;
+    let responseAccepted = false;
     try {
       if (!activeConversationId) {
         const created = await apiRequest<Conversation & { messages: AssistantMessage[] }>(
@@ -493,9 +504,12 @@ export function AssistantWorkspace({
       const userMessage: AssistantMessage = {
         id: createOptimisticMessageId(),
         role: "USER",
-        content: clean,
+        content: messageContent,
+        imagePreview: imageDataUrl ?? undefined,
+        structured_content: imageDataUrl ? [{ type: "image_attachment", data: { stored: false } }] : undefined,
       };
       const assistantId = createOptimisticMessageId();
+      optimisticMessageIds = [userMessage.id, assistantId];
       setMessages((current) => [
         ...current,
         userMessage,
@@ -509,7 +523,7 @@ export function AssistantWorkspace({
           "X-SophIA-Request": "1",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ content: clean }),
+        body: JSON.stringify({ content: messageContent, ...(imageDataUrl ? { image_data_url: imageDataUrl } : {}) }),
         cache: "no-store",
       });
       if (!response.ok) {
@@ -522,6 +536,11 @@ export function AssistantWorkspace({
         }
         throw new ApiError(message, response.status);
       }
+      responseAccepted = true;
+      setDraft("");
+      setAttachedImage(null);
+      setAttachedImageError("");
+      if (composerRef.current) composerRef.current.style.height = "42px";
       if (!response.body) throw new Error("A resposta do assistente veio vazia.");
 
       const reader = response.body.getReader();
@@ -582,7 +601,12 @@ export function AssistantWorkspace({
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : "Não foi possível concluir a mensagem.";
       setError(message);
-      setMessages((current) => current.filter((item) => !item.pending));
+      const failedMessageIds = optimisticMessageIds;
+      if (responseAccepted) {
+        setMessages((current) => current.filter((item) => !item.pending));
+      } else if (failedMessageIds) {
+        setMessages((current) => current.filter((item) => !failedMessageIds.includes(item.id)));
+      }
     } finally {
       setActiveTool("");
       setSending(false);
@@ -591,13 +615,51 @@ export function AssistantWorkspace({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await sendMessage(draft);
+    await sendMessage(draft, attachedImage);
+  }
+
+  async function selectChatImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setAttachedImageError("");
+    if (!(file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp")) {
+      setAttachedImageError("Escolha uma imagem JPEG, PNG ou WebP.");
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      setAttachedImageError("A imagem precisa ter até 25 MB.");
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      if (bitmap.width * bitmap.height > 48_000_000) {
+        bitmap.close();
+        throw new Error("A imagem original excede 48 megapixels. Envie uma versão reduzida.");
+      }
+      const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) {
+        bitmap.close();
+        throw new Error("Não foi possível preparar essa imagem.");
+      }
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const normalized = canvas.toDataURL("image/webp", 0.88);
+      if (normalized.length > 3_000_000) throw new Error("Não foi possível reduzir a imagem o suficiente. Tente uma captura de tela menor.");
+      setAttachedImage(normalized);
+    } catch (imageError) {
+      setAttachedImageError(imageError instanceof Error ? imageError.message : "Não foi possível ler essa imagem.");
+    }
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void sendMessage(draft);
+      void sendMessage(draft, attachedImage);
     }
   }
 
@@ -788,6 +850,9 @@ export function AssistantWorkspace({
   ) : null;
   const composer = aiAvailable ? (
     <form className={showWelcome ? "assistant-composer assistant-composer-inline" : "assistant-composer"} onSubmit={(event) => void handleSubmit(event)}>
+      <input accept="image/jpeg,image/png,image/webp" aria-label="Anexar foto" className="assistant-attachment-input" onChange={(event) => void selectChatImage(event)} ref={attachmentInputRef} type="file" />
+      {attachedImage && <div className="assistant-attachment-preview"><Image alt="Prévia da imagem anexada" height={52} src={attachedImage} unoptimized width={52} /><span>Imagem pronta para análise<span>Será enviada ao ChatGPT conectado e não ficará armazenada no histórico.</span></span><button aria-label="Remover imagem" onClick={() => { setAttachedImage(null); setAttachedImageError(""); }} type="button"><X aria-hidden="true" size={16} /></button></div>}
+      {attachedImageError && <p className="assistant-attachment-error" role="alert">{attachedImageError}</p>}
       <textarea
         aria-label="Mensagem para o assistente"
         disabled={sending || loading}
@@ -805,7 +870,10 @@ export function AssistantWorkspace({
       />
       <div className="assistant-composer-footer">
         <span>Enter envia · Shift + Enter quebra linha</span>
-        <button aria-label="Enviar mensagem" disabled={sending || !draft.trim()} type="submit">{sending ? <span className="assistant-spinner" /> : <ArrowUp aria-hidden="true" size={19} />}</button>
+        <div className="assistant-composer-actions">
+          <button aria-label="Anexar foto para análise" className="assistant-attach-button" disabled={sending || status?.provider !== "chatgpt_plan"} onClick={() => attachmentInputRef.current?.click()} title={status?.provider === "chatgpt_plan" ? "Anexar foto" : "Fotos funcionam com o ChatGPT conectado"} type="button"><ImagePlus aria-hidden="true" size={18} /></button>
+          <button aria-label="Enviar mensagem" disabled={sending || (!draft.trim() && !attachedImage)} type="submit">{sending ? <span className="assistant-spinner" /> : <ArrowUp aria-hidden="true" size={19} />}</button>
+        </div>
       </div>
     </form>
   ) : null;
@@ -880,7 +948,7 @@ export function AssistantWorkspace({
                   title={conversation.title}
                   type="button"
                 >
-                  <span className="history-marker" aria-hidden="true" />
+                  <MessageSquare className="history-marker" aria-hidden="true" size={14} strokeWidth={1.8} />
                   <span className="history-title">{conversation.title}</span>
                 </button>
                 <div className="history-actions">
@@ -1109,6 +1177,7 @@ function MessageBubble({
       <div className="message-body">
         <div className="message-author">{userMessage ? "Você" : "SophIA"}</div>
         {message.content && <p className="message-text">{userMessage ? message.content : renderAssistantText(message.content)}</p>}
+        {message.imagePreview ? <Image alt="Imagem enviada para análise" className="assistant-message-image" height={240} src={message.imagePreview} unoptimized width={420} /> : userMessage && message.structured_content?.some((item) => item.type === "image_attachment") ? <span className="assistant-image-not-stored">Imagem analisada e removida do armazenamento da conversa.</span> : null}
         {message.pending && !message.content && <span className="assistant-pending" role="status"><span className="assistant-spinner" />Respondendo</span>}
         {message.structured_content?.map((item) => (
           <StructuredCard
@@ -1835,17 +1904,17 @@ function AccountView({
       setAccountError("Escolha uma imagem JPEG, PNG ou WebP.");
       return;
     }
-    if (file.size > 8 * 1024 * 1024) {
-      setAccountError("A foto precisa ter até 8 MB.");
+    if (file.size > 25 * 1024 * 1024) {
+      setAccountError("A foto original precisa ter até 25 MB.");
       return;
     }
 
     setUploadingAvatar(true);
     try {
       const bitmap = await createImageBitmap(file);
-      if (bitmap.width * bitmap.height > 8_000_000) {
+      if (bitmap.width * bitmap.height > 48_000_000) {
         bitmap.close();
-        throw new Error("A foto pode ter no máximo 8 megapixels.");
+        throw new Error("A foto pode ter no máximo 48 megapixels.");
       }
       const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
       const canvas = document.createElement("canvas");
@@ -1967,7 +2036,7 @@ function AccountView({
             <span className="account-avatar-preview" aria-hidden="true">{avatarUrl ? <Image alt="" decoding="async" height={58} src={avatarUrl} unoptimized width={58} /> : displayName.slice(0, 1).toUpperCase()}</span>
             <div className="account-avatar-copy">
               <strong>Foto de perfil</strong>
-              <p>JPEG, PNG ou WebP · até 8 MB. A imagem fica vinculada à sua conta.</p>
+              <p>JPEG, PNG ou WebP · foto original até 25 MB. A imagem é reduzida para caber no perfil.</p>
               <input accept="image/jpeg,image/png,image/webp" aria-label="Escolher foto de perfil" hidden onChange={(event) => void uploadAvatar(event)} ref={avatarInputRef} type="file" />
               <div className="account-avatar-actions">
                 <button className="secondary-button" disabled={uploadingAvatar} onClick={() => avatarInputRef.current?.click()} type="button">{uploadingAvatar ? "Salvando…" : avatarUrl ? "Trocar foto" : "Adicionar foto"}</button>

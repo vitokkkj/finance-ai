@@ -4449,3 +4449,203 @@ textarea:focus-visible {
     align-items: flex-start;
   }
 }
+
+/* Ajustes de leitura, alinhamento e rolagem dos últimos comentários. */
+.assistant-layout .assistant-new-chat {
+  min-height: 42px;
+  margin-block: 18px 16px;
+  padding-inline: 12px;
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.assistant-sidebar .history-row {
+  display: flex;
+  align-items: center;
+}
+
+.assistant-sidebar .history-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.25;
+}
+
+.assistant-sidebar .history-item > .history-marker {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  align-self: center;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--color-sidebar-muted);
+  opacity: 0.9;
+  transform: translateY(-0.5px);
+}
+
+.assistant-sidebar .history-item > .history-marker::after {
+  content: none;
+}
+
+.assistant-sidebar .history-item > .history-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: block;
+  overflow: hidden;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-layout .assistant-main > .assistant-settings-page {
+  box-sizing: border-box;
+  min-height: 0;
+  flex: 1 1 0%;
+  padding-bottom: max(52px, calc(env(safe-area-inset-bottom) + 36px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.category-groups {
+  display: grid;
+  gap: 20px;
+}
+
+.category-group {
+  --category-group-accent: var(--color-brand);
+  min-width: 0;
+}
+
+.category-group-expense {
+  --category-group-accent: var(--color-danger);
+}
+
+.category-group-income {
+  --category-group-accent: var(--color-success);
+}
+
+.category-group-heading {
+  min-height: 36px;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.category-group-heading h3 {
+  margin: 0;
+  color: var(--category-group-accent);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.category-group-heading > span {
+  color: var(--color-subtle);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.assistant-attachment-input {
+  display: none;
+}
+
+.assistant-attachment-preview {
+  min-width: 0;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-soft);
+  color: var(--color-ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.assistant-attachment-preview > img {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.assistant-attachment-preview > span {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.assistant-attachment-preview > span > span {
+  color: var(--color-subtle);
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.assistant-composer-footer .assistant-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.assistant-composer-footer .assistant-attach-button {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-soft);
+  color: var(--color-brand);
+}
+
+.assistant-composer-footer .assistant-attach-button:hover:not(:disabled) {
+  border-color: var(--color-brand);
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+}
+
+.assistant-composer-footer .assistant-attach-button:disabled {
+  background: var(--color-surface-inset);
+  color: var(--color-subtle);
+}
+
+.assistant-attachment-error {
+  margin: 0 0 8px;
+  color: var(--color-danger);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.assistant-message-image {
+  width: min(100%, 420px);
+  height: auto;
+  max-height: 360px;
+  margin-top: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  object-fit: contain;
+}
+
+.assistant-image-not-stored {
+  display: block;
+  margin-top: 7px;
+  color: var(--color-subtle);
+  font-size: 9px;
+}
+
+@media (max-width: 720px) {
+  .assistant-layout .assistant-new-chat {
+    min-height: 40px;
+  }
+
+  .assistant-layout .assistant-main > .assistant-settings-page {
+    padding-bottom: max(56px, calc(env(safe-area-inset-bottom) + 40px));
+  }
+}

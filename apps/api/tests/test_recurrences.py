@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import cast
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -123,7 +124,9 @@ def test_create_generates_a_rolling_occurrence_horizon_idempotently(
         assert persisted_rule.amount == Decimal("120.00")
 
 
-def test_occurrence_status_tracks_sao_paulo_local_date(client: TestClient, monkeypatch) -> None:
+def test_occurrence_status_tracks_sao_paulo_local_date(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app.recurrences as recurrence_module
 
     today = date(2026, 10, 8)

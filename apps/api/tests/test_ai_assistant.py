@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+import threading
 from asyncio import run
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from io import BytesIO
 from types import SimpleNamespace
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import ai as ai_module
 from app.ai import _conversation_title_from_message, get_ai_provider
 from app.ai_chat import choose_model
 from app.ai_pricing import estimated_cost
@@ -26,6 +30,7 @@ from app.ai_provider import (
     _friendly_plan_error,
 )
 from app.auth import password_hasher
+from app.auth_security import SlidingWindowRateLimiter
 from app.chatgpt_plan import ChatGPTPlanError
 from app.config import settings
 from app.main import app
@@ -125,6 +130,286 @@ def test_conversation_can_be_created_renamed_and_archived(client: TestClient) ->
     archived = client.post(f"/api/ai/conversations/{conversation['id']}/archive")
     assert archived.status_code == 204
     assert client.get("/api/ai/conversations").json() == []
+
+
+def _small_webp_data_url() -> str:
+    image = Image.new("RGB", (80, 120), color=(245, 245, 245))
+    output = BytesIO()
+    image.save(output, format="WEBP")
+    import base64
+
+    return "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+
+
+def test_image_turn_is_ephemeral_and_cannot_create_transactions(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sign_up(client)
+    monkeypatch.setattr(settings, "ai_provider", "chatgpt_plan")
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    image_data_url = _small_webp_data_url()
+    fake = FakeAIProvider(
+        [[
+            ProviderEvent(
+                type="function_call",
+                function_call=FunctionCall(
+                    "call_image_transaction",
+                    "create_transaction",
+                    json.dumps(
+                        {
+                            "account_id": "00000000-0000-0000-0000-000000000001",
+                            "category_id": "00000000-0000-0000-0000-000000000002",
+                            "movement_type": "EXPENSE",
+                            "description": "Fatura do print",
+                            "amount": "357.40",
+                            "occurred_at": "2026-11-01",
+                        }
+                    ),
+                ),
+            ),
+            _completed(),
+        ]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={
+            "content": "Leia a imagem e me ajude com as faturas.",
+            "image_data_url": image_data_url,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "só pode consultar dados ou preparar cartão e faturas" in response.text
+    assert client.get("/api/transactions").json() == []
+    detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    assert image_data_url not in response.text
+    assert image_data_url not in json.dumps(detail)
+    assert detail["messages"][0]["structured_content"] == [
+        {"type": "image_attachment", "data": {"stored": False}}
+    ]
+
+    request = next(
+        request
+        for request in fake.requests
+        if not any(tool.get("name") == "suggest_conversation_title" for tool in request.tools)
+    )
+    user_item = next(item for item in request.input_items if item.get("role") == "user")
+    assert request.model == settings.ai_model_smart
+    assert isinstance(user_item["content"], list)
+    assert user_item["content"][1]["type"] == "input_image"
+    allowed_tool_names = {tool["name"] for tool in request.tools}
+    assert not allowed_tool_names.intersection(
+        {
+            "create_transaction",
+            "create_card_purchase",
+            "create_category",
+            "create_recurrence",
+            "create_transfer",
+            "update_transaction",
+            "save_explicit_memory",
+        }
+    )
+    assert "set_card_invoice_opening_balances" in allowed_tool_names
+
+
+def test_ollama_rejects_images_before_persisting_message(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sign_up(client)
+    monkeypatch.setattr(settings, "ai_provider", "ollama")
+    conversation = client.post("/api/ai/conversations", json={}).json()
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"image_data_url": _small_webp_data_url()},
+    )
+
+    assert response.status_code == 422
+    assert "ChatGPT conectado" in response.json()["detail"]
+    assert client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"] == []
+
+
+def test_oversized_message_body_is_rejected_before_persisting(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "x" * ai_module.MAX_MESSAGE_BODY_BYTES},
+    )
+
+    assert response.status_code == 413
+    assert client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"] == []
+
+
+def test_ai_message_rate_limit_is_per_authenticated_user(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    limiter = SlidingWindowRateLimiter(max_attempts=1, window_seconds=60)
+    monkeypatch.setattr(ai_module, "ai_message_rate_limiter", limiter)
+    _set_fake_provider(
+        client,
+        FakeAIProvider([[ProviderEvent(type="text_delta", text="Resposta."), _completed()]]),
+    )
+
+    first = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages", json={"content": "Oi"}
+    )
+    second = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages", json={"content": "Mais uma"}
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["retry-after"] == "60"
+    detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    user_messages = [
+        message["content"] for message in detail["messages"] if message["role"] == "USER"
+    ]
+    assert user_messages == ["Oi"]
+
+
+def test_concurrent_ai_stream_limit_does_not_persist_rejected_message(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    slots = threading.BoundedSemaphore(1)
+    assert slots.acquire(blocking=False)
+    monkeypatch.setattr(ai_module, "ai_message_stream_slots", slots)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages", json={"content": "Oi"}
+    )
+
+    slots.release()
+    assert response.status_code == 429
+    assert client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"] == []
+
+
+def test_chat_credit_card_creation_waits_for_confirmation(client: TestClient) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [[
+            ProviderEvent(
+                type="function_call",
+                function_call=FunctionCall(
+                    "call_create_card",
+                    "create_credit_card",
+                    json.dumps(
+                        {
+                            "name": "Nubank",
+                            "institution": "Nubank",
+                            "credit_limit": "5000.00",
+                            "closing_day": 5,
+                            "due_day": 12,
+                        }
+                    ),
+                ),
+            ),
+            _completed(),
+        ]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Cadastre o cartão Nubank com esses dados."},
+    )
+    assert response.status_code == 200
+    assert client.get("/api/cards").json() == []
+
+    detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    confirmation = next(
+        item
+        for message in detail["messages"]
+        if message["role"] == "ASSISTANT"
+        for item in message["structured_content"] or []
+        if item.get("type") == "confirmation" and item.get("status") == "pending"
+    )
+    confirmed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/tool-calls/"
+        f"{confirmation['tool_call_id']}/confirm"
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "SUCCEEDED"
+    cards = client.get("/api/cards").json()
+    assert len(cards) == 1
+    assert cards[0]["name"] == "Nubank"
+    assert cards[0]["credit_limit"] == "5000.00"
+
+
+def test_chat_can_confirm_new_card_and_invoice_totals_together(client: TestClient) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [[
+            ProviderEvent(
+                type="function_call",
+                function_call=FunctionCall(
+                    "call_create_card_and_invoices",
+                    "create_credit_card_with_invoices",
+                    json.dumps(
+                        {
+                            "name": "Nubank",
+                            "institution": "Nubank",
+                            "credit_limit": "5000.00",
+                            "closing_day": 5,
+                            "due_day": 12,
+                            "invoices": [
+                                {"closing_month": "2026-11", "amount": "357.40"},
+                                {"closing_month": "2026-12", "amount": "136.09"},
+                            ],
+                        }
+                    ),
+                ),
+            ),
+            _completed(),
+        ]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Cadastre o Nubank e importe os totais das faturas."},
+    )
+    assert response.status_code == 200
+    assert client.get("/api/cards").json() == []
+    assert client.get("/api/transactions").json() == []
+
+    detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    confirmation = next(
+        item
+        for message in detail["messages"]
+        if message["role"] == "ASSISTANT"
+        for item in message["structured_content"] or []
+        if item.get("type") == "confirmation" and item.get("status") == "pending"
+    )
+    changes = confirmation["data"]["changes"]
+    assert changes["Cartão"] == "Nubank"
+    assert changes["Fatura Novembro/2026 · vence 12/11/2026"] == "R$ 357,40"
+    assert changes["Fatura Dezembro/2026 · vence 12/12/2026"] == "R$ 136,09"
+
+    confirmed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/tool-calls/"
+        f"{confirmation['tool_call_id']}/confirm"
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["result"]["text"] == "Cartão e faturas cadastrados."
+    card = client.get("/api/cards").json()[0]
+    invoices = client.get(f"/api/cards/{card['id']}/invoices").json()
+    assert [(item["closing_date"], item["total"]) for item in invoices] == [
+        ("2026-12-05", "136.09"),
+        ("2026-11-05", "357.40"),
+    ]
+    assert client.get("/api/transactions").json() == []
 
 
 def test_custom_conversation_title_is_preserved_after_messages(client: TestClient) -> None:
@@ -414,7 +699,7 @@ def test_provider_uses_plan_token_store_false_and_namespaced_input_tools(
         return FakeClient()
 
     monkeypatch.setattr(provider, "_new_client", make_client)
-    tools = [
+    tools: list[dict[str, object]] = [
         {
             "type": "function",
             "name": "get_accounts",
@@ -1778,7 +2063,7 @@ def test_development_diagnostics_show_usage_without_messages_or_secrets(
     assert row["output_tokens"] == 8
     assert row["estimated_cost_usd"] is None
     assert secret not in diagnostics.text
-    assert client.cookies.get("finance_ai_session") not in diagnostics.text
+    assert (client.cookies.get("finance_ai_session") or "") not in diagnostics.text
     assert "content" not in row
     assert "user_id" not in row
 

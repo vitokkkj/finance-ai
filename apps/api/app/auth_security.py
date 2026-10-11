@@ -11,8 +11,8 @@ from collections import OrderedDict, deque
 from collections.abc import Iterable
 
 
-class LoginRateLimiter:
-    """Limita tentativas por conta e origem, com memória limitada e janela móvel."""
+class SlidingWindowRateLimiter:
+    """Aplica limite de frequência com janela móvel e memória limitada."""
 
     def __init__(
         self,
@@ -83,6 +83,9 @@ class LoginRateLimiter:
     def reset(self) -> None:
         with self._lock:
             self._failures.clear()
+
+
+LoginRateLimiter = SlidingWindowRateLimiter
 
 
 def verify_totp(secret: str, code: str | None, *, now: float | None = None) -> bool:

@@ -17,9 +17,15 @@ from openai import (
     RateLimitError,
 )
 
-from app.chatgpt_plan import ChatGPTCredentialStore, ChatGPTPlanError
+from app.chatgpt_plan import ChatGPTPlanError
 
 ProviderEventType = Literal["text_delta", "function_call", "completed"]
+
+
+class AccessTokenProvider(Protocol):
+    async def get_access_token(self) -> str: ...
+
+
 @dataclass(frozen=True, slots=True)
 class FunctionCall:
     call_id: str
@@ -151,7 +157,7 @@ def _friendly_plan_error(provider_error: object, status_code: int | None = None)
 class OpenAIResponsesProvider:
     """Responses API adapter authenticated with the user's ChatGPT plan OAuth token."""
 
-    def __init__(self, credentials: ChatGPTCredentialStore) -> None:
+    def __init__(self, credentials: AccessTokenProvider) -> None:
         self._credentials = credentials
 
     def _new_client(self, access_token: str) -> AsyncOpenAI:

@@ -4,6 +4,10 @@ A SophIA — sua assistente financeira — começa pela conversa: ao entrar, a p
 
 A visão geral financeira permanece como uma área própria. Na conversa, o painel lateral fica oculto quando não há assunto financeiro identificável, e pode ser recolhido quando está aberto. Os controles de recolher a navegação e abrir o contexto financeiro ficam no próprio menu lateral, com rótulos explícitos. Quando existe contexto, muda conforme o assunto:
 
+O composer permite anexar uma imagem quando o ChatGPT conectado está ativo. A prévia mostra que o arquivo será enviado para análise e não será salvo no histórico. As páginas de Preferências e Minha conta rolam dentro da área principal e mantêm espaço ao final para que o último conteúdo e as ações continuem acessíveis.
+
+Categorias aparecem em grupos separados de **Despesas** e **Receitas**, com contagem e acento de cor próprios para reduzir a confusão entre o tipo e o nome de cada categoria.
+
 - cartão: limite, fechamento, vencimento e fatura mais recente;
 - conta: saldo e movimentações associadas;
 - gastos: total, categorias e comparação com o mês anterior; quando a conversa pede outro período, o painel segue esse período;

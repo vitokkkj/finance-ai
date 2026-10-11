@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.accounts import list_accounts
-from app.cards import list_cards
+from app.cards import create_card, list_cards
 from app.categories import create_category, list_categories
 from app.finance_engine import billing_cycle_for_closing_month, current_financial_date
 from app.finance_views import credit_card_response
@@ -30,6 +30,7 @@ from app.schemas import (
     CardInvoiceOpeningBalanceSet,
     CardPurchaseCreate,
     CategoryCreate,
+    CreditCardCreate,
     RecurrenceCreate,
     TransactionCreate,
     TransactionUpdate,
@@ -157,6 +158,41 @@ class GetInvoicePurchasesInput(ToolInput):
     invoice_id: UUID
 
 
+class CreateCreditCardInput(ToolInput):
+    name: str = Field(min_length=1, max_length=100)
+    institution: str | None = Field(default=None, max_length=100)
+    credit_limit: str = Field(min_length=1, max_length=32)
+    closing_day: int = Field(ge=1, le=31)
+    due_day: int = Field(ge=1, le=31)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Informe o nome do cartão.")
+        return normalized
+
+    @field_validator("institution")
+    @classmethod
+    def normalize_institution(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @field_validator("credit_limit")
+    @classmethod
+    def validate_credit_limit(cls, value: str) -> str:
+        raw = value.strip()
+        if re.fullmatch(r"\d+(?:\.\d{1,2})?", raw) is None:
+            raise ValueError("Informe o limite como texto decimal exato.")
+        try:
+            amount = Decimal(raw)
+        except InvalidOperation as error:
+            raise ValueError("Informe um limite válido.") from error
+        if not amount.is_finite() or amount < Decimal("0"):
+            raise ValueError("O limite do cartão não pode ser negativo.")
+        return format(amount.quantize(Decimal("0.01")), ".2f")
+
+
 class CreateCardPurchaseInput(ToolInput):
     credit_card_id: UUID
     category_id: UUID
@@ -188,6 +224,17 @@ class SetInvoiceOpeningBalancesInput(ToolInput):
 
     @model_validator(mode="after")
     def validate_unique_cycles(self) -> SetInvoiceOpeningBalancesInput:
+        months = [item.closing_month for item in self.invoices]
+        if len(months) != len(set(months)):
+            raise ValueError("Cada mês de fechamento deve aparecer uma única vez.")
+        return self
+
+
+class CreateCreditCardWithInvoicesInput(CreateCreditCardInput):
+    invoices: list[InvoiceOpeningBalanceInput] = Field(min_length=1, max_length=24)
+
+    @model_validator(mode="after")
+    def validate_unique_cycles(self) -> CreateCreditCardWithInvoicesInput:
         months = [item.closing_month for item in self.invoices]
         if len(months) != len(set(months)):
             raise ValueError("Cada mês de fechamento deve aparecer uma única vez.")
@@ -521,6 +568,115 @@ def _invoice_purchases(db: Session, user: User, args: BaseModel) -> tuple[object
     return response.purchases, "transaction_card"
 
 
+def _credit_card_preview(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+    payload = cast(CreateCreditCardInput, args)
+    existing_cards = db.scalars(
+        select(CreditCard).where(
+            CreditCard.user_id == user.id,
+            CreditCard.is_active.is_(True),
+        )
+    ).all()
+    institution_key = (payload.institution or "").casefold()
+    duplicate = next(
+        (
+            card
+            for card in existing_cards
+            if card.name.casefold() == payload.name.casefold()
+            and (card.institution or "").casefold() == institution_key
+        ),
+        None,
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Este cartão já está cadastrado.")
+    return {
+        "title": "Confirme o cadastro do cartão",
+        "changes": {
+            "Cartão": payload.name,
+            "Instituição": payload.institution or "Não informada",
+            "Limite": format_brl(Decimal(payload.credit_limit)),
+            "Fecha dia": str(payload.closing_day),
+            "Vence dia": str(payload.due_day),
+        },
+        "message": "O cartão só será cadastrado depois da sua confirmação.",
+    }, "confirmation"
+
+
+def _create_credit_card(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+    payload = cast(CreateCreditCardInput, args)
+    request = CreditCardCreate(
+        name=payload.name,
+        institution=payload.institution,
+        credit_limit=payload.credit_limit,
+        closing_day=payload.closing_day,
+        due_day=payload.due_day,
+    )
+    return create_card(request, user, db), "card_summary"
+
+
+def _create_credit_card_with_invoices_preview(
+    db: Session, user: User, args: BaseModel
+) -> tuple[object, str]:
+    payload = cast(CreateCreditCardWithInvoicesInput, args)
+    card_preview, _ = _credit_card_preview(db, user, payload)
+    preview = cast(dict[str, object], card_preview)
+    changes = cast(dict[str, str], preview["changes"])
+    month_names = (
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    )
+    for item in sorted(payload.invoices, key=lambda value: value.closing_month):
+        year, month = (int(part) for part in item.closing_month.split("-"))
+        cycle = billing_cycle_for_closing_month(year, month, payload.closing_day, payload.due_day)
+        label = (
+            f"Fatura {month_names[month - 1].capitalize()}/{year} · "
+            f"vence {cycle.due_date:%d/%m/%Y}"
+        )
+        changes[label] = format_brl(Decimal(item.amount))
+    return {
+        "title": "Confirme o cartão e as faturas",
+        "changes": changes,
+        "message": (
+            "O cartão e os totais das faturas serão registrados juntos. "
+            "Nenhuma compra individual ou despesa histórica será criada."
+        ),
+    }, "confirmation"
+
+
+def _create_credit_card_with_invoices(
+    db: Session, user: User, args: BaseModel
+) -> tuple[object, str]:
+    payload = cast(CreateCreditCardWithInvoicesInput, args)
+    _credit_card_preview(db, user, payload)
+    card = CreditCard(
+        user_id=user.id,
+        name=payload.name,
+        institution=payload.institution,
+        credit_limit=Decimal(payload.credit_limit),
+        currency="BRL",
+        closing_day=payload.closing_day,
+        due_day=payload.due_day,
+    )
+    db.add(card)
+    db.flush()
+    invoices = [
+        CardInvoiceOpeningBalanceSet(
+            closing_month=item.closing_month,
+            amount=item.amount,
+        )
+        for item in payload.invoices
+    ]
+    set_invoice_opening_balances(
+        db,
+        user,
+        card.id,
+        invoices,
+        amounts_are_invoice_totals=True,
+    )
+    db.commit()
+    db.refresh(card)
+    return credit_card_response(db, card), "card_summary"
+
+
 def _create_card_purchase(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
     payload = cast(CreateCardPurchaseInput, args)
     request = CardPurchaseCreate(
@@ -835,6 +991,31 @@ TOOL_DEFINITIONS = (
         _invoice_purchases,
     ),
     ToolDefinition(
+        "create_credit_card",
+        (
+            "Prepara o cadastro de um cartão somente com nome, instituição, limite, dia de "
+            "fechamento e vencimento fornecidos pelo usuário. Nunca invente esses dados. "
+            "Sempre exige confirmação antes de criar o cartão."
+        ),
+        CreateCreditCardInput,
+        _credit_card_preview,
+        requires_confirmation=True,
+        confirmed_handler=_create_credit_card,
+    ),
+    ToolDefinition(
+        "create_credit_card_with_invoices",
+        (
+            "Prepara em uma única confirmação o cadastro de um cartão novo e a importação dos "
+            "totais das faturas informados. Exige nome, instituição se conhecida, limite, dias "
+            "de fechamento e vencimento; nunca deduza termos ausentes. Importa apenas totais "
+            "mensais, sem criar compras nem despesas históricas."
+        ),
+        CreateCreditCardWithInvoicesInput,
+        _create_credit_card_with_invoices_preview,
+        requires_confirmation=True,
+        confirmed_handler=_create_credit_card_with_invoices,
+    ),
+    ToolDefinition(
         "create_card_purchase",
         "Registra uma compra já feita em cartão de crédito.",
         CreateCardPurchaseInput,
@@ -897,7 +1078,7 @@ TOOL_DEFINITIONS = (
 )
 
 
-def tool_schemas() -> list[dict[str, object]]:
+def tool_schemas(allowed_names: set[str] | None = None) -> list[dict[str, object]]:
     return [
         {
             "type": "function",
@@ -907,6 +1088,7 @@ def tool_schemas() -> list[dict[str, object]]:
             "strict": True,
         }
         for definition in TOOL_DEFINITIONS
+        if allowed_names is None or definition.name in allowed_names
     ]
 
 

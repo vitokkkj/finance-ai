@@ -172,10 +172,6 @@ function accountTypeLabel(value: AccountType): string {
   return labels[value];
 }
 
-function movementTypeLabel(value: MovementType): string {
-  return value === "INCOME" ? "Receita" : "Despesa";
-}
-
 function financialTransactionLabel(value: FinancialTransactionType): string {
   const labels: Record<FinancialTransactionType, string> = {
     INCOME: "Receita",
@@ -799,9 +795,19 @@ export function FinanceWorkspace({
                     </form>
                   )}
                   {categories.length === 0 ? <EmptyState actionLabel="Criar categoria" message="Crie categorias para classificar receitas e despesas." onAction={() => { setCategoryName(""); setCategoryEditingId(null); setCategoryFormOpen(true); }} /> : (
-                    <div className="table-wrap"><table className="data-table"><thead><tr><th>Categoria</th><th>Tipo</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-                      {categories.map((category) => <tr key={category.id}><td><strong className="cell-primary">{category.name}</strong></td><td>{movementTypeLabel(category.type)}</td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={() => editCategory(category)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCategory(category)} type="button">Arquivar</button></>}</td></tr>)}
-                    </tbody></table></div>
+                    <div className="category-groups">
+                      {([
+                        { type: "EXPENSE" as const, label: "Despesas", items: categories.filter((category) => category.type === "EXPENSE") },
+                        { type: "INCOME" as const, label: "Receitas", items: categories.filter((category) => category.type === "INCOME") },
+                      ]).filter((group) => group.items.length > 0).map((group) => (
+                        <section aria-label={`Categorias de ${group.label.toLowerCase()}`} className={`category-group category-group-${group.type.toLowerCase()}`} key={group.type}>
+                          <div className="category-group-heading"><h3>{group.label}</h3><span>{group.items.length} {group.items.length === 1 ? "categoria" : "categorias"}</span></div>
+                          <div className="table-wrap"><table className="data-table"><thead><tr><th>Categoria</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
+                            {group.items.map((category) => <tr key={category.id}><td><strong className="cell-primary">{category.name}</strong></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={() => editCategory(category)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCategory(category)} type="button">Arquivar</button></>}</td></tr>)}
+                          </tbody></table></div>
+                        </section>
+                      ))}
+                    </div>
                   )}
                 </section>
               )}

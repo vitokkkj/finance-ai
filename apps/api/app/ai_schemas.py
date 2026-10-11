@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 
 class ConversationCreate(BaseModel):
@@ -33,15 +35,28 @@ class ConversationUpdate(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    content: str = Field(min_length=1, max_length=4000)
+    content: str = Field(default="", max_length=4000)
+    image_data_url: str | None = Field(default=None, max_length=3_000_000)
 
     @field_validator("content")
     @classmethod
     def normalize_content(cls, value: str) -> str:
-        content = value.strip()
-        if not content:
-            raise ValueError("Escreva uma mensagem antes de enviar.")
-        return content
+        return value.strip()
+
+    @field_validator("image_data_url")
+    @classmethod
+    def normalize_image_data_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.startswith("data:image/webp;base64,"):
+            raise ValueError("Envie uma imagem WebP preparada para análise.")
+        return value
+
+    @model_validator(mode="after")
+    def require_message_or_image(self) -> MessageCreate:
+        if not self.content and self.image_data_url is None:
+            raise ValueError("Escreva uma mensagem ou anexe uma imagem.")
+        return self
 
 
 class AIMessageResponse(BaseModel):
