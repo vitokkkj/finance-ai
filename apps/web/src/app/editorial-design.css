@@ -3998,6 +3998,97 @@ textarea:focus-visible {
   }
 }
 
+.upcoming-invoices {
+  margin: 0 0 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.upcoming-invoices > .editor-heading {
+  margin-bottom: 12px;
+}
+
+.upcoming-invoices > .editor-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.upcoming-invoices > .editor-heading p {
+  margin: 4px 0 0;
+}
+
+.upcoming-invoice-list {
+  display: grid;
+}
+
+.upcoming-invoice-row {
+  min-width: 0;
+  padding: 12px 0;
+  display: grid;
+  grid-template-columns: minmax(105px, 0.8fr) minmax(150px, 1.4fr) minmax(115px, 0.9fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.upcoming-invoice-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.upcoming-invoice-row > div > span {
+  color: var(--color-subtle);
+  font-size: 9px;
+}
+
+.upcoming-invoice-row > div > strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.upcoming-invoice-card > span {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upcoming-invoice-amount > strong {
+  white-space: nowrap;
+}
+
+.upcoming-invoice-row > .state-pill.overdue {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+@media (max-width: 760px) {
+  .upcoming-invoice-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 12px;
+  }
+
+  .upcoming-invoice-card {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .upcoming-invoice-row > .state-pill {
+    justify-self: start;
+  }
+
+  .upcoming-invoice-row > button {
+    grid-column: 2;
+    grid-row: 3;
+    justify-self: end;
+  }
+}
+
 /* Mantém o ícone e o texto dos itens do menu alinhados à esquerda. */
 .assistant-nav .assistant-nav-group .assistant-nav-item {
   justify-content: flex-start;

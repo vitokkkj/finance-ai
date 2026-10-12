@@ -454,8 +454,8 @@ def test_chat_can_confirm_new_card_and_invoice_totals_together(client: TestClien
     card = client.get("/api/cards").json()[0]
     invoices = client.get(f"/api/cards/{card['id']}/invoices").json()
     assert [(item["closing_date"], item["total"]) for item in invoices] == [
-        ("2026-12-05", "136.09"),
         ("2026-11-05", "357.40"),
+        ("2026-12-05", "136.09"),
     ]
     assert client.get("/api/transactions").json() == []
 

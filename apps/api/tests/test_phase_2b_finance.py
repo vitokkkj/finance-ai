@@ -448,6 +448,11 @@ def test_transfer_and_card_endpoints_enforce_ownership(
     assert foreign_invoice_payments.status_code == 404
     assert foreign_payment.status_code == 404
     assert all(card["id"] != foreign_card_id for card in client.get("/api/cards").json())
+    upcoming_invoice_ids = {
+        invoice["id"] for invoice in client.get("/api/cards/invoices/upcoming").json()
+    }
+    assert own_invoice_id in upcoming_invoice_ids
+    assert foreign_invoice_id not in upcoming_invoice_ids
     assert client.get(f"/api/invoices/{own_invoice_id}/payments").json() == []
 
 

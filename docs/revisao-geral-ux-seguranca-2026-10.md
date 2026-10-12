@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Esta revisão cobre a API, regras financeiras, frontend, segurança e operação da SophIA, além dos fluxos de avisos, compromissos, cartões e imagens analisadas pela IA. O código foi corrigido, validado e publicado. A configuração interna do Cloudflare não foi inspecionada porque o executor de navegador exigido pela skill `agent-browser` não está instalado. O domínio foi verificado por HTTP, mas isso não prova as regras de WAF e rate limit configuradas no painel.
+Esta revisão cobre a API, regras financeiras, frontend, segurança e operação da SophIA, além dos fluxos de avisos, compromissos, cartões e imagens analisadas pela IA. O painel da zona `ruralflow.com.br` foi conferido diretamente no navegador do Codex em 11/10/2026. O túnel de `finance.ruralflow.com.br` aparece como CNAME com proxy Cloudflare ativado e aponta para `finance-sophia`; o registro não expõe um IP de origem no DNS exibido.
 
 ## Prioridades tratadas
 
@@ -14,6 +14,7 @@ Esta revisão cobre a API, regras financeiras, frontend, segurança e operação
 - **Arquivamento de contas:** a API calcula o saldo atual pelo Finance Engine e bloqueia arquivamento quando o saldo é diferente de zero ou não pode ser determinado. O frontend explica o saldo e orienta a zerar ou conciliar a conta.
 - **Foto de perfil:** o limite real agora é 48 megapixels, alinhado à interface e à documentação; a imagem é normalizada para 512×512.
 - **Previsão e avisos:** a janela de sete dias atravessa a virada do mês; avisos abrem o compromisso, recorrência ou fatura exatos, com destaque e foco. Pagamentos permanecem sujeitos à confirmação do usuário.
+- **Visão de faturas:** a página de cartões ganha uma lista consolidada de todas as faturas em aberto, ordenada pelo vencimento mais próximo e com atalho para detalhes/pagamento. Os ciclos selecionados por cartão também ficam em ordem crescente de vencimento; valores são derivados pelo Finance Engine e o endpoint respeita `users.id` da sessão. Faturas futuras só aparecem quando já há saldo ou compras registradas para o ciclo.
 - **Cartões e ciclo futuro:** a regra de saldo inicial importado de fatura futura está documentada: compras/parcelas assumidas reduzem o limite disponível; intenção de compra ainda não realizada não deve ser lançada como fatura.
 
 ### Frontend e uso móvel
@@ -24,17 +25,18 @@ Esta revisão cobre a API, regras financeiras, frontend, segurança e operação
 - O breakpoint visual foi unificado em 760 px para alinhar a mudança de layout e o modo drawer.
 - Categorias exibem **Receitas** antes de **Despesas**.
 - O tratamento de imagens do chat aceita até quatro anexos e encaminha o tipo WebP verdadeiro depois da normalização.
+- No celular, o contexto financeiro inicia fechado e só abre pelo controle solicitado; o contador de avisos fica sobreposto ao sino, sem deslocá-lo; e o resumo mensal usa linhas de rótulo/valor para evitar colisões em larguras estreitas.
 
 ## Riscos e melhorias que permanecem
 
 | Prioridade | Item | Estado e próxima ação |
 |---|---|---|
-| P1 operacional | Rate limits e WAF no Cloudflare | **Não verificado no painel.** Confirmar limites para login, bootstrap e MFA, regras WAF e proteção de origem. O acesso HTTP ao site não comprova essas regras. |
+| P1 operacional | Rate limits e WAF no Cloudflare | Painel revisado: a zona está no plano Free, não há regras personalizadas nem regra de rate limiting configurada. Browser Integrity Check está ligado; Bot Fight Mode e Under Attack estão desligados; a proteção HTTP DDoS padrão aparece ativa. Não foram feitas mudanças no painel. Criar limites específicos para login, bootstrap e MFA segue como ação recomendada. |
 | P1 operacional | Firewall e SSH da VM | A conexão SSH de deploy foi validada; política de firewall, restrição de origem e autenticação por senha precisam de revisão administrativa própria. A chave root permanece instalada conforme decisão do usuário. |
 | P2 segurança | CSP com `unsafe-inline` | Permanece para compatibilidade com Next.js. Avaliar nonce/hash em ambiente de produção e remover a exceção apenas após validar hidratação, fontes e navegação. Não há XSS confirmado nesta revisão. |
 | P2 produto | Notificações do sistema | Os avisos são internos enquanto o site está aberto. Push no iPhone requer service worker, inscrição iniciada por ação explícita e configuração de push; manter opt-in e links diretos para o item. |
 | P2 qualidade | Automação do navegador | Não há suíte de testes E2E/visual no projeto. Adicionar fluxos para login/MFA, compromissos e baixa, fatura parcial/total, virada do mês, upload múltiplo, tema e drawer móvel. |
-| P2 UX | Verificação visual em telas reais | A checagem final com navegador automatizado está pendente até instalação de `agent-browser`; validar iPhone e larguras estreitas, médias e desktop. |
+| P2 UX | Verificação visual em telas reais | A CUA confirmou o app aberto no navegador desktop e os defeitos mobile foram reproduzidos pelas capturas fornecidas. O executor CUA disponível não oferece controle de viewport; a checagem em iPhone físico e larguras automatizadas continua pendente. |
 | P2 operação | Histórico completo de ocorrências | O item indicado pelo aviso pode ser aberto por ID mesmo fora da faixa recente. A navegação geral do histórico ainda precisa de paginação/faixas de data. |
 
 Pontos fortes confirmados no código: não há cadastro público; o bootstrap inicial é protegido por token; senhas usam Argon2; sessões persistem apenas hashes aleatórios; cookie de sessão é `HttpOnly`, `Secure` e `SameSite=Strict`; operações financeiras usam a sessão autenticada e filtram por `users.id`; PostgreSQL não publica porta; imagens do chat não são persistidas no histórico. Isso não substitui auditoria das regras operacionais do Cloudflare e do host.
@@ -49,7 +51,7 @@ As referências consultadas mostram padrões úteis: [Organizze — alertas de c
 
 | Verificação | Resultado |
 |---|---|
-| API — testes | **157 passaram; 2 ignorados** porque dependem de permissões POSIX indisponíveis no Windows. |
+| API — testes | **158 passaram; 2 ignorados** porque dependem de permissões POSIX indisponíveis no Windows. |
 | Ruff | Passou. |
 | Mypy | Passou: 28 arquivos. |
 | Biome lint | Passou com quatro avisos existentes sobre `!important` na regra `prefers-reduced-motion`. |
@@ -57,12 +59,12 @@ As referências consultadas mostram padrões úteis: [Organizze — alertas de c
 | Build Next.js | Passou; rotas estáticas geradas. |
 | Caddyfile 2.11.6 | Configuração validada no ambiente da VM. |
 | Compose da VM | Configuração validada sem imprimir valores interpolados. |
-| Deploy e migration | Publicado no commit `f549df3`; API e web saudáveis; Alembic em `0016_totp_replay`; PostgreSQL sem porta publicada no host. O novo Caddyfile foi validado e recarregado. |
+| Deploy e migration | Aguardando publicação desta revisão; a última versão publicada permanece no commit `f549df3`, API e web saudáveis; Alembic em `0016_totp_replay`; PostgreSQL sem porta publicada no host. O novo Caddyfile foi validado e recarregado. |
 | HTTP público | `/api/health/live` e `/api/health/ready` retornam 200; `/api/accounts` sem sessão retorna 401; `/api/docs` retorna 404; HTTP redireciona para HTTPS. HSTS, CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy e Permissions-Policy foram observados. |
-| UI no browser e painel Cloudflare | Pendentes: `agent-browser` não está instalado. |
+| Painel Cloudflare | Conferido: Full TLS com modo automático; Browser Integrity Check ligado; regras customizadas e rate limiting ausentes; tunnel DNS do subdomínio está proxied. |
 
 ## Próximos passos
 
-1. Revisar no painel Cloudflare rate limits para login/bootstrap/MFA, WAF e proteção do hostname de origem.
-2. Fazer validação visual e de gestos no navegador automatizado e em iPhone; instalar `agent-browser` (`npm i -g agent-browser` e `agent-browser install`) para concluir esta etapa.
+1. Criar regras de rate limiting para login, bootstrap e MFA, com limites definidos para o padrão real de uso e sem bloquear o usuário legítimo.
+2. Fazer validação visual e de gestos em iPhone e larguras móveis; a CUA desta sessão não expõe seleção de viewport.
 3. Planejar push opt-in e automação E2E sem armazenar conversas financeiras em cache.

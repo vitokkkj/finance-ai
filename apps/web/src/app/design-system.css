@@ -2352,16 +2352,25 @@ button {
   }
 
   .assistant-summary-values {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   .assistant-summary-values > div {
     display: grid;
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .assistant-summary-values span {
+    min-width: 0;
+    font-size: 10px;
   }
 
   .assistant-summary-values strong {
-    font-size: 9px;
+    font-size: 11px;
+    text-align: right;
+    white-space: nowrap;
   }
 }
 
@@ -2379,7 +2388,7 @@ button {
   }
 
   .assistant-summary-values strong {
-    font-size: 8px;
+    font-size: 10px;
   }
 }
 
@@ -3197,6 +3206,8 @@ button {
 }
 
 .notification-count {
+  position: relative;
+  z-index: 1;
   min-width: 17px;
   height: 17px;
   padding: 0 4px;
@@ -3397,14 +3408,28 @@ button {
 
 @media (max-width: 760px) {
   .assistant-notifications-toggle {
+    position: relative;
+    overflow: visible;
     width: 38px;
     min-width: 38px;
     min-height: 38px;
     padding: 0;
+    gap: 0;
   }
 
   .assistant-notifications-toggle > span {
     display: none;
+  }
+
+  .assistant-notifications-toggle .notification-count {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 17px;
+    height: 17px;
+    padding-inline: 3px;
+    border: 2px solid var(--color-surface);
+    font-size: 8px;
   }
 
   .assistant-notifications-panel {

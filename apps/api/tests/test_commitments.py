@@ -197,3 +197,55 @@ def test_open_card_invoice_is_forecast_and_reduces_only_its_selected_account_typ
         and item["id"] == f"invoice:{invoice.json()['id']}"
         for item in summary["forecast_items"]
     )
+
+
+def test_upcoming_card_invoices_are_sorted_by_due_date_and_exclude_paid_invoices(
+    client: TestClient,
+) -> None:
+    account_id, _, _, _ = setup_commitment_finances(client)
+    today = current_financial_date()
+    closing_month = f"{today.year:04d}-{today.month:02d}"
+
+    def create_card(name: str, due_day: int) -> dict[str, str]:
+        response = client.post(
+            "/api/cards",
+            json={
+                "name": name,
+                "credit_limit": "5000.00",
+                "closing_day": 1,
+                "due_day": due_day,
+                "payment_account_id": account_id,
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    earlier_card = create_card("Cartão com vencimento próximo", 15)
+    later_card = create_card("Cartão com vencimento posterior", 28)
+    paid_card = create_card("Cartão já pago", 20)
+
+    earlier_invoice = client.put(
+        f"/api/cards/{earlier_card['id']}/invoices/opening-balance",
+        json={"closing_month": closing_month, "amount": "120.00"},
+    ).json()
+    later_invoice = client.put(
+        f"/api/cards/{later_card['id']}/invoices/opening-balance",
+        json={"closing_month": closing_month, "amount": "80.00"},
+    ).json()
+    paid_invoice = client.put(
+        f"/api/cards/{paid_card['id']}/invoices/opening-balance",
+        json={"closing_month": closing_month, "amount": "40.00"},
+    ).json()
+    payment = client.post(
+        f"/api/invoices/{paid_invoice['id']}/payments",
+        json={"account_id": account_id, "amount": "40.00", "occurred_at": today.isoformat()},
+    )
+    assert payment.status_code == 201, payment.text
+
+    upcoming = client.get("/api/cards/invoices/upcoming")
+
+    assert upcoming.status_code == 200, upcoming.text
+    rows = upcoming.json()
+    assert [row["id"] for row in rows] == [earlier_invoice["id"], later_invoice["id"]]
+    assert [row["due_date"] for row in rows] == sorted(row["due_date"] for row in rows)
+    assert all(row["outstanding"] != "0.00" for row in rows)

@@ -1130,8 +1130,17 @@ export function AssistantWorkspace({
   ));
   const contextPanelAvailable = hasUsefulContext || (showWelcome && hasHomeSummary);
   useEffect(() => {
+    if (window.matchMedia("(max-width: 760px)").matches) return;
     setContextPanelOpen(Boolean(contextPanelAvailable && (showWelcome || hasUsefulContext)));
   }, [contextPanelAvailable, showWelcome, hasUsefulContext]);
+  useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 760px)");
+    const closeContextOnMobile = (event: MediaQueryListEvent) => {
+      if (event.matches) setContextPanelOpen(false);
+    };
+    mobile.addEventListener("change", closeContextOnMobile);
+    return () => mobile.removeEventListener("change", closeContextOnMobile);
+  }, []);
   const contextSuggestions = [
     {
       title: "Meu mês",

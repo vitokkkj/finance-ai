@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -9,7 +10,13 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.finance_views import card_invoice_response, credit_card_response
 from app.models import Account, CardInvoice, CreditCard, User
-from app.schemas import CardInvoiceResponse, CreditCardCreate, CreditCardResponse, CreditCardUpdate
+from app.schemas import (
+    CardInvoiceResponse,
+    CreditCardCreate,
+    CreditCardResponse,
+    CreditCardUpdate,
+    UpcomingCardInvoiceResponse,
+)
 
 router = APIRouter(prefix="/api/cards", tags=["cartões"])
 
@@ -24,6 +31,39 @@ def _validate_payment_account(user_id: UUID, account_id: UUID | None, db: Sessio
     )
     if account is None:
         raise HTTPException(status_code=404, detail="Conta pagadora não encontrada ou inativa.")
+
+
+@router.get("/invoices/upcoming", response_model=list[UpcomingCardInvoiceResponse])
+def list_upcoming_invoices(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[UpcomingCardInvoiceResponse]:
+    invoices = db.scalars(
+        select(CardInvoice)
+        .join(CreditCard, CreditCard.id == CardInvoice.credit_card_id)
+        .where(CardInvoice.user_id == user.id, CreditCard.user_id == user.id)
+        .order_by(CardInvoice.due_date, CreditCard.name, CardInvoice.closing_date)
+    ).all()
+    upcoming: list[UpcomingCardInvoiceResponse] = []
+    for invoice in invoices:
+        details = card_invoice_response(db, invoice)
+        if details.outstanding <= Decimal("0.00"):
+            continue
+        upcoming.append(
+            UpcomingCardInvoiceResponse(
+                id=details.id,
+                credit_card_id=details.credit_card_id,
+                credit_card_name=details.credit_card_name,
+                period_start=details.period_start,
+                period_end=details.period_end,
+                due_date=details.due_date,
+                total=details.total,
+                paid_amount=details.paid_amount,
+                outstanding=details.outstanding,
+                status=details.status,
+            )
+        )
+    return upcoming
 
 
 @router.get("", response_model=list[CreditCardResponse])
@@ -117,6 +157,6 @@ def list_card_invoices(
     invoices = db.scalars(
         select(CardInvoice)
         .where(CardInvoice.credit_card_id == card.id, CardInvoice.user_id == user.id)
-        .order_by(CardInvoice.closing_date.desc())
+        .order_by(CardInvoice.due_date, CardInvoice.closing_date)
     ).all()
     return [card_invoice_response(db, invoice) for invoice in invoices]

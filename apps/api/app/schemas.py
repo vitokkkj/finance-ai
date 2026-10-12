@@ -646,6 +646,23 @@ class CardInvoiceResponse(BaseModel):
         return format(value, ".2f")
 
 
+class UpcomingCardInvoiceResponse(BaseModel):
+    id: UUID
+    credit_card_id: UUID
+    credit_card_name: str
+    period_start: date
+    period_end: date
+    due_date: date
+    total: Decimal
+    paid_amount: Decimal
+    outstanding: Decimal
+    status: Literal["OPEN", "CLOSED", "PARTIALLY_PAID", "PAID", "OVERDUE"]
+
+    @field_serializer("total", "paid_amount", "outstanding")
+    def serialize_money(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
 class CardInvoiceOpeningBalanceSet(BaseModel):
     closing_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     amount: Decimal = Field(ge=Decimal("0"), max_digits=14, decimal_places=2)

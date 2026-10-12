@@ -46,6 +46,19 @@ type CardInvoice = {
   purchases: InvoiceItem[];
   payments: InvoiceItem[];
 };
+type UpcomingCardInvoice = Pick<
+  CardInvoice,
+  | "id"
+  | "credit_card_id"
+  | "credit_card_name"
+  | "period_start"
+  | "period_end"
+  | "due_date"
+  | "total"
+  | "paid_amount"
+  | "outstanding"
+  | "status"
+>;
 type CardForm = {
   name: string;
   institution: string;
@@ -104,8 +117,10 @@ export function CreditCardWorkspace({
 }) {
   const [cards, setCards] = useState<CreditCard[]>([]);
   const [invoices, setInvoices] = useState<CardInvoice[]>([]);
+  const [upcomingInvoices, setUpcomingInvoices] = useState<UpcomingCardInvoice[]>([]);
   const [selectedCardId, setSelectedCardId] = useState("");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
+  const [pendingInvoiceId, setPendingInvoiceId] = useState<string | null>(null);
   const [cardFormOpen, setCardFormOpen] = useState(false);
   const [cardEditingId, setCardEditingId] = useState<string | null>(null);
   const [cardForm, setCardForm] = useState<CardForm>(emptyCard);
@@ -152,6 +167,19 @@ export function CreditCardWorkspace({
   }, [activeAccounts, cards, focusTarget, invoices, selectedCardId]);
 
   useEffect(() => {
+    if (!pendingInvoiceId) return;
+    const invoice = invoices.find((item) => item.id === pendingInvoiceId);
+    if (!invoice) return;
+    const card = cards.find((item) => item.id === invoice.credit_card_id);
+    setSelectedInvoiceId(invoice.id);
+    const defaultAccountId = card?.payment_account_id && activeAccounts.some((item) => item.id === card.payment_account_id)
+      ? card.payment_account_id
+      : activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "";
+    setPaymentForm({ account_id: defaultAccountId, amount: invoice.outstanding, occurred_at: localDate() });
+    setPendingInvoiceId(null);
+  }, [activeAccounts, cards, invoices, pendingInvoiceId]);
+
+  useEffect(() => {
     if (focusTarget?.source !== "CARD_INVOICE" || selectedInvoiceId !== focusTarget.id || !selectedInvoice) return;
     const frame = window.requestAnimationFrame(() => {
       invoiceDetailsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -159,6 +187,14 @@ export function CreditCardWorkspace({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [focusTarget, selectedInvoice, selectedInvoiceId]);
+
+  useEffect(() => {
+    if (!selectedInvoiceId || focusTarget?.source === "CARD_INVOICE") return;
+    const frame = window.requestAnimationFrame(() => {
+      invoiceDetailsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusTarget, selectedInvoiceId]);
 
   const loadCards = useCallback(async () => {
     try {
@@ -193,10 +229,30 @@ export function CreditCardWorkspace({
     void loadInvoices();
   }, [loadInvoices]);
 
+  const loadUpcomingInvoices = useCallback(async () => {
+    try {
+      const rows = await apiRequest<UpcomingCardInvoice[]>("/api/cards/invoices/upcoming");
+      setUpcomingInvoices(rows);
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível carregar as próximas faturas." });
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUpcomingInvoices();
+  }, [loadUpcomingInvoices]);
+
   async function refresh(message: string) {
     setNotice({ kind: "success", message });
-    await Promise.all([loadCards(), loadInvoices()]);
+    await Promise.all([loadCards(), loadInvoices(), loadUpcomingInvoices()]);
     onFinanceChanged();
+  }
+
+  function openUpcomingInvoice(invoice: UpcomingCardInvoice) {
+    setSelectedCardId(invoice.credit_card_id);
+    setSelectedInvoiceId("");
+    setPendingInvoiceId(invoice.id);
+    document.getElementById("card-invoice-cycles")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function editCard(card: CreditCard) {
@@ -379,8 +435,22 @@ export function CreditCardWorkspace({
         )}
       </section>
 
-      <section className="surface-card data-card">
+      <section className="surface-card data-card" id="card-invoice-cycles">
         <div className="surface-heading"><div><p className="eyebrow">Ciclos mensais</p><h2>Faturas</h2></div><div className="invoice-heading-actions"><label className="month-picker">Cartão<select onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label><button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceFormOpen(true); }} type="button">＋ Registrar fatura existente</button></div></div>
+        <section aria-label="Próximas faturas de todos os cartões" className="upcoming-invoices">
+          <div className="editor-heading"><div><h3>Próximas faturas</h3><p className="form-note">Em aberto, ordenadas pelo vencimento mais próximo.</p></div><span className="state-pill active">{upcomingInvoices.length}</span></div>
+          {upcomingInvoices.length === 0 ? <p className="invoice-detail-empty">Nenhuma fatura em aberto cadastrada.</p> : (
+            <div className="upcoming-invoice-list">
+              {upcomingInvoices.map((invoice) => <article className="upcoming-invoice-row" key={invoice.id}>
+                <div className="upcoming-invoice-due"><span>Vencimento</span><strong>{displayDate(invoice.due_date)}</strong></div>
+                <div className="upcoming-invoice-card"><strong>{invoice.credit_card_name}</strong><span>Ciclo {displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</span></div>
+                <div className="upcoming-invoice-amount"><span>Em aberto</span><strong>{formatCurrency(invoice.outstanding)}</strong></div>
+                <span className={`state-pill ${invoice.status === "OVERDUE" ? "overdue" : "active"}`}>{statusLabel(invoice.status)}</span>
+                <button className="table-action" onClick={() => openUpcomingInvoice(invoice)} type="button">Detalhes / pagar</button>
+              </article>)}
+            </div>
+          )}
+        </section>
         {openingInvoiceFormOpen && (
           <form className="editor-form opening-invoice-form" onSubmit={(event) => void saveOpeningInvoice(event)}>
             <div className="editor-heading"><div><h3>Saldo de uma fatura existente</h3><p className="form-note">Registre o total que já deve ao cartão. Isso aumenta o valor em aberto, sem criar uma despesa histórica.</p></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setOpeningInvoiceFormOpen(false)} type="button">Fechar</button></div>
