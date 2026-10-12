@@ -227,16 +227,20 @@ def test_paying_an_occurrence_creates_one_confirmed_transaction(
     assert len(transactions) == 1
     assert transactions[0]["amount"] == "120.00"
     assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "120.00"
+    updated = client.patch(
+        f"/api/transactions/{transactions[0]['id']}", json={"amount": "121.00"}
+    )
     deleted = client.delete(f"/api/transactions/{transactions[0]['id']}")
-    assert deleted.status_code == 204
-    assert client.get("/api/transactions").json() == []
+    assert updated.status_code == 409
+    assert deleted.status_code == 409
+    assert len(client.get("/api/transactions").json()) == 1
     occurrence_after_delete = client.get(
         "/api/recurrences/occurrences",
         params={"start_date": today.isoformat(), "end_date": today.isoformat()},
     ).json()[0]
-    assert occurrence_after_delete["transaction_id"] is None
-    assert occurrence_after_delete["status"] == "PENDING"
-    assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "0.00"
+    assert occurrence_after_delete["transaction_id"] == transactions[0]["id"]
+    assert occurrence_after_delete["status"] == "PAID"
+    assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "120.00"
 
 
 def test_deleting_recurrence_removes_generated_transactions_and_occurrences(

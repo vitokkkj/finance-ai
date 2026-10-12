@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import io
+import ipaddress
 import secrets
 import threading
 import time
@@ -98,6 +99,12 @@ def _consume_totp_counter(db: Session, user: User, counter: int) -> bool:
 
 def _client_rate_keys(request: Request, action: str, email: str) -> tuple[str, ...]:
     client_host = request.client.host if request.client else "unknown"
+    forwarded_client_ip = request.headers.get("x-sophia-client-ip", "").strip()
+    if forwarded_client_ip:
+        try:
+            client_host = ipaddress.ip_address(forwarded_client_ip).compressed
+        except ValueError:
+            pass
     normalized_email = email.strip().casefold()
     account_digest = hmac.new(
         rate_limit_key, normalized_email.encode("utf-8"), hashlib.sha256

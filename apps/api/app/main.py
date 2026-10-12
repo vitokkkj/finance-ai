@@ -15,7 +15,6 @@ from app.database import get_db
 from app.exports import router as exports_router
 from app.imports import router as imports_router
 from app.invoices import router as invoices_router
-from app.managed_users import router as managed_users_router
 from app.recurrences import router as recurrences_router
 from app.request_limits import RequestBodyLimitMiddleware
 from app.transactions import router as transactions_router
@@ -40,7 +39,6 @@ app.include_router(categories_router)
 app.include_router(transactions_router)
 app.include_router(cards_router)
 app.include_router(invoices_router)
-app.include_router(managed_users_router)
 app.include_router(transfers_router)
 app.include_router(recurrences_router)
 app.include_router(commitments_router)

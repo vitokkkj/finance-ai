@@ -211,7 +211,7 @@ function json(route: Route, body: unknown) {
 
 export async function mockFinanceApi(
   page: Page,
-  options: { owner?: boolean; largeLists?: boolean; categoryBreakdown?: boolean } = {},
+  options: { largeLists?: boolean; categoryBreakdown?: boolean } = {},
 ): Promise<E2EApiState> {
   const state: E2EApiState = {
     dashboardQueries: [],
@@ -364,17 +364,11 @@ export async function mockFinanceApi(
     if (url.pathname === "/api/auth/me") {
       await json(route, {
         id: "synthetic-user",
-        email: options.owner ? "gamercreeper74@gmail.com" : "teste@example.invalid",
+        email: "teste@example.invalid",
         display_name: "Pessoa de teste",
         mfa_required: false,
         mfa_enrolled: false,
       });
-      return;
-    }
-    if (url.pathname === "/api/admin/users") {
-      await json(route, route.request().method() === "POST"
-        ? { id: "synthetic-managed-user", email: "colega@example.com", display_name: "Colega", created_at: "2026-10-12T12:00:00-03:00" }
-        : [{ id: "synthetic-owner", email: "gamercreeper74@gmail.com", display_name: "Vitor", created_at: "2026-10-11T12:00:00-03:00" }]);
       return;
     }
     if (url.pathname === "/api/ai/status") {

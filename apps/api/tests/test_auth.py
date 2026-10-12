@@ -349,6 +349,35 @@ def test_login_rate_limit_blocks_attempts_across_multiple_ips(client: TestClient
     assert blocked.status_code == 429
 
 
+def test_login_rate_limit_uses_valid_client_ip_from_trusted_proxy_header(
+    client: TestClient,
+) -> None:
+    for index in range(5):
+        response = client.post(
+            "/api/auth/login",
+            headers={"X-SophIA-Client-IP": "198.51.100.24"},
+            json={
+                "email": f"inexistente-{index}@example.com",
+                "password": "senha-incorreta-123",
+            },
+        )
+        assert response.status_code == 401
+
+    blocked = client.post(
+        "/api/auth/login",
+        headers={"X-SophIA-Client-IP": "198.51.100.24"},
+        json={"email": "inexistente-final@example.com", "password": "senha-incorreta-123"},
+    )
+    assert blocked.status_code == 429
+
+    another_ip = client.post(
+        "/api/auth/login",
+        headers={"X-SophIA-Client-IP": "198.51.100.25"},
+        json={"email": "inexistente-final@example.com", "password": "senha-incorreta-123"},
+    )
+    assert another_ip.status_code == 401
+
+
 def test_account_profile_and_active_sessions_can_be_managed(client: TestClient) -> None:
     from app.main import app
 

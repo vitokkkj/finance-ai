@@ -500,7 +500,14 @@ def confirm_tool_call(
         raise HTTPException(status_code=404, detail="Confirmação não encontrada.")
     if call.status != "PENDING_CONFIRMATION":
         raise HTTPException(status_code=409, detail="Esta confirmação já foi processada.")
-    result = execute_finance_tool(call.tool_name, call.input_sanitized, user, db, confirmed=True)
+    result = execute_finance_tool(
+        call.tool_name,
+        call.input_sanitized,
+        user,
+        db,
+        confirmed=True,
+        idempotency_key=str(call.id),
+    )
     call.status = result.status
     call.output_sanitized = audit_summary(result)
     call.completed_at = datetime.now(UTC)

@@ -279,28 +279,6 @@ test("clicar em um cartão no resumo abre os ciclos desse cartão", async ({ pag
   await expect(page.getByRole("heading", { name: "Faturas de Gold", exact: true })).toBeInViewport();
 });
 
-for (const width of [390, 820, 1440]) {
-  test(`formulário de criação de conta se alinha ao espaço disponível em ${width}px`, async ({ browser }) => {
-    const context = await browser.newContext({
-      viewport: { width, height: 900 },
-      isMobile: width <= 760,
-      hasTouch: width <= 760,
-    });
-    const page = await context.newPage();
-    await mockFinanceApi(page, { owner: true });
-    await page.goto("/");
-    if (width <= 760) await page.getByRole("button", { name: "Abrir menu de navegação" }).click();
-    await page.getByRole("button", { name: "Preferências", exact: true }).click();
-
-    const form = page.locator(".settings-managed-user-form");
-    const columns = await form.evaluate((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length);
-    expect(columns).toBe(width === 390 ? 1 : 2);
-    const pageDimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
-    expect(pageDimensions.content).toBeLessThanOrEqual(pageDimensions.viewport);
-    await context.close();
-  });
-}
-
 test("regras, compromissos e ocorrências usam paginação no lugar de mostrar histórico", async ({ page }) => {
   await mockFinanceApi(page, { largeLists: true });
   await page.goto("/");
@@ -321,17 +299,14 @@ test("regras, compromissos e ocorrências usam paginação no lugar de mostrar h
   await expect(occurrences.locator(".recurrence-occurrence-row")).toHaveCount(6);
 });
 
-test("somente a conta proprietária vê a área de criação de acessos", async ({ page }) => {
-  await mockFinanceApi(page, { owner: true });
+test("preferências não oferecem criação ou administração de outras contas", async ({ page }) => {
+  await mockFinanceApi(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Preferências", exact: true }).click();
 
-  await page.getByLabel("Nome da pessoa").fill("Colega de teste");
-  await page.getByLabel("E-mail de acesso").fill("colega@example.com");
-  await page.getByLabel("Senha inicial").fill("senha-inicial-segura-123");
-  await page.getByRole("button", { name: "Criar conta" }).click();
-  await expect(page.getByRole("status")).toContainText("Conta de Colega criada");
-  await expect(page.locator(".settings-managed-user-list")).toContainText("colega@example.com");
+  await expect(page.getByRole("heading", { name: "Contas de acesso" })).toHaveCount(0);
+  await expect(page.getByLabel("E-mail de acesso")).toHaveCount(0);
+  await expect(page.getByLabel("Senha inicial")).toHaveCount(0);
 });
 
 test("o histórico de conversas mostra 15 itens por página", async ({ page }) => {

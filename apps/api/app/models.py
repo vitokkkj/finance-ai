@@ -386,6 +386,17 @@ class Transaction(Base):
         ),
         Index("ix_transactions_user_invoice_type", "user_id", "card_invoice_id", "type"),
         UniqueConstraint("id", "user_id", name="uq_transactions_id_user_id"),
+        UniqueConstraint(
+            "user_id", "idempotency_operation", "idempotency_key",
+            name="uq_transactions_user_idempotency_operation_key",
+        ),
+        CheckConstraint(
+            "(idempotency_operation IS NULL AND idempotency_key IS NULL "
+            "AND idempotency_fingerprint IS NULL) OR "
+            "(idempotency_operation IS NOT NULL AND idempotency_key IS NOT NULL "
+            "AND idempotency_fingerprint IS NOT NULL)",
+            name="ck_transactions_idempotency_fields_complete",
+        ),
         CheckConstraint(
             "type IN ('INCOME', 'EXPENSE', 'TRANSFER', 'CARD_PURCHASE', 'CARD_PAYMENT')",
             name="ck_transactions_type",
@@ -456,6 +467,9 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_operation: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

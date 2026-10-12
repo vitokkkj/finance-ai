@@ -1,13 +1,19 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.finance_engine import current_financial_date, financial_day_start
 from app.finance_views import transaction_response, transaction_rows
+from app.idempotency import (
+    find_idempotent_transaction,
+    recover_concurrent_idempotency,
+    store_idempotency,
+)
 from app.models import Account, Transaction, User
 from app.schemas import TransactionResponse, TransferCreate
 
@@ -34,7 +40,13 @@ def create_transfer(
     payload: TransferCreate,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    existing, fingerprint = find_idempotent_transaction(
+        db, user.id, "transfer", idempotency_key, payload
+    )
+    if existing is not None:
+        return transaction_response(existing, None)
     if payload.source_account_id == payload.destination_account_id:
         raise HTTPException(
             status_code=422,
@@ -87,7 +99,16 @@ def create_transfer(
         occurred_at=financial_day_start(payload.occurred_at),
         notes=payload.notes,
     )
+    store_idempotency(transfer, "transfer", idempotency_key, fingerprint)
     db.add(transfer)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        existing = recover_concurrent_idempotency(
+            db, user.id, "transfer", idempotency_key, fingerprint
+        )
+        if existing is None:
+            raise
+        return transaction_response(existing, None)
     db.refresh(transfer)
     return transaction_response(transfer, None)

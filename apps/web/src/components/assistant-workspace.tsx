@@ -149,7 +149,6 @@ type Usage = {
 };
 
 type Memory = { id: string; content: string; created_at: string };
-type ManagedUser = { id: string; email: string; display_name: string; created_at: string };
 type AssistantPreferences = {
   responseStyle: "concise" | "balanced" | "detailed";
   defaultAccount: string;
@@ -1496,7 +1495,6 @@ export function AssistantWorkspace({
         ) : view === "settings" ? (
           <SettingsView
             loading={loadingSettings}
-            email={email}
             memories={memories}
             accounts={contextAccounts}
             cards={contextCards}
@@ -2072,7 +2070,6 @@ function ForecastContext({ dashboard }: { dashboard: Dashboard }) {
 
 function SettingsView({
   loading,
-  email,
   status,
   usage,
   diagnostics,
@@ -2085,7 +2082,6 @@ function SettingsView({
   onDeleteMemory,
 }: {
   loading: boolean;
-  email: string;
   status: AIStatus | null;
   usage: Usage | null;
   diagnostics: AIDiagnostic[];
@@ -2110,52 +2106,6 @@ function SettingsView({
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
   const [savingMemory, setSavingMemory] = useState(false);
   const [memoryError, setMemoryError] = useState("");
-  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [usersError, setUsersError] = useState("");
-  const [userNameDraft, setUserNameDraft] = useState("");
-  const [userEmailDraft, setUserEmailDraft] = useState("");
-  const [userPasswordDraft, setUserPasswordDraft] = useState("");
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [usersNotice, setUsersNotice] = useState("");
-  const ownerCanManageUsers = email.trim().toLocaleLowerCase("en-US") === "gamercreeper74@gmail.com";
-  const managedUsersPagination = usePagination(managedUsers, String(managedUsers.length));
-
-  useEffect(() => {
-    if (!ownerCanManageUsers) return;
-    let active = true;
-    setUsersLoading(true);
-    apiRequest<ManagedUser[]>("/api/admin/users")
-      .then((rows) => { if (active) setManagedUsers(rows); })
-      .catch((error: unknown) => {
-        if (active) setUsersError(error instanceof Error ? error.message : "Não foi possível carregar as contas.");
-      })
-      .finally(() => { if (active) setUsersLoading(false); });
-    return () => { active = false; };
-  }, [ownerCanManageUsers]);
-
-  async function createManagedUser(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCreatingUser(true);
-    setUsersError("");
-    setUsersNotice("");
-    try {
-      const created = await apiRequest<ManagedUser>("/api/admin/users", {
-        method: "POST",
-        body: JSON.stringify({ email: userEmailDraft, display_name: userNameDraft, password: userPasswordDraft }),
-      });
-      setManagedUsers((current) => [created, ...current.filter((user) => user.id !== created.id)]);
-      setUsersNotice(`Conta de ${created.display_name} criada. A pessoa já pode entrar com o e-mail e a senha informados.`);
-      setUserNameDraft("");
-      setUserEmailDraft("");
-      setUserPasswordDraft("");
-    } catch (error) {
-      setUsersError(error instanceof Error ? error.message : "Não foi possível criar a conta.");
-    } finally {
-      setCreatingUser(false);
-    }
-  }
-
   useEffect(() => {
     const saved = parseAssistantPreferences(assistantPreferenceContent);
     const activeAccounts = accounts.filter((account) => account.is_active);
@@ -2229,23 +2179,6 @@ function SettingsView({
             <div className="settings-row"><span>Modelo avançado</span><strong>{status?.smart_model ?? "—"}</strong></div>
             {status && !status.configured && <p className="settings-help">{status.provider === "ollama" ? "O serviço ou o modelo local não está disponível. A conversa será retomada quando o modelo estiver pronto na VM." : "Conecte sua conta ChatGPT pelo procedimento seguro descrito no README. Sem essa autorização, a conversa fica pausada."} Contas, lançamentos, cartões e as demais áreas financeiras continuam disponíveis.</p>}
           </section>
-          {ownerCanManageUsers && <section className="assistant-settings-card settings-managed-users">
-            <h2>Contas de acesso</h2>
-            <p>Crie uma conta de acesso para outra pessoa. Esta área só aparece para gamercreeper74@gmail.com e a API também confere essa permissão. Cada pessoa terá seus próprios dados financeiros. As contas adicionais usam uma senha própria; a autenticação por código do proprietário continua protegendo a conta principal.</p>
-            <form className="settings-managed-user-form" onSubmit={(event) => void createManagedUser(event)}>
-              <label>Nome da pessoa<input autoComplete="name" maxLength={100} onChange={(event) => setUserNameDraft(event.target.value)} required value={userNameDraft} /></label>
-              <label>E-mail de acesso<input autoComplete="email" maxLength={320} onChange={(event) => setUserEmailDraft(event.target.value)} required type="email" value={userEmailDraft} /></label>
-              <label>Senha inicial<input autoComplete="new-password" minLength={12} maxLength={128} onChange={(event) => setUserPasswordDraft(event.target.value)} required type="password" value={userPasswordDraft} /><small>Use pelo menos 12 caracteres e envie à pessoa por um canal privado.</small></label>
-              <button className="settings-memory-save" disabled={creatingUser || userPasswordDraft.length < 12} type="submit">{creatingUser ? "Criando conta…" : "Criar conta"}</button>
-            </form>
-            {usersError && <p className="settings-form-error" role="alert">{usersError}</p>}
-            {usersNotice && <p aria-live="polite" className="settings-user-notice" role="status">{usersNotice}</p>}
-            <div className="settings-memory-list-heading"><strong>Contas cadastradas</strong><span>{managedUsers.length}</span></div>
-            {usersLoading ? <p className="settings-help">Carregando contas…</p> : managedUsers.length === 0 ? <p className="settings-help">Nenhuma conta adicional cadastrada.</p> : <div className="settings-managed-user-list">
-              {managedUsersPagination.items.map((managedUser) => <div className="settings-managed-user-row" key={managedUser.id}><span><strong>{managedUser.display_name}</strong><small>{managedUser.email}</small></span><small>Criada em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(managedUser.created_at))}</small></div>)}
-              <PaginationControls end={managedUsersPagination.end} label="Paginação das contas de acesso" onPageChange={managedUsersPagination.setPage} page={managedUsersPagination.page} pageCount={managedUsersPagination.pageCount} start={managedUsersPagination.start} total={managedUsersPagination.total} />
-            </div>}
-          </section>}
           <section className="assistant-settings-card">
             <h2>Uso da SophIA</h2>
             <p className="settings-period-label">Hoje</p>

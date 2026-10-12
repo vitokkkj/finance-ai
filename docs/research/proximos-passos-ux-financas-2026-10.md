@@ -1,7 +1,7 @@
 # Pesquisa: próximos passos de UX para finanças pessoais
 
 **Pesquisado em:** 2026-10-12
-**Escopo:** páginas oficiais de ajuda do Minhas Finanças e do Organizze, comparadas com a revisão e as decisões existentes da SophIA. Pesquisa documental; não altera o produto nem valida recursos dos concorrentes em uso. O produto é privado e administrado pelo proprietário, que pode provisionar contas adicionais com dados isolados por usuário.
+**Escopo:** páginas oficiais de ajuda do Minhas Finanças e do Organizze, comparadas com a revisão e as decisões existentes da SophIA. Pesquisa documental; não altera o produto nem valida recursos dos concorrentes em uso. A SophIA é privada, de usuário único e administrada pelo proprietário.
 
 ## Recomendação inicial
 
@@ -37,9 +37,9 @@ Na SophIA, os backups da VM são gerenciados fora do repositório. O proprietár
 
 ## Limites de escopo nesta fase
 
-- **Aplicável agora:** backup/restauração confirmados pelo proprietário, exportação JSON, importação CSV com revisão, previsão/avisos já implementados, conferência manual e isolamento de dados por conta de acesso. Importação de fotos ainda é um fluxo futuro revisável.
+- **Aplicável agora:** backup/restauração confirmados pelo proprietário, exportação JSON, importação CSV com revisão, previsão/avisos já implementados e conferência manual. Os registros pertencem à única conta autenticada. Importação de fotos ainda é um fluxo futuro revisável.
 - **Manter para depois:** conectar Open Finance automaticamente; essa integração aparece como fase futura na decisão do projeto. O fluxo manual continua suficiente para validar os dados e a necessidade antes de introduzir consentimentos, sincronização e reconciliação recorrente.
-- **Fora de escopo:** orçamento colaborativo, divisão familiar e automações que paguem contas. Contas adicionais provisionadas pelo proprietário são isoladas e não compartilham orçamento; a SophIA não inicia pagamentos.
+- **Fora de escopo:** orçamento colaborativo, divisão familiar, contas de acesso adicionais e automações que paguem contas; a SophIA não inicia pagamentos.
 - **Não copiar sem adaptar:** fluxos genéricos de alerta por e-mail/push ou importações que confirmem lotes sem destacar correspondências e impacto. Para dados reais, a prevenção de duplicidade e a reversibilidade importam mais que reduzir um clique.
 
 ## Pontos incertos

@@ -2,8 +2,9 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -21,6 +22,11 @@ from app.finance_views import (
     invoice_amounts,
     transaction_response,
     transaction_rows,
+)
+from app.idempotency import (
+    find_idempotent_transaction,
+    recover_concurrent_idempotency,
+    store_idempotency,
 )
 from app.models import Account, CardInvoice, Category, CreditCard, Transaction, User
 from app.schemas import (
@@ -158,7 +164,25 @@ def create_card_purchase(
     payload: CardPurchaseCreate,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    existing, fingerprint = find_idempotent_transaction(
+        db, user.id, "card_purchase", idempotency_key, payload
+    )
+    if existing is not None:
+        category_name = db.scalar(
+            select(Category.name).where(
+                Category.id == existing.category_id, Category.user_id == user.id
+            )
+        )
+        card = db.scalar(
+            select(CreditCard).where(
+                CreditCard.id == payload.credit_card_id, CreditCard.user_id == user.id
+            )
+        )
+        return transaction_response(
+            existing, category_name, card.id if card else None, card.name if card else None
+        )
     if payload.occurred_at > current_financial_date():
         raise HTTPException(status_code=422, detail="A data da compra não pode estar no futuro.")
     card = db.scalar(
@@ -184,11 +208,13 @@ def create_card_purchase(
 
     cycle = billing_cycle_for_purchase(payload.occurred_at, card.closing_day, card.due_day)
     invoice = db.scalar(
-        select(CardInvoice).where(
+        select(CardInvoice)
+        .where(
             CardInvoice.credit_card_id == card.id,
             CardInvoice.user_id == user.id,
             CardInvoice.closing_date == cycle.closing_date,
         )
+        .with_for_update()
     )
     if invoice is None:
         invoice = CardInvoice(
@@ -214,8 +240,17 @@ def create_card_purchase(
         occurred_at=financial_day_start(payload.occurred_at),
         notes=payload.notes,
     )
+    store_idempotency(purchase, "card_purchase", idempotency_key, fingerprint)
     db.add(purchase)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        existing = recover_concurrent_idempotency(
+            db, user.id, "card_purchase", idempotency_key, fingerprint
+        )
+        if existing is None:
+            raise
+        return transaction_response(existing, category.name, card.id, card.name)
     db.refresh(purchase)
     return transaction_response(purchase, category.name, card.id, card.name)
 
@@ -330,10 +365,30 @@ def pay_invoice(
     payload: CardPaymentCreate,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    idempotency_payload: dict[str, object] = {
+        "invoice_id": str(invoice_id),
+        "payment": payload.model_dump(mode="json"),
+    }
+    existing, fingerprint = find_idempotent_transaction(
+        db, user.id, "invoice_payment", idempotency_key, idempotency_payload
+    )
+    if existing is not None:
+        invoice = _get_invoice(db, user.id, existing.card_invoice_id or invoice_id)
+        card = db.get(CreditCard, invoice.credit_card_id)
+        assert card is not None
+        return transaction_response(existing, None, card.id, card.name)
+    invoice = _get_invoice(db, user.id, invoice_id, lock=True)
+    existing, fingerprint = find_idempotent_transaction(
+        db, user.id, "invoice_payment", idempotency_key, idempotency_payload
+    )
+    if existing is not None:
+        card = db.get(CreditCard, invoice.credit_card_id)
+        assert card is not None
+        return transaction_response(existing, None, card.id, card.name)
     if payload.occurred_at > current_financial_date():
         raise HTTPException(status_code=422, detail="A data do pagamento não pode estar no futuro.")
-    invoice = _get_invoice(db, user.id, invoice_id, lock=True)
     account = db.scalar(
         select(Account).where(
             Account.id == payload.account_id,
@@ -372,8 +427,20 @@ def pay_invoice(
         occurred_at=financial_day_start(payload.occurred_at),
         notes=payload.notes,
     )
+    store_idempotency(payment, "invoice_payment", idempotency_key, fingerprint)
     db.add(payment)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        existing = recover_concurrent_idempotency(
+            db, user.id, "invoice_payment", idempotency_key, fingerprint
+        )
+        if existing is None:
+            raise
+        invoice = _get_invoice(db, user.id, existing.card_invoice_id or invoice_id)
+        card = db.get(CreditCard, invoice.credit_card_id)
+        assert card is not None
+        return transaction_response(existing, None, card.id, card.name)
     db.refresh(payment)
     card = db.get(CreditCard, invoice.credit_card_id)
     assert card is not None

@@ -5904,96 +5904,6 @@ textarea:focus-visible {
   text-underline-offset: 3px;
 }
 
-.settings-managed-users > p {
-  max-width: 720px;
-  color: var(--color-muted);
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.settings-managed-user-form {
-  margin: 16px 0 20px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
-  align-items: end;
-  gap: 10px;
-}
-
-.settings-managed-user-form label {
-  display: grid;
-  gap: 6px;
-  color: var(--color-ink);
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.settings-managed-user-form input {
-  width: 100%;
-  min-width: 0;
-  min-height: 38px;
-  padding: 0 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font: inherit;
-}
-
-.settings-managed-user-form small,
-.settings-managed-user-row small {
-  color: var(--color-muted);
-  font-size: 9px;
-  font-weight: 450;
-}
-
-.settings-managed-user-list {
-  display: grid;
-  gap: 0;
-}
-
-.settings-managed-user-row {
-  min-height: 50px;
-  padding: 9px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px solid var(--color-rule);
-}
-
-.settings-managed-user-row > span {
-  display: grid;
-  gap: 3px;
-}
-
-.settings-managed-user-row strong {
-  color: var(--color-ink);
-  font-size: 11px;
-}
-
-.settings-user-notice {
-  color: var(--color-success);
-  font-size: 11px;
-}
-
-@media (max-width: 850px) {
-  .settings-managed-user-form {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 560px) {
-  .settings-managed-user-form {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .settings-managed-user-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 5px;
-  }
-}
-
 @media (max-width: 520px) {
   .pagination-controls {
     align-items: flex-start;
@@ -6016,27 +5926,6 @@ textarea:focus-visible {
 /* At intermediate widths, let each preference card decide its own columns. */
 .assistant-settings-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
-}
-
-.settings-managed-users {
-  container-name: managed-users;
-  container-type: inline-size;
-}
-
-@container managed-users (max-width: 620px) {
-  .settings-managed-user-form {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@container managed-users (max-width: 380px) {
-  .settings-managed-user-form {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .settings-managed-user-form > button {
-    width: 100%;
-  }
 }
 
 .category-summary-drilldown {

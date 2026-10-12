@@ -1,6 +1,6 @@
 # SophIA — sua assistente financeira
 
-Aplicação financeira pessoal e privada, administrada pelo proprietário. Não há cadastro público: somente `gamercreeper74@gmail.com` pode criar contas adicionais nas Preferências. Cada conta tem seus próprios dados financeiros, isolados pela sessão autenticada. O Finance Engine calcula saldos, faturas e resumos no backend. A SophIA é a interface principal: conversa com você e consulta ou registra operações financeiras por ferramentas explícitas.
+Aplicação financeira pessoal, privada e de usuário único, administrada por `gamercreeper74@gmail.com`. Não há cadastro público nem criação de contas adicionais; a conta inicial é criada pelo fluxo controlado de bootstrap. Os dados financeiros são vinculados ao usuário autenticado. O Finance Engine calcula saldos, faturas e resumos no backend. A SophIA é a interface principal: conversa com você e consulta ou registra operações financeiras por ferramentas explícitas.
 
 O código está publicado em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai) sob a licença MIT; consulte [LICENSE](LICENSE). A instância da SophIA, as credenciais e os dados financeiros do proprietário continuam privados e ficam fora deste repositório.
 
@@ -40,7 +40,7 @@ Frontend, API, worker, Caddy, cloudflared e PostgreSQL permanecem em serviços s
 
 ## Acesso externo na VM
 
-Não exponha a execução local `docker compose up` à internet. Para a VM pública, use exclusivamente o perfil de produção documentado em [docs/deployment.md](docs/deployment.md): Cloudflare Tunnel é a única entrada, sem portas de entrada publicadas na VM; Caddy aplica cabeçalhos de segurança atrás do túnel, o cookie é seguro e o login da conta proprietária exige TOTP. Contas adicionais provisionadas pelo proprietário usam senha própria e dados isolados. API e banco não têm portas públicas; o primeiro cadastro também exige token temporário de bootstrap. Configure a rota `finance.ruralflow.com.br`, `APP_DOMAIN` e os segredos privados antes de iniciar esse perfil. Os backups da VM são gerenciados pelo Proxmox, fora do repositório.
+Não exponha a execução local `docker compose up` à internet. Para a VM pública, use exclusivamente o perfil de produção documentado em [docs/deployment.md](docs/deployment.md): Cloudflare Tunnel é a única entrada da aplicação; nenhum serviço Compose publica portas no host. A VM mantém SSH na porta 22 para administração pela conta `sophia` com senha; root é acessado depois com `su -`. Caddy aplica cabeçalhos de segurança atrás do túnel, o cookie é seguro e o login da conta única exige TOTP. API e banco não têm portas públicas; a conta é criada pelo fluxo controlado de bootstrap com token temporário. O endpoint de administração de usuários não está habilitado. Configure a rota `finance.ruralflow.com.br`, `APP_DOMAIN` e os segredos privados antes de iniciar esse perfil. Os backups da VM são gerenciados pelo Proxmox, fora do repositório.
 
 O padrão usa OAuth do plano ChatGPT, sem chave da API e sem fallback para chamadas pagas da API. O repositório já é público sob MIT; a instância, as credenciais OAuth e os dados financeiros continuam privados. O uso feito pela SophIA entra nos limites do próprio plano autorizado e não dá acesso ao histórico ou às memórias do ChatGPT. Confira as permissões e os limites do aplicativo em ChatGPT → Configurações → Uso. Consulte a [documentação oficial de Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) e o guia para [VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
 
@@ -78,7 +78,7 @@ O Ollama continua disponível como alternativa local explicitamente iniciada com
 - Regras de receita/despesa recorrentes com ocorrências previstas até 90 dias à frente, incluindo frequências diária, semanal, mensal e anual.
 - Ocorrências não afetam saldos até serem registradas; registrar cria uma única transação confirmada, e ignorar ou encerrar preserva o histórico sem criar movimento.
 - A previsão “A pagar” reúne compromissos avulsos, ocorrências recorrentes e faturas abertas por vencimento. O centro de avisos leva ao item correspondente e permite registrar o pagamento após conferência.
-- Somente `gamercreeper74@gmail.com` pode provisionar outras contas em Preferências; não há cadastro público e cada pessoa acessa dados isolados pela própria sessão.
+- A aplicação opera com uma única conta privada: não há cadastro público, provisionamento de outras contas ou administração de usuários na interface/API.
 - Minha conta permite exportar dados em JSON; Lançamentos aceita o modelo CSV descrito em [docs/importacao-csv.md](docs/importacao-csv.md), com prévia e confirmação explícita.
 - O fluxo padrão usa OAuth do ChatGPT exclusivamente no backend e o endpoint Responses API; nenhuma chave da API é configurada. AI_MODEL_FAST e AI_MODEL_SMART são configuráveis por ambiente. O Ollama só inicia com o perfil local-ai e não é fallback automático. Pedidos inequívocos de despesas e recorrências mensais podem ser interpretados por regras determinísticas; pedidos ambíguos seguem para o modelo SMART, que deve sugerir e perguntar antes de executar. Os testes automatizados usam providers e transportes simulados.
 
@@ -119,7 +119,10 @@ docker compose exec worker sh -c 'MYPYPATH=/workspace/apps/api:/workspace/worker
 docker compose exec web npm run lint
 docker compose exec web npm run typecheck
 docker compose exec web npm run build
+docker compose exec web npm run test:e2e
 ```
+
+O E2E padrão usa mocks e dispensa a API. O cenário integrado é habilitado com `E2E_INTEGRATED=1` e precisa de API, banco descartável migrado e `OWNER_TOTP_SECRET` fictício de teste; a CI prepara esses serviços e executa ambos os fluxos. Nunca use segredos de produção em automação.
 
 Para executar a suíte contra PostgreSQL, crie uma vez um banco de teste separado do banco de desenvolvimento e passe sua URL pela variável `TEST_DATABASE_URL`:
 
@@ -147,7 +150,6 @@ Não aponte `TEST_DATABASE_URL` para o banco de desenvolvimento: os fixtures dos
 - `GET /api/ai/status`, `GET/POST /api/ai/conversations`, `GET/PATCH /api/ai/conversations/{id}`
 - `POST /api/ai/conversations/{id}/messages` (SSE), confirmação/cancelamento de ferramenta e gestão de preferências
 - `GET /api/ai/usage`, `GET/DELETE /api/ai/memories`
-- `GET /api/admin/users` e `POST /api/admin/users` somente para a conta proprietária
 - `GET /api/export` e `POST /api/imports/transactions/preview`, `POST /api/imports/transactions/confirm`
 - `GET /api/ai/diagnostics` somente em desenvolvimento; checklist real e detalhes em [docs/ai-assistant.md](docs/ai-assistant.md)
 
@@ -182,4 +184,4 @@ O `docker compose up` simples continua reservado ao ambiente local de desenvolvi
 
 O centro de avisos da aplicação mostra compromissos vencidos e com vencimento nos próximos sete dias, usando os mesmos dados da previsão financeira. Ele atualiza ao abrir a lista, ao voltar para a aba e a cada cinco minutos enquanto a aplicação está aberta. Os avisos não são enviados fora da aplicação; notificações push e e-mail ficam para uma etapa futura. Recorrências cobrem regras e ocorrências previstas; despesas recorrentes não alteram saldos até serem marcadas como pagas. Gestão de financiamentos com amortização, parcelamentos, investimentos e integração Pluggy ainda não foram implementados. O uso do plano ChatGPT via OAuth é o provider padrão, sem chave da API nem fallback pago; o Ollama é uma alternativa local opcional. O parser determinístico cobre frases inequívocas de despesas e programação mensal; pedidos incompletos ou ambíguos seguem para o modelo, com instruções para sugerir e perguntar.
 
-Uma VM Debian pode hospedar a instância pessoal pela internet usando o perfil de produção descrito em [docs/deployment.md](docs/deployment.md). Publique somente o código, nunca `.env`, credenciais, endereços privados ou dados financeiros. Cloudflare Tunnel é a única entrada pública; a VM não publica portas, e API e PostgreSQL permanecem privados. A interface responsiva pode ser instalada como PWA no iOS; um app nativo pode ser desenvolvido depois reutilizando a API.
+Uma VM Debian pode hospedar a instância pessoal pela internet usando o perfil de produção descrito em [docs/deployment.md](docs/deployment.md). Publique somente o código, nunca `.env`, credenciais, endereços privados ou dados financeiros. Cloudflare Tunnel é a única entrada pública da aplicação; containers não publicam portas no host e API/PostgreSQL permanecem privados. A porta SSH 22 fica aberta por escolha do proprietário; o acesso remoto é pela conta `sophia` com senha, e root é acessado com `su -`. A exposição pela rede anterior à VM precisa ser verificada separadamente. A interface responsiva pode ser instalada como PWA no iOS; um app nativo pode ser desenvolvido depois reutilizando a API.

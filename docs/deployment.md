@@ -8,15 +8,19 @@ Na zona Cloudflare, mantenha ativa a regra de redirecionamento 301 `http://finan
 
 Next.js encaminha `/api/*` para FastAPI. API e worker acessam PostgreSQL pela rede `data`, marcada como interna; a API também participa da rede `app`. O worker e o banco não têm interface na rede pública. O túnel não alcança diretamente a API nem o banco.
 
-Na implantação, Next.js recebe `API_INTERNAL_URL=http://api:8000` durante o build para que o proxy de `/api/*` alcance a API pela rede Docker. API, web, worker, Caddy e `cloudflared` usam sistema de arquivos raiz somente leitura e `/tmp` temporário. O worker não recebe o segredo TOTP do proprietário. A API não confia nos cabeçalhos encaminhados para determinar o IP do cliente: recebe conexões apenas do serviço web; o rate limiting por origem pública deve ser aplicado na Cloudflare, e o limitador da API mantém também a chave por conta.
+Na implantação, Next.js recebe `API_INTERNAL_URL=http://api:8000` durante o build para que o proxy de `/api/*` alcance a API pela rede Docker. API, web, worker, Caddy e `cloudflared` usam sistema de arquivos raiz somente leitura e `/tmp` temporário. O worker não recebe o segredo TOTP do proprietário. A API recebe conexões apenas do serviço web; para limitar por IP público, usa um cabeçalho dedicado que Caddy reescreve com o endereço fornecido pela Cloudflare, além da chave por conta.
 
-A API roda com um único worker para manter o limitador de tentativas de login consistente. A validação de senha e a etapa de MFA compartilham o mesmo orçamento de tentativas por conta e origem. Bloqueios ativos não são expulsos por novas origens: se a tabela de chaves atingir a capacidade configurada, novas chaves recebem 429 até que entradas expirem. Esta instalação foi projetada para uma instância de API; não escale réplicas sem antes mover o limitador para um mecanismo compartilhado.
+## Acesso administrativo SSH
+
+A porta SSH 22 permanece acessível nas interfaces da VM, conforme decisão do proprietário em 12/10/2026. A regra `input` do nftables não restringe essa porta; o firewall de rede/roteador anterior à VM não foi inspecionado, então esta documentação não afirma que a porta esteja acessível pela internet. O acesso SSH deve ser feito somente como `sophia`, com senha (`PasswordAuthentication yes`, `AllowUsers sophia`); login SSH direto de `root` está desativado (`PermitRootLogin no`). Para obter uma shell privilegiada, entre como `sophia` e execute `su -`, informando a senha de `root`. A conta `sophia` também aceita chave pública já configurada, mas a senha permanece habilitada conforme escolha do proprietário. Em 12/10/2026, a configuração efetiva anunciou os métodos `publickey,password`; as contas `sophia` e `root` tinham senha ativa. Não altere a política de acesso à porta 22 sem alinhar com o proprietário.
+
+A API roda com um único worker para manter o limitador de tentativas de login consistente. Caddy substitui `X-SophIA-Client-IP` pelo `CF-Connecting-IP` recebido na origem Cloudflare; Next.js encaminha esse cabeçalho à API, que valida o endereço IP antes de usá-lo junto com a conta no limitador. A API não deve ser publicada diretamente nem aceitar esse cabeçalho de origens não confiáveis. A validação de senha e a etapa de MFA compartilham o mesmo orçamento de tentativas por conta e origem. Bloqueios ativos não são expulsos por novas origens: se a tabela de chaves atingir a capacidade configurada, novas chaves recebem 429 até que entradas expirem. Esta instalação foi projetada para uma instância de API; não escale réplicas sem antes mover o limitador para um mecanismo compartilhado.
 
 Fotos de perfil aceitam JPEG, PNG ou WebP até 25 MB e 48 megapixels no navegador e na API. O navegador corrige a orientação e reduz a foto a no máximo 512 px antes do envio; a API valida novamente e armazena WebP associado ao usuário. A leitura exige uma sessão autenticada e envia Cache-Control: no-store; a migration 0013_profile_avatar só acrescenta os campos opcionais do perfil.
 
 Fotos do chat podem ser selecionadas ou coladas da área de transferência; cada arquivo original pode ter até 25 MB e 48 megapixels antes da redução no navegador. Cada mensagem aceita até quatro imagens preparadas, com até 3 MB de dados por imagem. O cliente tenta reencodar cada imagem em WebP com até 2.048 px e também pode enviar PNG ou JPEG quando o navegador não oferece exportação WebP no canvas. Caddy e API limitam corpos HTTP a 16 MiB; a rota do chat mantém o limite específico de 12,5 MB. A API valida formato e resolução de até 4 megapixels por imagem, remove metadados e normaliza tudo em WebP antes de encaminhar somente ao provider ChatGPT conectado no turno atual. O conteúdo da imagem não é persistido no histórico financeiro. A API bloqueia anexos quando AI_PROVIDER=ollama.
 
-A API limita mensagens do chat a 20 por usuário a cada 60 segundos e mantém até três respostas simultâneas por processo. Os limites são locais à instância única descrita acima; a publicação continua exigindo rate limiting na Cloudflare.
+A API limita mensagens do chat a 20 por usuário a cada 60 segundos e mantém até três respostas simultâneas por processo. Os limites são locais à instância única descrita acima e reiniciam com o processo. Configure e verifique na Cloudflare limites de borda para autenticação e bootstrap como defesa adicional; o estado atual do painel ainda não foi validado nesta revisão.
 
 O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai), sob licença MIT. Endereços privados da VM, arquivos `.env`, tokens de túnel, credenciais OAuth e dados financeiros não pertencem ao GitHub.
 
@@ -24,7 +28,7 @@ O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokk
 
 - Docker Compose V2 `2.24.4` ou superior, por causa de `!reset` e `!override` usados para remover portas e mounts de desenvolvimento.
 - Zona `ruralflow.com.br` gerenciada pela Cloudflare e um túnel dedicado chamado `finance-sophia`. Não reutilize um túnel que publique outros domínios.
-- Conectividade de saída da VM para a Cloudflare na porta `7844` (UDP ou TCP). Não é necessário abrir portas de entrada para a internet.
+- Conectividade de saída da VM para a Cloudflare na porta `7844` (UDP ou TCP). O acesso da aplicação não exige portas de entrada, pois usa o túnel de saída; o SSH administrativo na porta 22 permanece ativo conforme a política documentada acima.
 - Token do túnel salvo em arquivo local privado no servidor. `cloudflared` executa como usuário não-root e lê `/run/secrets/cloudflare_tunnel_token`; o token não é colocado na linha de comando, no `.env` nem no Git.
 - Segredo TOTP do proprietário em `OWNER_TOTP_SECRET`, no `.env` privado da VM. Gere-o em um terminal confiável com `python3 scripts/generate-owner-totp.py` e mantenha a chave fora do banco e do repositório. O QR de pareamento do Authy é exibido pela aplicação após a autenticação da senha e autorização temporária do servidor.
 - Token aleatório de primeiro pareamento em `MFA_ENROLLMENT_TOKEN`. Gere com `openssl rand -hex 32`, informe-o somente na tela privada de configuração do Authy e apague a variável do `.env` depois de confirmar o primeiro código. A tela não revela o QR sem esse token e a senha da conta.
@@ -44,7 +48,7 @@ No túnel dedicado `finance-sophia`, a rota publicada deve usar:
 
 Ao salvar a rota, a Cloudflare cria o DNS CNAME proxied apontando para o túnel. O conector `cloudflared` precisa estar na rede Docker `edge` deste Compose para resolver `caddy`. Não crie registros A/AAAA apontando para o IP da VM e não publique as portas 80/443 do host.
 
-O hostname público permite que qualquer visitante alcance a tela de login. A criação inicial e a administração de contas são restritas a `gamercreeper74@gmail.com`; não há cadastro público. A conta do proprietário exige senha e TOTP. Contas adicionais criadas pelo proprietário têm senha própria e dados financeiros isolados pela sessão autenticada; hoje elas não usam o TOTP do proprietário. Compartilhe a senha inicial por um canal privado. A rota pública não substitui a autenticação da aplicação.
+O hostname público permite que qualquer visitante alcance a tela de login. A aplicação é de usuário único: não há cadastro público, provisionamento de contas adicionais nem rota de administração de usuários. O bootstrap controlado cria a conta inicial do proprietário `gamercreeper74@gmail.com`; depois de configurada, `requires_setup` deve permanecer `false`. A conta exige senha e TOTP. A rota pública não substitui a autenticação da aplicação.
 
 ## Preparar a VM e publicar
 
@@ -55,16 +59,16 @@ O hostname público permite que qualquer visitante alcance a tela de login. A cr
 5. Inicie os serviços: `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build`. Confirme que os seis serviços estão em execução e que o Compose não publica portas no host.
 6. Só depois da validação interna, publique no túnel dedicado a rota `finance.ruralflow.com.br` → `http://caddy:80`, com fallback `http_status:404`.
 7. Confirme que o conector `cloudflared` está conectado no painel e acesse `https://finance.ruralflow.com.br`. Verifique os cabeçalhos HSTS, proteção contra framing, MIME sniffing e permissões do navegador. Cookies usam o prefixo `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict` e validade máxima de 24 horas. A conta existente exige novo login com senha e TOTP; a migration `0011_public_auth_hardening` invalida sessões antigas, mas preserva os dados financeiros.
-8. No primeiro login do proprietário, informe e-mail e senha; a aplicação então solicita o MFA. Para parear o Authy, escolha **Configurar autenticador**, informe o token temporário, escaneie o QR e confirme o código atual do Authy. O QR vale por dez minutos. Depois da confirmação, remova `MFA_ENROLLMENT_TOKEN` do `.env` e recrie a API; o acesso do proprietário continuará exigindo senha e TOTP. As contas adicionais criadas pelo proprietário usam e-mail e senha, sem herdar o MFA do proprietário.
+8. No primeiro login do proprietário, informe e-mail e senha; a aplicação então solicita o MFA. Para parear o Authy, escolha **Configurar autenticador**, informe o token temporário, escaneie o QR e confirme o código atual do Authy. O QR vale por dez minutos. Depois da confirmação, remova `MFA_ENROLLMENT_TOKEN` do `.env` e recrie a API; o acesso do proprietário continuará exigindo senha e TOTP. O produto aceita uma única conta e não permite provisionar usuários adicionais.
 
-A migration `0011_public_auth_hardening` revoga sessões antigas para exigir novo login. A migration `0012_owner_mfa_enrollment` adiciona apenas o estado e o prazo temporário de pareamento. A migration `0016_totp_replay` acrescenta o contador de códigos já consumidos e impede que o mesmo código abra sessões ou autorize novamente uma ação sensível. As migrations são incrementais e não removem dados financeiros.
+A migration `0011_public_auth_hardening` revoga sessões antigas para exigir novo login. A migration `0012_owner_mfa_enrollment` adiciona apenas o estado e o prazo temporário de pareamento. A migration `0016_totp_replay` acrescenta o contador de códigos já consumidos e impede que o mesmo código abra sessões ou autorize novamente uma ação sensível. A migration local `0017_financial_idempotency` acrescenta campos de idempotência às transações e uma restrição única por usuário, operação e chave; não reescreve transações existentes. Ela ainda não foi aplicada na VM. As migrations são incrementais e não removem dados financeiros.
 
 ## Verificação de segurança pós-deploy
 
 - `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`: confira que web, API, worker, PostgreSQL, Caddy e cloudflared estão ativos.
 - Verifique que o Compose de produção não publica portas no host: `docker compose -f docker-compose.yml -f docker-compose.vm.yml port web 3000`, `port api 8000`, `port postgres 5432` e `port caddy 80` não devem retornar um endereço público.
 - Acesse `/api/health/live` e `/api/health/ready` pelo hostname HTTPS; confirme redirecionamento HTTP→HTTPS e os cabeçalhos `Strict-Transport-Security`, `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` e `Permissions-Policy`.
-- Uma chamada sem sessão a `/api/accounts` deve retornar `401`; `/api/admin/users` deve retornar `401` sem sessão e `403` para uma conta que não seja do proprietário; `/api/docs` deve retornar `404` em produção. Com o proprietário já criado, `requires_setup` em `/api/auth/setup-state` deve ser `false`.
+- Uma chamada sem sessão a `/api/accounts` deve retornar `401`; `/api/admin/users` deve retornar `404` para GET e POST, com ou sem sessão; `/api/docs` deve retornar `404` em produção. Com o proprietário já criado, `requires_setup` em `/api/auth/setup-state` deve ser `false`.
 - Confirme que a rota de bootstrap está indisponível depois que a conta do proprietário existir e que um login inválido não cria sessão.
 - Confira `alembic current`, integridade dos saldos no Finance Engine e logs sem segredos. Os backups e a recuperação permanecem sob responsabilidade do Proxmox, fora deste repositório.
 
@@ -73,6 +77,8 @@ Não teste login real, não crie usuários adicionais e não use dados financeir
 ## Desenvolvimento local
 
 O arquivo `.env.example` e `docker compose up` são para desenvolvimento em `http://localhost:3000`. O frontend fica ligado a `127.0.0.1`; o cookie `Secure` é desligado para HTTP local e o TOTP pode ficar sem configuração. API e PostgreSQL continuam sem portas publicadas. Não use esse modo para exposição pública.
+
+A suíte E2E mockada roda com `npm run test:e2e`. O cenário integrado é habilitado no CI com `E2E_INTEGRATED=1`, API isolada, PostgreSQL descartável e uma chave TOTP fictícia exclusiva para automação; nunca reutilize essa chave fora do CI.
 
 ## Integração com o plano ChatGPT
 
@@ -94,10 +100,11 @@ Depois da atualização, confira `/api/health/live`, `/api/health/ready`, login 
 ## Publicar uma atualização do GitHub na VM
 
 1. Revise a alteração, rode as verificações do componente e confirme `git diff --check`. Não inclua `.env`, arquivos de segredo, credenciais OAuth, backups ou dados financeiros no commit.
-2. Faça commit do estado revisado e publique-o em `main` no repositório oficial. O deploy deve partir de um commit que já está no GitHub, para manter código, revisão e produção rastreáveis.
-3. Na VM, preserve `.env` e `secrets/` locais e atualize somente o checkout: `git fetch origin` e `git pull --ff-only origin main`. Confira `git status --short` antes de construir; não descarte alterações locais sem identificar sua origem.
-4. Valide e publique com `docker compose -f docker-compose.yml -f docker-compose.vm.yml config -q` e `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build --wait`.
-5. Confira a revisão com `git rev-parse --short HEAD`, os seis serviços com `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`, a migration com `docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic current` e os dois health checks públicos. Não faça reset destrutivo do banco para atualizar o código.
+2. Publique o commit em branch/PR e aguarde sucesso do workflow `Qualidade e dependências` no SHA exato que será implantado, incluindo API, Frontend e runtime. A proteção de branch do GitHub não foi verificada; se não existir, mantenha este gate como conferência manual. Não implante SHA com CI pendente ou falha.
+3. Faça merge/publicação do mesmo SHA validado em `main`. O deploy continua manual; nenhum workflow do repositório publica automaticamente na VM.
+4. Na VM, preserve `.env` e `secrets/` locais e atualize somente o checkout: `git fetch origin` e `git pull --ff-only origin main`. Confira `git status --short` antes de construir; não descarte alterações locais sem identificar sua origem.
+5. Valide e publique com `docker compose -f docker-compose.yml -f docker-compose.vm.yml config -q` e `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build --wait`.
+6. Confira a revisão com `git rev-parse --short HEAD`, os seis serviços com `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`, a migration com `docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic current` e os dois health checks públicos. Não faça reset destrutivo do banco para atualizar o código.
 
 ## Comandos de operação
 

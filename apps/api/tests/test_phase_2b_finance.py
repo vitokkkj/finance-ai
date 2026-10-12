@@ -583,6 +583,107 @@ def test_transfer_rejects_same_account_and_card_payment_rejects_overpayment(
     assert overpayment.status_code == 422
 
 
+def test_deleting_paid_card_purchase_cannot_make_payments_exceed_invoice_total(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    card = create_card(client)
+    category_id = create_expense_category(client)
+    purchase = client.post(
+        "/api/card-purchases",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Compra parcialmente paga",
+            "amount": "100.00",
+            "occurred_at": TODAY,
+        },
+    )
+    invoice_id = purchase.json()["invoice_id"]
+    payment = client.post(
+        f"/api/invoices/{invoice_id}/payments",
+        json={"account_id": account["id"], "amount": "40.00", "occurred_at": TODAY},
+    )
+    assert purchase.status_code == payment.status_code == 201
+
+    deleted = client.delete(f"/api/transactions/{purchase.json()['id']}")
+
+    assert deleted.status_code == 409
+    assert client.get(f"/api/invoices/{invoice_id}").json()["outstanding"] == "60.00"
+    assert any(
+        row["id"] == purchase.json()["id"] for row in client.get("/api/transactions").json()
+    )
+
+
+def test_financial_idempotency_replays_transactions_transfers_and_invoice_payments(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    destination = create_account(client, "Inter", "500.00")
+    category_id = create_expense_category(client)
+    card = create_card(client)
+    purchase = client.post(
+        "/api/card-purchases",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Fatura para pagar",
+            "amount": "200.00",
+            "occurred_at": TODAY,
+        },
+    )
+    invoice_id = purchase.json()["invoice_id"]
+
+    transaction_payload = {
+        "account_id": account["id"],
+        "category_id": category_id,
+        "type": "EXPENSE",
+        "description": "Mercado",
+        "amount": "25.00",
+        "occurred_at": TODAY,
+    }
+    key = "tx-retry-000000001"
+    first = client.post(
+        "/api/transactions", json=transaction_payload, headers={"Idempotency-Key": key}
+    )
+    retry = client.post(
+        "/api/transactions", json=transaction_payload, headers={"Idempotency-Key": key}
+    )
+    changed_payload = {**transaction_payload, "amount": "26.00"}
+    conflict = client.post(
+        "/api/transactions", json=changed_payload, headers={"Idempotency-Key": key}
+    )
+    assert first.status_code == retry.status_code == 201
+    assert first.json()["id"] == retry.json()["id"]
+    assert conflict.status_code == 409
+
+    transfer_payload = {
+        "source_account_id": account["id"],
+        "destination_account_id": destination["id"],
+        "amount": "50.00",
+        "occurred_at": TODAY,
+    }
+    transfer_headers = {"Idempotency-Key": "transfer-retry-00001"}
+    first_transfer = client.post("/api/transfers", json=transfer_payload, headers=transfer_headers)
+    retry_transfer = client.post("/api/transfers", json=transfer_payload, headers=transfer_headers)
+    assert first_transfer.status_code == retry_transfer.status_code == 201
+    assert first_transfer.json()["id"] == retry_transfer.json()["id"]
+
+    payment_payload = {"account_id": account["id"], "amount": "60.00", "occurred_at": TODAY}
+    payment_headers = {"Idempotency-Key": "payment-retry-000001"}
+    first_payment = client.post(
+        f"/api/invoices/{invoice_id}/payments", json=payment_payload, headers=payment_headers
+    )
+    retry_payment = client.post(
+        f"/api/invoices/{invoice_id}/payments", json=payment_payload, headers=payment_headers
+    )
+    assert first_payment.status_code == retry_payment.status_code == 201
+    assert first_payment.json()["id"] == retry_payment.json()["id"]
+    assert client.get(f"/api/invoices/{invoice_id}").json()["paid_amount"] == "60.00"
+
+
 def test_deleting_invoice_removes_purchases_and_payments_and_reconciles_account(
     client: TestClient,
 ) -> None:

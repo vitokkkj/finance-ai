@@ -3,8 +3,9 @@ from decimal import Decimal
 from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -22,9 +23,15 @@ from app.finance_engine import (
 from app.finance_views import (
     card_invoice_response,
     credit_card_response,
+    invoice_amounts,
     transaction_movement,
     transaction_response,
     transaction_rows,
+)
+from app.idempotency import (
+    find_idempotent_transaction,
+    recover_concurrent_idempotency,
+    store_idempotency,
 )
 from app.models import (
     Account,
@@ -155,7 +162,18 @@ def create_transaction(
     payload: TransactionCreate,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    existing, fingerprint = find_idempotent_transaction(
+        db, user.id, "transaction", idempotency_key, payload
+    )
+    if existing is not None:
+        category_name = db.scalar(
+            select(Category.name).where(
+                Category.id == existing.category_id, Category.user_id == user.id
+            )
+        )
+        return transaction_response(existing, category_name)
     _validate_references(
         user.id,
         payload.account_id,
@@ -176,8 +194,22 @@ def create_transaction(
         occurred_at=_transaction_instant(payload.occurred_at),
         notes=payload.notes,
     )
+    store_idempotency(transaction, "transaction", idempotency_key, fingerprint)
     db.add(transaction)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        existing = recover_concurrent_idempotency(
+            db, user.id, "transaction", idempotency_key, fingerprint
+        )
+        if existing is None:
+            raise
+        category_name = db.scalar(
+            select(Category.name).where(
+                Category.id == existing.category_id, Category.user_id == user.id
+            )
+        )
+        return transaction_response(existing, category_name)
     db.refresh(transaction)
     category_name = db.scalar(
         select(Category.name).where(
@@ -221,6 +253,21 @@ def update_transaction(
                 "por este endpoint."
             ),
         )
+    if (
+        db.scalar(
+            select(RecurrenceOccurrence.id)
+            .where(RecurrenceOccurrence.transaction_id == transaction.id)
+            .limit(1)
+        )
+        is not None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "O lançamento está vinculado a uma ocorrência recorrente paga e não pode ser "
+                "alterado por este endpoint. Corrija a ocorrência pelo fluxo de recorrências."
+            ),
+        )
 
     changes = {
         field: value
@@ -260,6 +307,39 @@ def delete_transaction(
     )
     if transaction is None:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    if transaction.type == "CARD_PURCHASE" and transaction.card_invoice_id is not None:
+        invoice = db.scalar(
+            select(CardInvoice)
+            .where(
+                CardInvoice.id == transaction.card_invoice_id,
+                CardInvoice.user_id == user.id,
+            )
+            .with_for_update()
+        )
+        if invoice is None:
+            raise HTTPException(status_code=409, detail="A fatura vinculada não foi encontrada.")
+        amounts = invoice_amounts(db, invoice)
+        if amounts.paid_amount > amounts.total - transaction.amount:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A compra não pode ser excluída porque os pagamentos registrados excederiam "
+                    "o total restante da fatura. Registre um estorno ou ajuste a fatura antes."
+                ),
+            )
+    if db.scalar(
+        select(RecurrenceOccurrence.id)
+        .where(RecurrenceOccurrence.transaction_id == transaction.id)
+        .limit(1)
+    ) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "O lançamento está vinculado a uma ocorrência recorrente paga e não pode ser "
+                "excluído por este endpoint. Exclua a regra recorrente se quiser remover também "
+                "seu histórico."
+            ),
+        )
     delete_transaction_record(db, transaction)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

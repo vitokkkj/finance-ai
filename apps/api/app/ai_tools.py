@@ -416,7 +416,9 @@ def _search_transactions(db: Session, user: User, args: BaseModel) -> tuple[obje
     return rows[: payload.limit], "transaction_card"
 
 
-def _create_transaction(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+def _create_transaction(
+    db: Session, user: User, args: BaseModel, *, idempotency_key: str | None = None
+) -> tuple[object, str]:
     payload = cast(CreateTransactionInput, args)
     request = TransactionCreate(
         account_id=payload.account_id,
@@ -426,7 +428,8 @@ def _create_transaction(db: Session, user: User, args: BaseModel) -> tuple[objec
         amount=Decimal(payload.amount),
         occurred_at=payload.occurred_at,
     )
-    return create_transaction(request, user, db), "transaction_card"
+    transaction = create_transaction(request, user, db, idempotency_key=idempotency_key)
+    return transaction, "transaction_card"
 
 
 def _preview_transaction_update(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
@@ -901,7 +904,9 @@ def format_brl(amount: Decimal) -> str:
     return f"R$ {grouped},{fraction}"
 
 
-def _create_transfer(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+def _create_transfer(
+    db: Session, user: User, args: BaseModel, *, idempotency_key: str | None = None
+) -> tuple[object, str]:
     payload = cast(CreateTransferInput, args)
     request = TransferCreate(
         source_account_id=payload.source_account_id,
@@ -909,7 +914,7 @@ def _create_transfer(db: Session, user: User, args: BaseModel) -> tuple[object, 
         amount=Decimal(payload.amount),
         occurred_at=payload.occurred_at,
     )
-    return create_transfer(request, user, db), "transaction_card"
+    return create_transfer(request, user, db, idempotency_key=idempotency_key), "transaction_card"
 
 
 def _dashboard(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
@@ -1216,6 +1221,7 @@ def execute_finance_tool(
     db: Session,
     *,
     confirmed: bool = False,
+    idempotency_key: str | None = None,
 ) -> ToolResult:
     definition = next((item for item in TOOL_DEFINITIONS if item.name == name), None)
     if definition is None:
@@ -1258,7 +1264,14 @@ def execute_finance_tool(
                     if previous_account_id is not None:
                         previous_account_ids.add(previous_account_id)
         handler = definition.confirmed_handler if confirmed else None
-        result, card_type = (handler or definition.handler)(db, user, payload)
+        selected_handler = handler or definition.handler
+        if name in {"create_transaction", "create_transfer"}:
+            idempotent_handler = cast(Callable[..., tuple[object, str | None]], selected_handler)
+            result, card_type = idempotent_handler(
+                db, user, payload, idempotency_key=idempotency_key
+            )
+        else:
+            result, card_type = selected_handler(db, user, payload)
         serialized = _serialize(result)
         cards: list[dict[str, object]] = []
         if card_type is not None:
