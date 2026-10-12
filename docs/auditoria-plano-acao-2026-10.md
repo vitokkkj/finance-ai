@@ -13,22 +13,22 @@
 
 ## Atualização da execução — 12/10/2026
 
-**Estado do código:** as correções estão no checkout local, ainda no SHA `542f69e`; não foram publicadas nem implantadas. A VM continua servindo esse SHA e a migration `0016_totp_replay`. Nenhuma migration local foi aplicada ao banco de produção e nenhum dado financeiro foi consultado, alterado ou removido. Os arquivos não rastreados anteriores (`.agents/`, `docs/skills.md` e `sophia_logo_refinada.png`) foram preservados.
+**Estado do código:** as correções foram commitadas e publicadas na branch `codex/p1-audit-remediation`, SHA `63eee3cb990efe0c87958d13c35effa3ac2cb77b`. O workflow hospedado passou nos três jobs no mesmo SHA: [execução 38305965616](https://github.com/vitokkkj/finance-ai/actions/runs/38305965616). A branch ainda não foi integrada a `main` e nada foi implantado. A VM continua servindo `542f69e` e a migration `0016_totp_replay`. Nenhuma migration local foi aplicada ao banco de produção e nenhum dado financeiro foi consultado, alterado ou removido. Os arquivos não rastreados anteriores (`.agents/`, `docs/skills.md` e `sophia_logo_refinada.png`) foram preservados fora do commit.
 
 | P1 | Situação após esta rodada |
 |---|---|
-| 1.1 — falha da CI | Causa reproduzida: `OWNER_TOTP_SECRET` e `INITIAL_SETUP_TOKEN` vazios no ambiente do job eram interpretados como valores configurados e falhavam em `test_production_worker_does_not_require_owner_totp`. As variáveis foram removidas e os passos separados. Resultado GitHub no novo SHA ainda pendente de publicação. |
-| 1.2 — reconciliação financeira | Código e regressões locais impedem apagar compra quando os pagamentos superariam o total remanescente, e bloqueiam alteração/exclusão genérica de ocorrência paga. Testes API locais passaram. |
-| 1.3 — idempotência | Lançamento, transferência, compra e pagamento aceitam chave persistida por usuário/operação; retry reproduz o movimento e reuso com payload distinto dá `409`. Migration `0017` criada; validação PostgreSQL 17 segue pendente. |
-| 1.4 — PostgreSQL na CI | Workflow agora cria PostgreSQL 17 descartável, aplica `alembic upgrade head`, executa `alembic check` e pytest com `TEST_DATABASE_URL`. Execução hospedada ainda não ocorreu. |
-| 1.5 — E2E | Playwright foi adicionado à CI. O cenário integrado cobre setup, login com MFA fictício de CI, conta/categoria, lançamento, transferência, compra no cartão, pagamento de fatura, retries idempotentes e rota administrativa desativada. 19 testes mockados passaram; o fluxo completo com MFA, API real e SQLite temporário também passou localmente. PostgreSQL 17 integrado aguarda CI no novo SHA. |
-| 1.6 — gate de deploy | Guia exige CI verde no SHA exato e mantém deploy manual; não há deploy automático. `main` não tem branch protection e o repositório não tem rulesets; isso permanece no backlog P2. |
+| 1.1 — falha da CI | Causa reproduzida e corrigida; os três jobs do workflow passaram no SHA `63eee3cb990efe0c87958d13c35effa3ac2cb77b` (run `38305965616`). |
+| 1.2 — reconciliação financeira | Código e regressões impedem apagar compra quando pagamentos excederiam o total remanescente e bloqueiam edição/exclusão genérica de ocorrência paga. API local e PostgreSQL 17 na CI passaram; a correção ainda aguarda implantação na VM. |
+| 1.3 — idempotência | Lançamento, transferência, compra e pagamento persistem chave por usuário/operação; retry reproduz o mesmo movimento e reuso com payload distinto retorna `409`. Migration `0017` passou em `alembic upgrade head` e `alembic check` no PostgreSQL 17 da CI; ainda não foi aplicada à VM. |
+| 1.4 — PostgreSQL na CI | PostgreSQL 17 descartável, migrations, `alembic check`, suíte API e `pip-audit` passaram no workflow hospedado. |
+| 1.5 — E2E | Playwright integrado passou na CI com PostgreSQL 17: setup, MFA de teste, login, conta/categoria, lançamento, transferência, compra no cartão, pagamento de fatura, retries idempotentes e rota administrativa desativada. Localmente passaram 19/19 testes mockados e 1/1 integrado com API real/SQLite temporário. |
+| 1.6 — gate de deploy | O guia exige CI verde no SHA exato e mantém deploy manual; o SHA candidato tem CI verde e ainda não foi integrado nem implantado. Não há deploy automático. `main` não tem branch protection nem rulesets; isso permanece no backlog P2. |
 | 1.7 — conta/MFA/rate limit | Provisionamento extra foi removido da API e da interface, alinhando o produto a uma conta privada; VM confirmou um usuário e nada foi apagado. Caddy reescreve `X-SophIA-Client-IP` com `CF-Connecting-IP`; a API valida o IP e usa a origem no limitador. Regras do painel Cloudflare não foram inspecionadas. |
 | 1.8 — VM | Inspeção direta por SSH concluída; detalhes e limites estão abaixo. A porta 22 permanece aberta por decisão expressa do proprietário. |
 
 **VM verificada por SSH:** Debian 13; SHA `542f69e`; seis serviços Compose em execução, web/API/PostgreSQL saudáveis; API e PostgreSQL sem portas publicadas no host; Alembic em `0016_totp_replay`; exatamente um usuário; cerca de 8,7 GB livres em disco de 40 GB e 7,3/8 GB de RAM disponíveis. Não foram lidos `.env`, tokens, e-mails, lançamentos ou saldos. Por escolha do proprietário, TCP/22 permanece aberto no host; SSH permite senha e chave somente para `sophia` (`AllowUsers sophia`), e login direto de `root` está bloqueado (`PermitRootLogin no`). A conta `sophia` e a conta `root` reportaram senha ativa; o servidor anunciou `publickey,password` e a conexão por chave como `sophia` foi confirmada. A senha em si e o comando interativo `su -` não foram testados nem lidos. SSH escuta em todas as interfaces e a política de entrada do nftables é `accept`; isso não comprova exposição pela internet, pois roteador/firewall anterior à VM não foi inspecionado. Cloudflare e Proxmox não foram consultados nesta rodada.
 
-**Falhas e validações pendentes:** o reload de `ssh.service` falhou por causa da ativação por socket; o systemd reiniciou o daemon, o serviço voltou a `active`, `sshd -t` passou antes da aplicação e a conexão SSH como `sophia` foi confirmada depois. A autenticação por senha foi habilitada na configuração efetiva e anunciada pelo servidor, mas não foi feita tentativa interativa para não coletar a senha do proprietário. Docker local está indisponível e o PostgreSQL instalado no host é 9.5, então PostgreSQL 17 e a migration `0017` aguardam o workflow descartável. O último run GitHub ainda é o #47 do SHA antigo e continua falho; nenhum run foi iniciado para este diff local.
+**Falhas e validações pendentes:** o reload de `ssh.service` falhou por causa da ativação por socket; o systemd reiniciou o daemon, o serviço voltou a `active`, `sshd -t` passou e uma nova conexão como `sophia` foi confirmada. O servidor anuncia `publickey,password`, mas não foi feita tentativa interativa para não coletar a senha do proprietário. Uma execução completa inicial de `npm run test:e2e` sem API falhou no cenário integrado por falta do backend local; o teste foi separado por `E2E_INTEGRATED=1`, após isso os 19 mocks passaram e o integrado passou isoladamente. A execução hospedada final passou com PostgreSQL 17. Docker local continua indisponível; `npm run lint` emite quatro avisos existentes de `!important` na regra de movimento reduzido. O GitHub também emitiu aviso não bloqueante de runtime Node 20 para a action `checkout` pinned; acompanhar como P2. `npm audit` e `pip-audit` não encontraram vulnerabilidades. O run anterior #47 no SHA antigo continua falho; a execução nova é verde.
 
 ## Estado inicial registrado
 
@@ -55,6 +55,8 @@ Os itens P1 abaixo permanecem **em andamento**, exceto pelo alinhamento de conta
 
 **Ação:** obter logs autenticados, identificar e corrigir a causa, separar etapas para diagnóstico útil e exigir uma execução verde para o SHA candidato a deploy. Documentar o SHA validado e a relação entre aprovação de CI e deploy manual.
 
+**Resultado:** causa corrigida; API, Frontend e runtime passaram no run [38305965616](https://github.com/vitokkkj/finance-ai/actions/runs/38305965616), SHA `63eee3cb990efe0c87958d13c35effa3ac2cb77b`.
+
 **Referências:** [quality.yml](../.github/workflows/quality.yml#L45), [quality.yml — auditoria Python](../.github/workflows/quality.yml#L52), [deployment.md — deploy manual](deployment.md#L94).
 
 ### P1.2 Preservar reconciliação ao editar/excluir compras e ocorrências pagas
@@ -78,6 +80,8 @@ Os itens P1 abaixo permanecem **em andamento**, exceto pelo alinhamento de conta
 **Evidência:** a configuração CI usa SQLite em memória. A fixture cria tabelas com `Base.metadata.create_all`; não percorre migrations PostgreSQL nem garante comportamento idêntico de chaves estrangeiras, locks ou concorrência.
 
 **Ação:** adicionar serviço PostgreSQL compatível com produção, executar `alembic upgrade head` em banco descartável e a suíte com `TEST_DATABASE_URL`; acrescentar cobertura para isolamento de usuário, constraints, reconciliação e operações concorrentes. Manter SQLite apenas se continuar útil para testes rápidos.
+
+**Resultado:** `alembic upgrade head`, `alembic check`, pytest PostgreSQL e `pip-audit` passaram no job API hospedado do run `38305965616`.
 
 **Referências:** [quality.yml](../.github/workflows/quality.yml#L18), [fixture de testes](../apps/api/tests/conftest.py#L12), [README — execução contra PostgreSQL](../README.md#L124), [README — migrations](../README.md#L131).
 
@@ -145,12 +149,11 @@ Os itens P1 abaixo permanecem **em andamento**, exceto pelo alinhamento de conta
 
 ## Limites que seguem abertos
 
-1. **CI hospedada no novo SHA:** publicar o diff para rodar o workflow atualizado e confirmar migrations/testes PostgreSQL 17, build e E2E integrado. O run #47 confirma somente a falha do código antigo. A suíte mockada local atual contém 19 testes e passou; a tentativa sem API não valida o cenário integrado.
-2. **Cloudflare/rede anterior:** confirmar limites para autenticação/bootstrap/MFA, configuração do túnel/TLS e exposição do TCP/22; esses controles externos não foram inspecionados nesta rodada.
-3. **Proxmox:** confirmar jobs/retenção/criptografia e localizar evidência de restauração recente; saúde da VM não verifica backup.
+1. **Integração e deploy:** CI verde no SHA `63eee3c` da branch; falta integrar em `main` e atualizar a VM. A migration `0017` segue não aplicada. O proprietário autorizou acesso como `sophia` com senha e root somente via `su -`; o agente não possui a senha para executar comandos privilegiados. Nenhum login SSH direto como `root` será usado.
+2. **Cloudflare/rede anterior:** confirmar limites para autenticação/bootstrap/MFA, configuração do túnel/TLS e exposição do TCP/22; não houve acesso ao painel nem ao roteador/firewall anterior nesta rodada.
+3. **Proxmox:** a documentação registra confirmação do proprietário em 12/10/2026 de backup criptografado e restauração testada; falta evidência direta recente de jobs, retenção e teste de restauração no Proxmox.
 4. **Branch protection:** decidir e aplicar os checks requeridos em `main`; o estado atual sem proteção foi verificado.
-5. **Deploy:** migration `0017` e correções locais ainda não estão na VM; publicar e aplicar apenas depois da CI verde no SHA exato e aprovação operacional.
-6. **Dados reais:** a revisão visual da interface não deve reproduzir nomes, saldos ou transações do usuário no relatório. Testes permanecem com dados sintéticos.
+5. **Dados reais:** a revisão visual da interface não reproduz nomes, saldos ou transações do usuário no relatório. Testes permanecem com dados sintéticos.
 
 ## Registro de execução deste plano
 
@@ -163,5 +166,6 @@ Os itens P1 abaixo permanecem **em andamento**, exceto pelo alinhamento de conta
 | 12/10/2026 | Finance Engine (P1.2/P1.3) | Reconciliação de compra paga protegida, ocorrência paga bloqueada para edição/exclusão genérica, idempotência persistente adicionada; regressões API passam. PostgreSQL 17 aguarda CI. |
 | 12/10/2026 | CI/E2E (P1.1/P1.4/P1.5) | Causa da falha reproduzida e workflow ampliado para PostgreSQL/Alembic/Playwright integrado; execução hospedada no novo SHA aguarda publicação. |
 | 12/10/2026 | Gate de deploy (P1.6) | CI verde no mesmo SHA documentada como gate manual; sem deploy automático e sem atualização da VM nesta rodada. |
+| 12/10/2026 | CI hospedada e branch candidata | Run `38305965616` passou nos jobs API, Frontend e runtime no SHA `63eee3cb990efe0c87958d13c35effa3ac2cb77b`; migration PostgreSQL 17, suíte completa, E2E integrado e builds passaram. Branch ainda não integrada a `main`; VM segue no SHA antigo. |
 
 Atualizar esta tabela e as prioridades somente após mudança verificável e checagens correspondentes. Atualizar a documentação operacional junto com cada mudança, incluindo limitações, falhas e comandos de verificação pendentes.
