@@ -704,8 +704,8 @@ export function FinanceWorkspace({
                 <>
                   <div className="overview-period-row">
                     <p>Resumo atualizado em {displayDate(dashboard.as_of)}</p>
-                    <div className="month-picker"><span>Período</span>
-                      <CalendarMonthInput aria-label="Mês do resumo" onChange={setMonth} value={month} />
+                    <div className="month-picker"><span>Mês analisado</span>
+                      <CalendarMonthInput aria-label="Mês analisado" onChange={setMonth} value={month} />
                     </div>
                   </div>
                   <section aria-label="Saldo e fluxo do período" className="overview-primary-grid">

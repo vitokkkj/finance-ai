@@ -23,6 +23,9 @@ Esta revisão cobre a API, regras financeiras, frontend, segurança e operação
 - O drawer tem isolamento do conteúdo de fundo, foco inicial e restauração de foco, atributos ARIA e bloqueio de rolagem do documento enquanto está aberto.
 - A navegação lateral permanece rolável em telas baixas; áreas de toque do controle foram ampliadas.
 - O breakpoint visual foi unificado em 760 px para alinhar a mudança de layout e o modo drawer.
+- A lateral reserva uma faixa fixa para a conta e a saída, e usa o espaço restante para mostrar e rolar várias conversas. “Nova conversa” ficou compacta. No celular, “Atualizar aplicativo” recarrega os dados do app e restaura a conversa ou seção aberta; aparece um aviso antes de descartar rascunho e o botão fica desativado durante uma resposta.
+- No celular, Enter quebra linha e o botão de envio envia a mensagem; no computador, Enter continua enviando e Shift+Enter quebra linha. Campos de texto, datas e listas usam fonte mínima de 16 px para evitar o zoom automático do Safari ao focá-los, mantendo o zoom por gesto disponível.
+- O seletor do resumo foi exercitado no navegador: ao escolher outro mês, fluxo e categorias são atualizados; o rótulo agora informa “Mês analisado”. A previsão “A pagar” continua mostrando o mês corrente, conforme sua função de compromissos próximos.
 - Categorias exibem **Receitas** antes de **Despesas**.
 - O tratamento de imagens do chat aceita até quatro anexos e encaminha o tipo WebP verdadeiro depois da normalização.
 - No celular, o contexto financeiro inicia fechado e só abre pelo controle solicitado; o contador de avisos fica sobreposto ao sino, sem deslocá-lo; e o resumo mensal usa linhas de rótulo/valor para evitar colisões em larguras estreitas.
@@ -59,7 +62,7 @@ As referências consultadas mostram padrões úteis: [Organizze — alertas de c
 | Build Next.js | Passou; rotas estáticas geradas. |
 | Caddyfile 2.11.6 | Configuração validada no ambiente da VM. |
 | Compose da VM | Configuração validada sem imprimir valores interpolados. |
-| Deploy e migration | Aguardando publicação desta revisão; a última versão publicada permanece no commit `f549df3`, API e web saudáveis; Alembic em `0016_totp_replay`; PostgreSQL sem porta publicada no host. O novo Caddyfile foi validado e recarregado. |
+| Deploy e migration | A revisão `82395e3` foi publicada; API e web saudáveis; Alembic em `0016_totp_replay`; PostgreSQL sem porta publicada no host. O novo Caddyfile foi validado e recarregado. A atualização móvel descrita acima ainda aguarda publicação. |
 | HTTP público | `/api/health/live` e `/api/health/ready` retornam 200; `/api/accounts` sem sessão retorna 401; `/api/docs` retorna 404; HTTP redireciona para HTTPS. HSTS, CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy e Permissions-Policy foram observados. |
 | Painel Cloudflare | Conferido: Full TLS com modo automático; Browser Integrity Check ligado; regras customizadas e rate limiting ausentes; tunnel DNS do subdomínio está proxied. |
 

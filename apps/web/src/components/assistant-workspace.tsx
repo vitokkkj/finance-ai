@@ -28,6 +28,7 @@ import {
   Plus,
   Pencil,
   ReceiptText,
+  RefreshCw,
   Repeat2,
   SlidersHorizontal,
   Square,
@@ -48,6 +49,36 @@ import { formatCurrency } from "@/lib/money";
 type FinanceSection = "overview" | "transactions" | "accounts" | "categories" | "cards" | "recurrences";
 type WorkspaceView = "chat" | "finance" | "settings" | "account";
 type Theme = "light" | "dark";
+type WorkspaceRefreshSnapshot = {
+  version: 1;
+  view: WorkspaceView;
+  financeSection: FinanceSection;
+  conversationId: string | null;
+};
+
+const WORKSPACE_REFRESH_SNAPSHOT_KEY = "sophia-workspace-refresh-v1";
+
+function readWorkspaceRefreshSnapshot(): WorkspaceRefreshSnapshot | null {
+  try {
+    const stored = window.sessionStorage.getItem(WORKSPACE_REFRESH_SNAPSHOT_KEY);
+    window.sessionStorage.removeItem(WORKSPACE_REFRESH_SNAPSHOT_KEY);
+    if (!stored) return null;
+    const value: unknown = JSON.parse(stored);
+    if (!value || typeof value !== "object") return null;
+    const snapshot = value as Partial<WorkspaceRefreshSnapshot>;
+    const views: WorkspaceView[] = ["chat", "finance", "settings", "account"];
+    const sections: FinanceSection[] = ["overview", "transactions", "accounts", "categories", "cards", "recurrences"];
+    if (snapshot.version !== 1 || !views.includes(snapshot.view as WorkspaceView) || !sections.includes(snapshot.financeSection as FinanceSection)) return null;
+    return {
+      version: 1,
+      view: snapshot.view as WorkspaceView,
+      financeSection: snapshot.financeSection as FinanceSection,
+      conversationId: typeof snapshot.conversationId === "string" ? snapshot.conversationId : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 type Conversation = {
   id: string;
@@ -503,6 +534,7 @@ export function AssistantWorkspace({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [refreshingApp, setRefreshingApp] = useState(false);
   const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [conversationTitleDraft, setConversationTitleDraft] = useState("");
@@ -515,6 +547,7 @@ export function AssistantWorkspace({
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const conversationRenameRef = useRef<HTMLInputElement>(null);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
+  const refreshSnapshotRef = useRef<WorkspaceRefreshSnapshot | null | undefined>(undefined);
 
   useEffect(() => {
     if (!mobileMenuOpen || window.matchMedia("(min-width: 761px)").matches) return;
@@ -602,10 +635,37 @@ export function AssistantWorkspace({
     setContextCards(cardsResult.status === "fulfilled" ? cardsResult.value : []);
   }, []);
 
+  const loadSettings = useCallback(async () => {
+    setLoadingSettings(true);
+    setError("");
+    try {
+      const [newStatus, newUsage, newMemories] = await Promise.all([
+        apiRequest<AIStatus>("/api/ai/status"),
+        apiRequest<Usage>("/api/ai/usage"),
+        apiRequest<Memory[]>("/api/ai/memories"),
+      ]);
+      const newDiagnostics = newStatus.diagnostics_enabled
+        ? await apiRequest<AIDiagnostic[]>("/api/ai/diagnostics")
+        : [];
+      setStatus(newStatus);
+      setUsage(newUsage);
+      setMemories(newMemories);
+      setDiagnostics(newDiagnostics);
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : "Não foi possível carregar as preferências.");
+    } finally {
+      setLoadingSettings(false);
+    }
+  }, []);
+
   useEffect(() => {
     setGreeting(currentGreeting());
     let mounted = true;
     async function loadInitialData() {
+      if (refreshSnapshotRef.current === undefined) {
+        refreshSnapshotRef.current = readWorkspaceRefreshSnapshot();
+      }
+      const refreshSnapshot = refreshSnapshotRef.current;
       try {
         const [aiStatus, rows, existingAccounts] = await Promise.all([
           apiRequest<AIStatus>("/api/ai/status"),
@@ -616,6 +676,19 @@ export function AssistantWorkspace({
         setStatus(aiStatus);
         setConversations(rows);
         setFirstUseRequired(existingAccounts.length === 0);
+        if (refreshSnapshot) {
+          setView(refreshSnapshot.view);
+          setFinanceSection(refreshSnapshot.financeSection);
+          if (refreshSnapshot.view === "chat" && refreshSnapshot.conversationId && rows.some((row) => row.id === refreshSnapshot.conversationId)) {
+            try {
+              await loadConversation(refreshSnapshot.conversationId);
+            } catch (conversationError) {
+              setError(conversationError instanceof Error ? conversationError.message : "Não foi possível restaurar a conversa.");
+            }
+          } else if (refreshSnapshot.view === "settings") {
+            void loadSettings();
+          }
+        }
         // A sessão começa na home conversacional; o histórico permanece acessível na sidebar.
       } catch (loadError) {
         if (mounted) {
@@ -631,7 +704,7 @@ export function AssistantWorkspace({
     return () => {
       mounted = false;
     };
-  }, [loadDashboard]);
+  }, [loadConversation, loadDashboard, loadSettings]);
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -949,7 +1022,8 @@ export function AssistantWorkspace({
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    const isMobile = window.matchMedia("(max-width: 760px)").matches;
+    if (event.key === "Enter" && !event.shiftKey && !isMobile) {
       event.preventDefault();
       void sendMessage(draft, attachedImages.map((image) => image.dataUrl));
     }
@@ -972,31 +1046,12 @@ export function AssistantWorkspace({
     }
   }
 
-  async function openSettings() {
+  function openSettings() {
     setFinanceFocusTarget(null);
     setView("settings");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
-    setLoadingSettings(true);
-    setError("");
-    try {
-      const [newStatus, newUsage, newMemories] = await Promise.all([
-        apiRequest<AIStatus>("/api/ai/status"),
-        apiRequest<Usage>("/api/ai/usage"),
-        apiRequest<Memory[]>("/api/ai/memories"),
-      ]);
-      const newDiagnostics = newStatus.diagnostics_enabled
-        ? await apiRequest<AIDiagnostic[]>("/api/ai/diagnostics")
-        : [];
-      setStatus(newStatus);
-      setUsage(newUsage);
-      setMemories(newMemories);
-      setDiagnostics(newDiagnostics);
-    } catch (settingsError) {
-      setError(settingsError instanceof Error ? settingsError.message : "Não foi possível carregar as preferências.");
-    } finally {
-      setLoadingSettings(false);
-    }
+    void loadSettings();
   }
 
   async function deleteMemory(id: string) {
@@ -1196,7 +1251,7 @@ export function AssistantWorkspace({
         value={draft}
       />
       <div className="assistant-composer-footer">
-        <span id="assistant-composer-hint">Até 4 imagens · Ctrl/⌘ + V cola imagens · Enter envia</span>
+        <span id="assistant-composer-hint"><span className="composer-hint-desktop">Até 4 imagens · Ctrl/⌘ + V cola imagens · Enter envia</span><span className="composer-hint-mobile">Até 4 imagens · Enter quebra linha · botão envia</span></span>
         <div className="assistant-composer-actions">
           <button aria-label="Anexar foto para análise" className="assistant-attach-button" disabled={sending || status?.provider !== "chatgpt_plan"} onClick={() => attachmentInputRef.current?.click()} title={status?.provider === "chatgpt_plan" ? "Anexar foto" : "Fotos funcionam com o ChatGPT conectado"} type="button"><ImagePlus aria-hidden="true" size={18} /></button>
           {sending
@@ -1213,6 +1268,24 @@ export function AssistantWorkspace({
       window.localStorage.setItem("sophia-sidebar-collapsed", String(next));
       return next;
     });
+  }
+
+  function reloadApplication() {
+    if (sending || refreshingApp) return;
+    if ((draft.trim() || attachedImages.length > 0) && !window.confirm("O texto e as imagens ainda não enviados serão descartados ao recarregar. Deseja continuar?")) return;
+    try {
+      const snapshot: WorkspaceRefreshSnapshot = {
+        version: 1,
+        view,
+        financeSection,
+        conversationId: view === "chat" ? conversationId : null,
+      };
+      window.sessionStorage.setItem(WORKSPACE_REFRESH_SNAPSHOT_KEY, JSON.stringify(snapshot));
+    } catch {
+      // O recarregamento continua disponível mesmo se o navegador bloquear o armazenamento da sessão.
+    }
+    setRefreshingApp(true);
+    window.location.reload();
   }
 
   useEffect(() => {
@@ -1261,6 +1334,18 @@ export function AssistantWorkspace({
           type="button"
         >
           <Plus aria-hidden="true" size={17} strokeWidth={2} /><span>Nova conversa</span>
+        </button>
+        <button
+          aria-busy={refreshingApp}
+          aria-label="Recarregar aplicativo"
+          className={refreshingApp ? "assistant-sidebar-refresh is-refreshing" : "assistant-sidebar-refresh"}
+          disabled={sending || refreshingApp}
+          onClick={reloadApplication}
+          title={sending ? "Aguarde a resposta terminar antes de recarregar" : "Recarregar aplicativo"}
+          type="button"
+        >
+          <RefreshCw aria-hidden="true" size={15} />
+          <span>Atualizar aplicativo</span>
         </button>
         <div className="assistant-history">
           <p>Conversas recentes</p>

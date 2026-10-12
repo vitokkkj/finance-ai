@@ -5133,3 +5133,173 @@ textarea:focus-visible {
     padding-bottom: max(56px, calc(env(safe-area-inset-bottom) + 40px));
   }
 }
+
+/* O menu lateral reserva sempre espaço para a conta e distribui o histórico no restante. */
+.assistant-sidebar {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.assistant-sidebar > .assistant-brand,
+.assistant-sidebar > .assistant-sidebar-toggle {
+  flex: 0 0 auto;
+}
+
+.assistant-layout .assistant-new-chat {
+  min-height: 36px;
+  flex: 0 0 36px;
+  margin: 10px 0 12px;
+  padding-inline: 10px;
+  gap: 8px;
+}
+
+.assistant-layout .assistant-new-chat > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.assistant-layout .assistant-new-chat > span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-sidebar .assistant-history {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  margin: 0 0 10px;
+  padding-top: 11px;
+  padding-bottom: 8px;
+}
+
+.assistant-sidebar .assistant-nav {
+  flex: 0 0 auto;
+  gap: 1px;
+}
+
+.assistant-sidebar .assistant-nav .assistant-nav-group .assistant-nav-item {
+  min-height: 33px;
+}
+
+.assistant-sidebar .assistant-nav-label {
+  margin-bottom: 4px;
+}
+
+.assistant-sidebar .assistant-account {
+  min-height: 49px;
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding-top: 7px;
+  padding-bottom: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--color-sidebar);
+}
+
+/* Atualização manual compacta para o app instalado no celular. */
+.assistant-sidebar-refresh {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .assistant-sidebar-refresh {
+    min-height: 32px;
+    flex: 0 0 32px;
+    margin: -7px 0 4px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-sidebar-muted);
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 650;
+    text-align: left;
+  }
+
+  .assistant-sidebar-refresh:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+
+  .assistant-sidebar-refresh:hover,
+  .assistant-sidebar-refresh:focus-visible {
+    background: var(--color-surface-soft);
+    color: var(--color-sidebar-brand);
+  }
+
+  .assistant-sidebar-refresh.is-refreshing > svg {
+    animation: sophia-app-refresh 800ms linear infinite;
+  }
+
+  .assistant-sidebar {
+    height: 100dvh;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .assistant-sidebar .assistant-history {
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 auto;
+  }
+
+  .composer-hint-desktop {
+    display: none;
+  }
+
+  .composer-hint-mobile {
+    display: inline;
+  }
+
+  /* iOS amplia a página ao focar controles com fonte menor que 16 px. */
+  .assistant-layout input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  .assistant-layout select,
+  .assistant-layout textarea,
+  .assistant-layout [contenteditable="true"] {
+    font-size: 16px;
+  }
+}
+
+.composer-hint-mobile {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .assistant-sidebar > .assistant-brand {
+    flex-basis: 40px;
+  }
+
+  .assistant-sidebar > .assistant-sidebar-toggle {
+    flex-shrink: 0;
+  }
+
+  .assistant-sidebar .assistant-account {
+    margin-top: auto;
+  }
+
+  .assistant-layout .assistant-topbar-actions {
+    flex: 0 0 auto;
+  }
+}
+
+@keyframes sophia-app-refresh {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-sidebar-refresh.is-refreshing > svg {
+    animation-duration: 2s;
+  }
+}
