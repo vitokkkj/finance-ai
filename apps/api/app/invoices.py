@@ -166,18 +166,19 @@ def create_card_purchase(
     db: Annotated[Session, Depends(get_db)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    user_id = user.id
     existing, fingerprint = find_idempotent_transaction(
-        db, user.id, "card_purchase", idempotency_key, payload
+        db, user_id, "card_purchase", idempotency_key, payload
     )
     if existing is not None:
         category_name = db.scalar(
             select(Category.name).where(
-                Category.id == existing.category_id, Category.user_id == user.id
+                Category.id == existing.category_id, Category.user_id == user_id
             )
         )
         card = db.scalar(
             select(CreditCard).where(
-                CreditCard.id == payload.credit_card_id, CreditCard.user_id == user.id
+                CreditCard.id == payload.credit_card_id, CreditCard.user_id == user_id
             )
         )
         return transaction_response(
@@ -189,7 +190,7 @@ def create_card_purchase(
         select(CreditCard)
         .where(
             CreditCard.id == payload.credit_card_id,
-            CreditCard.user_id == user.id,
+            CreditCard.user_id == user_id,
             CreditCard.is_active.is_(True),
         )
         .with_for_update()
@@ -197,7 +198,7 @@ def create_card_purchase(
     if card is None:
         raise HTTPException(status_code=404, detail="Cartão não encontrado.")
     category = db.scalar(
-        select(Category).where(Category.id == payload.category_id, Category.user_id == user.id)
+        select(Category).where(Category.id == payload.category_id, Category.user_id == user_id)
     )
     if category is None:
         raise HTTPException(status_code=404, detail="Categoria não encontrada.")
@@ -211,14 +212,14 @@ def create_card_purchase(
         select(CardInvoice)
         .where(
             CardInvoice.credit_card_id == card.id,
-            CardInvoice.user_id == user.id,
+            CardInvoice.user_id == user_id,
             CardInvoice.closing_date == cycle.closing_date,
         )
         .with_for_update()
     )
     if invoice is None:
         invoice = CardInvoice(
-            user_id=user.id,
+            user_id=user_id,
             credit_card_id=card.id,
             period_start=cycle.period_start,
             period_end=cycle.period_end,
@@ -229,7 +230,7 @@ def create_card_purchase(
         db.flush()
 
     purchase = Transaction(
-        user_id=user.id,
+        user_id=user_id,
         type="CARD_PURCHASE",
         source="MANUAL",
         status="CONFIRMED",
@@ -246,7 +247,7 @@ def create_card_purchase(
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(
-            db, user.id, "card_purchase", idempotency_key, fingerprint
+            db, user_id, "card_purchase", idempotency_key, fingerprint
         )
         if existing is None:
             raise
@@ -367,21 +368,22 @@ def pay_invoice(
     db: Annotated[Session, Depends(get_db)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    user_id = user.id
     idempotency_payload: dict[str, object] = {
         "invoice_id": str(invoice_id),
         "payment": payload.model_dump(mode="json"),
     }
     existing, fingerprint = find_idempotent_transaction(
-        db, user.id, "invoice_payment", idempotency_key, idempotency_payload
+        db, user_id, "invoice_payment", idempotency_key, idempotency_payload
     )
     if existing is not None:
-        invoice = _get_invoice(db, user.id, existing.card_invoice_id or invoice_id)
+        invoice = _get_invoice(db, user_id, existing.card_invoice_id or invoice_id)
         card = db.get(CreditCard, invoice.credit_card_id)
         assert card is not None
         return transaction_response(existing, None, card.id, card.name)
-    invoice = _get_invoice(db, user.id, invoice_id, lock=True)
+    invoice = _get_invoice(db, user_id, invoice_id, lock=True)
     existing, fingerprint = find_idempotent_transaction(
-        db, user.id, "invoice_payment", idempotency_key, idempotency_payload
+        db, user_id, "invoice_payment", idempotency_key, idempotency_payload
     )
     if existing is not None:
         card = db.get(CreditCard, invoice.credit_card_id)
@@ -392,7 +394,7 @@ def pay_invoice(
     account = db.scalar(
         select(Account).where(
             Account.id == payload.account_id,
-            Account.user_id == user.id,
+            Account.user_id == user_id,
             Account.is_active.is_(True),
         )
     )
@@ -416,7 +418,7 @@ def pay_invoice(
         raise HTTPException(status_code=409, detail="A fatura já está quitada.")
 
     payment = Transaction(
-        user_id=user.id,
+        user_id=user_id,
         type="CARD_PAYMENT",
         source="MANUAL",
         status="CONFIRMED",
@@ -433,11 +435,11 @@ def pay_invoice(
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(
-            db, user.id, "invoice_payment", idempotency_key, fingerprint
+            db, user_id, "invoice_payment", idempotency_key, fingerprint
         )
         if existing is None:
             raise
-        invoice = _get_invoice(db, user.id, existing.card_invoice_id or invoice_id)
+        invoice = _get_invoice(db, user_id, existing.card_invoice_id or invoice_id)
         card = db.get(CreditCard, invoice.credit_card_id)
         assert card is not None
         return transaction_response(existing, None, card.id, card.name)

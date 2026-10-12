@@ -164,18 +164,19 @@ def create_transaction(
     db: Annotated[Session, Depends(get_db)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    user_id = user.id
     existing, fingerprint = find_idempotent_transaction(
-        db, user.id, "transaction", idempotency_key, payload
+        db, user_id, "transaction", idempotency_key, payload
     )
     if existing is not None:
         category_name = db.scalar(
             select(Category.name).where(
-                Category.id == existing.category_id, Category.user_id == user.id
+                Category.id == existing.category_id, Category.user_id == user_id
             )
         )
         return transaction_response(existing, category_name)
     _validate_references(
-        user.id,
+        user_id,
         payload.account_id,
         payload.category_id,
         payload.type,
@@ -183,7 +184,7 @@ def create_transaction(
         db,
     )
     transaction = Transaction(
-        user_id=user.id,
+        user_id=user_id,
         account_id=payload.account_id,
         category_id=payload.category_id,
         type=payload.type,
@@ -200,20 +201,20 @@ def create_transaction(
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(
-            db, user.id, "transaction", idempotency_key, fingerprint
+            db, user_id, "transaction", idempotency_key, fingerprint
         )
         if existing is None:
             raise
         category_name = db.scalar(
             select(Category.name).where(
-                Category.id == existing.category_id, Category.user_id == user.id
+                Category.id == existing.category_id, Category.user_id == user_id
             )
         )
         return transaction_response(existing, category_name)
     db.refresh(transaction)
     category_name = db.scalar(
         select(Category.name).where(
-            Category.id == transaction.category_id, Category.user_id == user.id
+            Category.id == transaction.category_id, Category.user_id == user_id
         )
     )
     return transaction_response(transaction, category_name)

@@ -42,8 +42,9 @@ def create_transfer(
     db: Annotated[Session, Depends(get_db)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TransactionResponse:
+    user_id = user.id
     existing, fingerprint = find_idempotent_transaction(
-        db, user.id, "transfer", idempotency_key, payload
+        db, user_id, "transfer", idempotency_key, payload
     )
     if existing is not None:
         return transaction_response(existing, None)
@@ -58,7 +59,7 @@ def create_transfer(
         )
     accounts = db.scalars(
         select(Account).where(
-            Account.user_id == user.id,
+            Account.user_id == user_id,
             Account.id.in_([payload.source_account_id, payload.destination_account_id]),
             Account.is_active.is_(True),
         )
@@ -88,7 +89,7 @@ def create_transfer(
         )
 
     transfer = Transaction(
-        user_id=user.id,
+        user_id=user_id,
         type="TRANSFER",
         source="MANUAL",
         status="CONFIRMED",
@@ -105,7 +106,7 @@ def create_transfer(
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(
-            db, user.id, "transfer", idempotency_key, fingerprint
+            db, user_id, "transfer", idempotency_key, fingerprint
         )
         if existing is None:
             raise
