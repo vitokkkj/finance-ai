@@ -4071,6 +4071,14 @@ textarea:focus-visible {
   color: var(--color-danger);
 }
 
+.upcoming-invoice-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 760px) {
   .upcoming-invoice-row {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -4086,7 +4094,7 @@ textarea:focus-visible {
     justify-self: start;
   }
 
-  .upcoming-invoice-row > button {
+  .upcoming-invoice-row > .upcoming-invoice-actions {
     grid-column: 2;
     grid-row: 3;
     justify-self: end;

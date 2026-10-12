@@ -95,8 +95,19 @@ def test_planned_commitments_are_forecast_then_recorded_once_when_paid(client: T
     assert paid.json()["transaction_id"] == repeated.json()["transaction_id"]
     assert client.get("/api/accounts").json()[0]["balance"] == "930.00"
     assert client.get("/api/transactions").json()[0]["amount"] == "70.00"
-    blocked_delete = client.delete(f"/api/transactions/{paid.json()['transaction_id']}")
-    assert blocked_delete.status_code == 409
+    deleted_payment = client.delete(f"/api/transactions/{paid.json()['transaction_id']}")
+    assert deleted_payment.status_code == 204
+    assert client.get("/api/accounts").json()[0]["balance"] == "1000.00"
+    reset_commitment = next(
+        item for item in client.get("/api/commitments").json() if item["id"] == bill.json()["id"]
+    )
+    assert reset_commitment["transaction_id"] is None
+    assert reset_commitment["status"] == "PLANNED"
+    assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "0.00"
+
+    deleted_commitment = client.delete(f"/api/commitments/{bill.json()['id']}")
+    assert deleted_commitment.status_code == 204
+    assert bill.json()["id"] not in {item["id"] for item in client.get("/api/commitments").json()}
 
 
 def test_dashboard_keeps_seven_day_due_alerts_across_month_end(

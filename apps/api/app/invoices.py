@@ -2,12 +2,13 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.finance_deletion import delete_invoice_record
 from app.finance_engine import (
     BillingCycle,
     billing_cycle_for_closing_month,
@@ -48,9 +49,7 @@ def _get_invoice(
     return invoice
 
 
-def validate_invoice_opening_balance(
-    db: Session, invoice: CardInvoice, amount: Decimal
-) -> Decimal:
+def validate_invoice_opening_balance(db: Session, invoice: CardInvoice, amount: Decimal) -> Decimal:
     amounts = invoice_amounts(db, invoice)
     purchase_total = amounts.total - invoice.opening_balance
     if amounts.paid_amount > purchase_total + amount:
@@ -246,6 +245,18 @@ def get_invoice(
 ) -> CardInvoiceResponse:
     invoice = _get_invoice(db, user.id, invoice_id)
     return card_invoice_response(db, invoice)
+
+
+@router.delete("/api/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_invoice(
+    invoice_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    invoice = _get_invoice(db, user.id, invoice_id, lock=True)
+    delete_invoice_record(db, invoice)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

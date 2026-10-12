@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.finance_deletion import delete_transaction_record
 from app.finance_engine import (
     FinancialMovement,
     calculate_account_balance,
@@ -259,34 +260,7 @@ def delete_transaction(
     )
     if transaction is None:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
-    if transaction.type not in ("INCOME", "EXPENSE"):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Este movimento usa uma operação própria e não pode ser excluído por este endpoint."
-            ),
-        )
-    recurrence_occurrence_id = db.scalar(
-        select(RecurrenceOccurrence.id)
-        .where(RecurrenceOccurrence.transaction_id == transaction.id)
-        .limit(1)
-    )
-    if recurrence_occurrence_id is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="O lançamento está vinculado a uma recorrência e não pode ser excluído.",
-        )
-    planned_commitment_id = db.scalar(
-        select(PlannedCommitment.id)
-        .where(PlannedCommitment.transaction_id == transaction.id)
-        .limit(1)
-    )
-    if planned_commitment_id is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="O lançamento está vinculado a um compromisso pago e não pode ser excluído.",
-        )
-    db.delete(transaction)
+    delete_transaction_record(db, transaction)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -467,9 +441,7 @@ def _calculate_dashboard_summary(
     ]
     if forecast_start is not None:
         occurrence_filters.append(RecurrenceOccurrence.due_date >= forecast_start)
-    planned_occurrences = db.scalars(
-        select(RecurrenceOccurrence).where(*occurrence_filters)
-    ).all()
+    planned_occurrences = db.scalars(select(RecurrenceOccurrence).where(*occurrence_filters)).all()
     for occurrence in planned_occurrences:
         add_forecast_item(
             item_id=f"recurrence:{occurrence.id}",
@@ -488,9 +460,7 @@ def _calculate_dashboard_summary(
     ]
     if forecast_start is not None:
         commitment_filters.append(PlannedCommitment.due_date >= forecast_start)
-    commitments = db.scalars(
-        select(PlannedCommitment).where(*commitment_filters)
-    ).all()
+    commitments = db.scalars(select(PlannedCommitment).where(*commitment_filters)).all()
     for commitment in commitments:
         add_forecast_item(
             item_id=f"commitment:{commitment.id}",

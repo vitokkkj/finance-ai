@@ -479,7 +479,8 @@ def test_specialized_movements_cannot_be_changed_through_manual_transaction_endp
         ).status_code
         == 409
     )
-    assert client.delete(f"/api/transactions/{transaction_id}").status_code == 409
+    assert client.delete(f"/api/transactions/{transaction_id}").status_code == 204
+    assert client.get("/api/transactions").json() == []
 
 
 def test_transfer_rejects_same_account_and_card_payment_rejects_overpayment(
@@ -515,6 +516,46 @@ def test_transfer_rejects_same_account_and_card_payment_rejects_overpayment(
 
     assert same_account.status_code == 422
     assert overpayment.status_code == 422
+
+
+def test_deleting_invoice_removes_purchases_and_payments_and_reconciles_account(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    card = create_card(client)
+    category_id = create_expense_category(client)
+    purchase = client.post(
+        "/api/card-purchases",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Compra lançada errada",
+            "amount": "110.00",
+            "occurred_at": TODAY,
+        },
+    )
+    invoice_id = purchase.json()["invoice_id"]
+    payment = client.post(
+        f"/api/invoices/{invoice_id}/payments",
+        json={"account_id": account["id"], "amount": "40.00", "occurred_at": TODAY},
+    )
+    assert purchase.status_code == payment.status_code == 201
+    assert client.get("/api/accounts").json()[0]["balance"] == "960.00"
+    assert client.delete(f"/api/accounts/{account['id']}").status_code == 409
+    assert client.delete(f"/api/cards/{card['id']}").status_code == 409
+    assert client.delete(f"/api/categories/{category_id}").status_code == 409
+
+    deleted = client.delete(f"/api/invoices/{invoice_id}")
+
+    assert deleted.status_code == 204
+    assert client.get(f"/api/invoices/{invoice_id}").status_code == 404
+    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/accounts").json()[0]["balance"] == "1000.00"
+    assert client.get("/api/cards").json()[0]["used_limit"] == "0.00"
+    assert client.delete(f"/api/cards/{card['id']}").status_code == 204
+    assert client.delete(f"/api/accounts/{account['id']}").status_code == 204
+    assert client.delete(f"/api/categories/{category_id}").status_code == 204
 
 
 def test_phase_2b_money_inputs_reject_json_numbers(client: TestClient) -> None:

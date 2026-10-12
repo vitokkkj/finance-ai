@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { CalendarClock, Check, CircleOff, Pencil, Plus, Repeat2, X } from "lucide-react";
+import { CalendarClock, Check, CircleOff, Pencil, Plus, Repeat2, Trash2, X } from "lucide-react";
 
 import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
@@ -298,6 +298,22 @@ export function RecurrenceWorkspace({
     }
   }
 
+  async function deleteCommitment(item: PlannedCommitment) {
+    if (!window.confirm(`Excluir o compromisso “${item.description}” de ${formatCurrency(item.amount)}? Se já estiver pago, o lançamento será removido e o saldo recalculado.`)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await apiRequest<void>(`/api/commitments/${item.id}`, { method: "DELETE" });
+      setNotice({ kind: "success", message: "Compromisso e eventual lançamento vinculado excluídos." });
+      await loadData(false);
+      void onFinanceChanged?.();
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível excluir o compromisso." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openRuleEdit(rule: RecurrenceRule) {
     setEditingRuleId(rule.id);
     setRuleForm({
@@ -356,6 +372,22 @@ export function RecurrenceWorkspace({
       void onFinanceChanged?.();
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível encerrar." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteRule(rule: RecurrenceRule) {
+    if (!window.confirm(`Excluir a recorrência “${rule.description}”? Todas as ocorrências e lançamentos pagos gerados por ela também serão apagados.`)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await apiRequest<void>(`/api/recurrences/${rule.id}`, { method: "DELETE" });
+      setNotice({ kind: "success", message: "Recorrência, ocorrências e lançamentos vinculados excluídos." });
+      await loadData(false);
+      void onFinanceChanged?.();
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível excluir a recorrência." });
     } finally {
       setBusy(false);
     }
@@ -516,7 +548,7 @@ export function RecurrenceWorkspace({
                       <span className={`recurrence-kind-mark ${rule.type === "INCOME" ? "income" : "expense"}`} aria-hidden="true">{rule.type === "INCOME" ? "+" : "−"}</span>
                       <div className="recurrence-rule-main"><strong>{rule.description}</strong><span>{account} · {category} · {frequencyLabel(rule.frequency, rule.interval)}</span><small>Desde {displayDate(rule.starts_on)}{rule.ends_on ? ` · até ${displayDate(rule.ends_on)}` : " · sem data final"}</small></div>
                       <strong className="recurrence-amount">{formatCurrency(rule.amount)}</strong>
-                      <div className="recurrence-actions"><button aria-label={`Editar ${rule.description}`} className="table-action" disabled={busy} onClick={() => openRuleEdit(rule)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action danger-action" disabled={busy} onClick={() => void cancelRule(rule)} type="button"><CircleOff size={15} /><span>Encerrar</span></button></div>
+                      <div className="recurrence-actions"><button aria-label={`Editar ${rule.description}`} className="table-action" disabled={busy} onClick={() => openRuleEdit(rule)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action danger-action" disabled={busy} onClick={() => void cancelRule(rule)} type="button"><CircleOff size={15} /><span>Encerrar</span></button><button aria-label={`Excluir ${rule.description}`} className="table-action danger-action" disabled={busy} onClick={() => void deleteRule(rule)} type="button"><Trash2 aria-hidden="true" size={15} /><span>Excluir</span></button></div>
                     </article>
                   );
                 })}
@@ -531,7 +563,7 @@ export function RecurrenceWorkspace({
               const category = categories.find((row) => row.id === item.category_id)?.name ?? "Categoria arquivada";
               const canAct = ["PLANNED", "OVERDUE"].includes(item.status);
               const isFocused = focusTarget?.source === "COMMITMENT" && focusTarget.id === item.id;
-              return <article aria-label={`${item.description}, ${statusLabel(item.status).toLocaleLowerCase("pt-BR")}, vencimento ${displayDate(item.due_date)}`} className={`recurrence-occurrence-row${isFocused ? " notification-target" : ""}`} id={`notification-target-COMMITMENT-${item.id}`} key={item.id} tabIndex={-1}><time className="recurrence-date" dateTime={item.due_date}>{displayDate(item.due_date)}</time><div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account} · {category} · {item.type === "INCOME" ? "Receita" : "Despesa"}</span></div><strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong><span className={`recurrence-status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span>{canAct && <div className="recurrence-actions"><button aria-label={`Editar ${item.description}`} className="table-action" disabled={busy} onClick={() => openCommitmentEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeCommitment(item, "pay")} type="button"><Check size={15} /><span>{item.type === "INCOME" ? "Marcar como recebido" : "Marcar como pago"}</span></button><button aria-label={`Cancelar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeCommitment(item, "cancel")} type="button">Cancelar</button></div>}</article>;
+              return <article aria-label={`${item.description}, ${statusLabel(item.status).toLocaleLowerCase("pt-BR")}, vencimento ${displayDate(item.due_date)}`} className={`recurrence-occurrence-row${isFocused ? " notification-target" : ""}`} id={`notification-target-COMMITMENT-${item.id}`} key={item.id} tabIndex={-1}><time className="recurrence-date" dateTime={item.due_date}>{displayDate(item.due_date)}</time><div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account} · {category} · {item.type === "INCOME" ? "Receita" : "Despesa"}</span></div><strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong><span className={`recurrence-status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="recurrence-actions">{canAct && <><button aria-label={`Editar ${item.description}`} className="table-action" disabled={busy} onClick={() => openCommitmentEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeCommitment(item, "pay")} type="button"><Check size={15} /><span>{item.type === "INCOME" ? "Marcar como recebido" : "Marcar como pago"}</span></button><button aria-label={`Cancelar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeCommitment(item, "cancel")} type="button">Cancelar</button></>}<button aria-label={`Excluir ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void deleteCommitment(item)} type="button"><Trash2 aria-hidden="true" size={15} /><span>Excluir</span></button></div></article>;
             })}</div>}
           </section>
 

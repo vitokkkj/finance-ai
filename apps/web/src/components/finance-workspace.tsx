@@ -411,6 +411,19 @@ export function FinanceWorkspace({
     }
   }
 
+  async function deleteAccount(account: Account) {
+    if (!window.confirm(`Excluir a conta “${account.name}”? A exclusão é permanente e só funciona quando não há lançamentos, previsões, recorrências ou cartões vinculados.`)) return;
+    setBusy(true);
+    try {
+      await apiRequest<void>(`/api/accounts/${account.id}`, { method: "DELETE" });
+      refreshAfterMutation("Conta excluída.");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Falha ao excluir a conta." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -461,6 +474,19 @@ export function FinanceWorkspace({
       refreshAfterMutation("Categoria arquivada. Os lançamentos existentes foram preservados.");
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Falha ao arquivar." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteCategory(category: Category) {
+    if (!window.confirm(`Excluir a categoria “${category.name}”? A exclusão é permanente e só funciona quando não há lançamentos, previsões ou recorrências vinculados.`)) return;
+    setBusy(true);
+    try {
+      await apiRequest<void>(`/api/categories/${category.id}`, { method: "DELETE" });
+      refreshAfterMutation("Categoria excluída.");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Falha ao excluir a categoria." });
     } finally {
       setBusy(false);
     }
@@ -530,7 +556,7 @@ export function FinanceWorkspace({
   }
 
   async function deleteTransaction(transaction: Transaction) {
-    if (!window.confirm(`Excluir o lançamento “${transaction.description}”?`)) return;
+    if (!window.confirm(`Excluir “${transaction.description}” (${formatCurrency(transaction.amount)})? Esta ação recalcula os saldos e os valores de faturas e previsões vinculadas.`)) return;
     setBusy(true);
     try {
       await apiRequest<void>(`/api/transactions/${transaction.id}`, { method: "DELETE" });
@@ -819,7 +845,7 @@ export function FinanceWorkspace({
                   )}
                   {accounts.length === 0 ? <EmptyState actionLabel="Adicionar primeira conta" message="Cadastre uma conta para começar a acompanhar seu saldo." onAction={() => { setAccountForm(emptyAccount()); setAccountEditingId(null); setAccountFormOpen(true); }} /> : (
                     <div className="table-wrap"><table className="data-table"><thead><tr><th>Conta</th><th>Tipo</th><th>Saldo atual</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-                      {accounts.map((account) => <tr key={account.id}><td><strong className="cell-primary">{account.name}</strong><small className="cell-secondary">{account.opening_balance_date ? `Saldo inicial em ${displayDate(account.opening_balance_date)}` : "Saldo inicial não informado"}</small></td><td>{accountTypeLabel(account.type)}</td><td className="table-money">{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</td><td><span className={account.is_active ? "state-pill active" : "state-pill archived"}>{account.is_active ? "Ativa" : "Arquivada"}</span></td><td className="row-actions">{account.is_active && <><button className="table-action" onClick={() => editAccount(account)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveAccount(account)} type="button">Arquivar</button></>}</td></tr>)}
+                      {accounts.map((account) => <tr key={account.id}><td><strong className="cell-primary">{account.name}</strong><small className="cell-secondary">{account.opening_balance_date ? `Saldo inicial em ${displayDate(account.opening_balance_date)}` : "Saldo inicial não informado"}</small></td><td>{accountTypeLabel(account.type)}</td><td className="table-money">{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</td><td><span className={account.is_active ? "state-pill active" : "state-pill archived"}>{account.is_active ? "Ativa" : "Arquivada"}</span></td><td className="row-actions">{account.is_active && <><button className="table-action" onClick={() => editAccount(account)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveAccount(account)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteAccount(account)} type="button">Excluir</button></td></tr>)}
                     </tbody></table></div>
                   )}
                 </section>
@@ -847,7 +873,7 @@ export function FinanceWorkspace({
                         <section aria-label={`Categorias de ${group.label.toLowerCase()}`} className={`category-group category-group-${group.type.toLowerCase()}`} key={group.type}>
                           <div className="category-group-heading"><h3>{group.label}</h3><span>{group.items.length} {group.items.length === 1 ? "categoria" : "categorias"}</span></div>
                           <div className="table-wrap"><table className="data-table"><thead><tr><th>Categoria</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-                            {group.items.map((category) => <tr key={category.id}><td><strong className="cell-primary">{category.name}</strong></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={() => editCategory(category)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCategory(category)} type="button">Arquivar</button></>}</td></tr>)}
+                            {group.items.map((category) => <tr key={category.id}><td><strong className="cell-primary">{category.name}</strong></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={() => editCategory(category)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCategory(category)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCategory(category)} type="button">Excluir</button></td></tr>)}
                           </tbody></table></div>
                         </section>
                       ))}
@@ -903,7 +929,7 @@ export function FinanceWorkspace({
                     <div className="table-wrap"><table className="data-table transaction-table"><thead><tr><th>Lançamento</th><th>Categoria / origem / destino</th><th>Data</th><th>Tipo</th><th>Valor</th><th aria-label="Ações" /></tr></thead><tbody>
                       {transactions.map((transaction) => {
                         const tone = transaction.type === "INCOME" ? "income" : transaction.type === "EXPENSE" || transaction.type === "CARD_PURCHASE" ? "expense" : "neutral";
-                        return <tr key={transaction.id}><td><strong className="cell-primary">{transaction.description}</strong>{transaction.notes && <small className="cell-secondary">{transaction.notes}</small>}</td><td>{transactionContext(transaction, accounts)}</td><td>{displayDate(transaction.occurred_at)}</td><td><span className={`type-text ${tone}`}>{financialTransactionLabel(transaction.type)}</span></td><td className="table-money">{financialAmountSign(transaction.type)}{formatCurrency(transaction.amount)}</td><td className="row-actions">{isEditableTransaction(transaction) && <><button className="table-action" onClick={() => editTransaction(transaction)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteTransaction(transaction)} type="button">Excluir</button></>}</td></tr>;
+                        return <tr key={transaction.id}><td><strong className="cell-primary">{transaction.description}</strong>{transaction.notes && <small className="cell-secondary">{transaction.notes}</small>}</td><td>{transactionContext(transaction, accounts)}</td><td>{displayDate(transaction.occurred_at)}</td><td><span className={`type-text ${tone}`}>{financialTransactionLabel(transaction.type)}</span></td><td className="table-money">{financialAmountSign(transaction.type)}{formatCurrency(transaction.amount)}</td><td className="row-actions">{isEditableTransaction(transaction) && <button className="table-action" onClick={() => editTransaction(transaction)} type="button">Editar</button>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteTransaction(transaction)} type="button">Excluir</button></td></tr>;
                       })}
                     </tbody></table></div>
                   )}

@@ -314,6 +314,37 @@ export function CreditCardWorkspace({
     }
   }
 
+  async function deleteCard(card: CreditCard) {
+    if (!window.confirm(`Excluir o cartão “${card.name}”? Primeiro é necessário excluir as faturas dele. Esta ação é permanente.`)) return;
+    setBusy(true);
+    try {
+      await apiRequest<void>(`/api/cards/${card.id}`, { method: "DELETE" });
+      if (selectedCardId === card.id) setSelectedCardId("");
+      await refresh("Cartão excluído.");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível excluir o cartão." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteInvoice(invoice: CardInvoice | UpcomingCardInvoice) {
+    const detailedImpact = "purchases" in invoice
+      ? `\n\nSerão removidas ${invoice.purchases.length} compras e ${invoice.payments.length} pagamentos. Pagamentos excluídos serão estornados do saldo das contas.`
+      : "\n\nAs compras e os pagamentos vinculados serão apagados, e os saldos serão recalculados.";
+    if (!window.confirm(`Excluir a fatura ${invoice.credit_card_name}, vencimento ${displayDate(invoice.due_date)}, total ${formatCurrency(invoice.total)}? Esta ação é permanente.${detailedImpact}`)) return;
+    setBusy(true);
+    try {
+      await apiRequest<void>(`/api/invoices/${invoice.id}`, { method: "DELETE" });
+      setSelectedInvoiceId((current) => current === invoice.id ? "" : current);
+      await refresh("Fatura e lançamentos vinculados excluídos.");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível excluir a fatura." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createPurchase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -408,7 +439,7 @@ export function CreditCardWorkspace({
         )}
         {cards.length === 0 ? <EmptyState actionLabel="Cadastrar primeiro cartão" message="Cadastre um cartão para acompanhar compras e faturas." onAction={() => { setCardEditingId(null); setCardForm(emptyCard()); setCardFormOpen(true); }} /> : (
           <div className="table-wrap"><table className="data-table"><thead><tr><th>Cartão</th><th>Limite</th><th>Utilizado</th><th>Disponível</th><th>Próximo vencimento</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-            {cards.map((card) => <tr key={card.id}><td><strong className="cell-primary">{card.name}</strong><small className="cell-secondary">{card.institution ?? "Cartão de crédito"} · fecha {card.closing_day} · vence {card.due_day}</small></td><td className="table-money">{formatCurrency(card.credit_limit)}</td><td className="table-money">{formatCurrency(card.used_limit)}</td><td className="table-money">{formatCurrency(card.available_limit)}</td><td>{card.next_due_date ? displayDate(card.next_due_date) : "—"}</td><td><span className={card.is_active ? "state-pill active" : "state-pill archived"}>{card.is_active ? "Ativo" : "Arquivado"}</span></td><td className="row-actions">{card.is_active && <><button className="table-action" onClick={() => editCard(card)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCard(card)} type="button">Arquivar</button></>}</td></tr>)}
+            {cards.map((card) => <tr key={card.id}><td><strong className="cell-primary">{card.name}</strong><small className="cell-secondary">{card.institution ?? "Cartão de crédito"} · fecha {card.closing_day} · vence {card.due_day}</small></td><td className="table-money">{formatCurrency(card.credit_limit)}</td><td className="table-money">{formatCurrency(card.used_limit)}</td><td className="table-money">{formatCurrency(card.available_limit)}</td><td>{card.next_due_date ? displayDate(card.next_due_date) : "—"}</td><td><span className={card.is_active ? "state-pill active" : "state-pill archived"}>{card.is_active ? "Ativo" : "Arquivado"}</span></td><td className="row-actions">{card.is_active && <><button className="table-action" onClick={() => editCard(card)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCard(card)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCard(card)} type="button">Excluir</button></td></tr>)}
           </tbody></table></div>
         )}
       </section>
@@ -446,7 +477,7 @@ export function CreditCardWorkspace({
                 <div className="upcoming-invoice-card"><strong>{invoice.credit_card_name}</strong><span>Ciclo {displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</span></div>
                 <div className="upcoming-invoice-amount"><span>Em aberto</span><strong>{formatCurrency(invoice.outstanding)}</strong></div>
                 <span className={`state-pill ${invoice.status === "OVERDUE" ? "overdue" : "active"}`}>{statusLabel(invoice.status)}</span>
-                <button className="table-action" onClick={() => openUpcomingInvoice(invoice)} type="button">Detalhes / pagar</button>
+                <div className="upcoming-invoice-actions"><button className="table-action" onClick={() => openUpcomingInvoice(invoice)} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir fatura</button></div>
               </article>)}
             </div>
           )}
@@ -474,7 +505,7 @@ export function CreditCardWorkspace({
           }
         }} /> : (
           <div className="table-wrap"><table className="data-table"><thead><tr><th>Ciclo</th><th>Fechamento</th><th>Vencimento</th><th>Total</th><th>Pago</th><th>Em aberto</th><th>Status</th><th /></tr></thead><tbody>
-            {invoices.map((invoice) => <tr className={focusTarget?.source === "CARD_INVOICE" && focusTarget.id === invoice.id ? "notification-target" : undefined} key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions"><button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button></td></tr>)}
+            {invoices.map((invoice) => <tr className={focusTarget?.source === "CARD_INVOICE" && focusTarget.id === invoice.id ? "notification-target" : undefined} key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions"><button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir</button></td></tr>)}
           </tbody></table></div>
         )}
         {selectedInvoice && (
@@ -487,6 +518,7 @@ export function CreditCardWorkspace({
               </div>
               <div className="invoice-details-actions">
                 <span className={`state-pill ${selectedInvoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(selectedInvoice.status)}</span>
+                <button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(selectedInvoice)} type="button">Excluir fatura</button>
                 <button className="text-button" onClick={() => setSelectedInvoiceId("")} type="button">Fechar</button>
               </div>
             </div>

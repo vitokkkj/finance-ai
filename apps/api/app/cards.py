@@ -2,7 +2,7 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -141,6 +141,34 @@ def archive_card(
     db.commit()
     db.refresh(card)
     return credit_card_response(db, card)
+
+
+@router.delete("/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_card(
+    card_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    card = db.scalar(
+        select(CreditCard)
+        .where(CreditCard.id == card_id, CreditCard.user_id == user.id)
+        .with_for_update()
+    )
+    if card is None:
+        raise HTTPException(status_code=404, detail="Cartão não encontrado.")
+    has_invoices = db.scalar(
+        select(CardInvoice.id)
+        .where(CardInvoice.credit_card_id == card.id, CardInvoice.user_id == user.id)
+        .limit(1)
+    )
+    if has_invoices is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Exclua primeiro as faturas e os lançamentos vinculados a este cartão.",
+        )
+    db.delete(card)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{card_id}/invoices", response_model=list[CardInvoiceResponse])

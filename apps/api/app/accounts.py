@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -15,7 +15,15 @@ from app.finance_engine import (
     financial_day_after,
 )
 from app.finance_views import movements_for_account
-from app.models import Account, Transaction, User
+from app.models import (
+    Account,
+    CreditCard,
+    PlannedCommitment,
+    RecurrenceOccurrence,
+    RecurrenceRule,
+    Transaction,
+    User,
+)
 from app.schemas import AccountCreate, AccountResponse, AccountUpdate
 
 router = APIRouter(prefix="/api/accounts", tags=["contas"])
@@ -244,3 +252,64 @@ def archive_account(
     db.commit()
     db.refresh(account)
     return _account_response(account, movements)
+
+
+@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_account(
+    account_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    account = db.scalar(
+        select(Account)
+        .where(Account.id == account_id, Account.user_id == user.id)
+        .with_for_update()
+    )
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta não encontrada.")
+
+    movement_id = db.scalar(
+        select(Transaction.id)
+        .where(
+            Transaction.user_id == user.id,
+            or_(
+                Transaction.account_id == account.id,
+                Transaction.source_account_id == account.id,
+                Transaction.destination_account_id == account.id,
+            ),
+        )
+        .limit(1)
+    )
+    has_recurrences = db.scalar(
+        select(RecurrenceRule.id)
+        .where(RecurrenceRule.user_id == user.id, RecurrenceRule.account_id == account.id)
+        .limit(1)
+    )
+    has_occurrences = db.scalar(
+        select(RecurrenceOccurrence.id)
+        .where(
+            RecurrenceOccurrence.user_id == user.id, RecurrenceOccurrence.account_id == account.id
+        )
+        .limit(1)
+    )
+    has_commitments = db.scalar(
+        select(PlannedCommitment.id)
+        .where(PlannedCommitment.user_id == user.id, PlannedCommitment.account_id == account.id)
+        .limit(1)
+    )
+    card_id = db.scalar(
+        select(CreditCard.id)
+        .where(CreditCard.user_id == user.id, CreditCard.payment_account_id == account.id)
+        .limit(1)
+    )
+    if any((movement_id, has_recurrences, has_occurrences, has_commitments, card_id)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A conta ainda está vinculada a lançamentos, pagamentos previstos, recorrências "
+                "ou cartões. Remova esses vínculos antes de excluir a conta."
+            ),
+        )
+    db.delete(account)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

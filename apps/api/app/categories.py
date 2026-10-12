@@ -2,13 +2,20 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Category, Transaction, User
+from app.models import (
+    Category,
+    PlannedCommitment,
+    RecurrenceOccurrence,
+    RecurrenceRule,
+    Transaction,
+    User,
+)
 from app.schemas import CategoryCreate, CategoryResponse, CategoryUpdate
 
 router = APIRouter(prefix="/api/categories", tags=["categorias"])
@@ -107,3 +114,49 @@ def archive_category(
         db.commit()
         db.refresh(category)
     return _category_response(category)
+
+
+@router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_category(
+    category_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    category = db.scalar(
+        select(Category)
+        .where(Category.id == category_id, Category.user_id == user.id)
+        .with_for_update()
+    )
+    if category is None:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+    references = (
+        select(Transaction.id)
+        .where(Transaction.user_id == user.id, Transaction.category_id == category.id)
+        .limit(1),
+        select(RecurrenceRule.id)
+        .where(RecurrenceRule.user_id == user.id, RecurrenceRule.category_id == category.id)
+        .limit(1),
+        select(RecurrenceOccurrence.id)
+        .where(
+            RecurrenceOccurrence.user_id == user.id,
+            RecurrenceOccurrence.category_id == category.id,
+        )
+        .limit(1),
+        select(PlannedCommitment.id)
+        .where(
+            PlannedCommitment.user_id == user.id,
+            PlannedCommitment.category_id == category.id,
+        )
+        .limit(1),
+    )
+    if any(db.scalar(statement) is not None for statement in references):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A categoria ainda está vinculada a lançamentos, pagamentos previstos ou "
+                "recorrências. Remova esses vínculos antes de excluí-la."
+            ),
+        )
+    db.delete(category)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

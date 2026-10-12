@@ -2,12 +2,13 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.finance_deletion import delete_transaction_record
 from app.finance_engine import current_financial_date, financial_day_start
 from app.models import Account, Category, PlannedCommitment, Transaction, User
 from app.schemas import PlannedCommitmentCreate, PlannedCommitmentResponse, PlannedCommitmentUpdate
@@ -217,3 +218,26 @@ def cancel_commitment(
         db.commit()
         db.refresh(commitment)
     return _response(commitment)
+
+
+@router.delete("/{commitment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_commitment(
+    commitment_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    commitment = _owned(commitment_id, user.id, db, for_update=True)
+    if commitment.transaction_id is not None:
+        transaction = db.scalar(
+            select(Transaction)
+            .where(
+                Transaction.id == commitment.transaction_id,
+                Transaction.user_id == user.id,
+            )
+            .with_for_update()
+        )
+        if transaction is not None:
+            delete_transaction_record(db, transaction, commitment_status="CANCELLED")
+    db.delete(commitment)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

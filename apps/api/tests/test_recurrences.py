@@ -227,9 +227,40 @@ def test_paying_an_occurrence_creates_one_confirmed_transaction(
     assert len(transactions) == 1
     assert transactions[0]["amount"] == "120.00"
     assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "120.00"
-    cannot_delete_source = client.delete(f"/api/transactions/{transactions[0]['id']}")
-    assert cannot_delete_source.status_code == 409
-    assert client.get("/api/transactions").json()[0]["id"] == transactions[0]["id"]
+    deleted = client.delete(f"/api/transactions/{transactions[0]['id']}")
+    assert deleted.status_code == 204
+    assert client.get("/api/transactions").json() == []
+    occurrence_after_delete = client.get(
+        "/api/recurrences/occurrences",
+        params={"start_date": today.isoformat(), "end_date": today.isoformat()},
+    ).json()[0]
+    assert occurrence_after_delete["transaction_id"] is None
+    assert occurrence_after_delete["status"] == "PENDING"
+    assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "0.00"
+
+
+def test_deleting_recurrence_removes_generated_transactions_and_occurrences(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    today = current_financial_date()
+    account_id, category_id = setup_references(client, today)
+    rule = create_recurrence(
+        client, account_id=account_id, category_id=category_id, starts_on=today
+    )
+    occurrence = client.get(
+        "/api/recurrences/occurrences",
+        params={"start_date": today.isoformat(), "end_date": today.isoformat()},
+    ).json()[0]
+    paid = client.post(f"/api/recurrences/{rule['id']}/occurrences/{occurrence['id']}/pay")
+    assert paid.status_code == 200
+
+    deleted = client.delete(f"/api/recurrences/{rule['id']}")
+
+    assert deleted.status_code == 204
+    assert client.get("/api/recurrences").json() == []
+    assert client.get("/api/recurrences/occurrences").json() == []
+    assert client.get("/api/transactions").json() == []
 
 
 def test_occurrence_scope_updates_only_the_requested_series_range(client: TestClient) -> None:
