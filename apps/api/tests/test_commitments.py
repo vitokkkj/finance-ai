@@ -88,14 +88,14 @@ def test_planned_commitments_are_forecast_then_recorded_once_when_paid(client: T
         ]
         == "1080.00"
     )
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
     paid = client.post(f"/api/commitments/{bill.json()['id']}/pay")
     repeated = client.post(f"/api/commitments/{bill.json()['id']}/pay")
     assert paid.status_code == repeated.status_code == 200
     assert paid.json()["transaction_id"] == repeated.json()["transaction_id"]
     assert client.get("/api/accounts").json()[0]["balance"] == "930.00"
-    assert client.get("/api/transactions").json()[0]["amount"] == "70.00"
+    assert client.get("/api/transactions").json()["items"][0]["amount"] == "70.00"
     deleted_payment = client.delete(f"/api/transactions/{paid.json()['transaction_id']}")
     assert deleted_payment.status_code == 204
     assert client.get("/api/accounts").json()[0]["balance"] == "1000.00"

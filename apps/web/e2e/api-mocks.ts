@@ -10,6 +10,7 @@ const CARD_IDS = {
 
 export type E2EApiState = {
   dashboardQueries: string[];
+  transactionQueries: string[];
   chatPrompts: string[];
   importPreviewRequests: number;
   importConfirmRequests: {
@@ -211,22 +212,31 @@ function json(route: Route, body: unknown) {
 
 export async function mockFinanceApi(
   page: Page,
-  options: { largeLists?: boolean; categoryBreakdown?: boolean; owner?: boolean } = {},
+  options: { largeLists?: boolean; categoryBreakdown?: boolean; owner?: boolean; managedUserEnrolled?: boolean; failTransactionsRequests?: number } = {},
 ): Promise<E2EApiState> {
   const state: E2EApiState = {
     dashboardQueries: [],
+    transactionQueries: [],
     chatPrompts: [],
     importPreviewRequests: 0,
     importConfirmRequests: [],
   };
   let conversationCreated = false;
+  let transactionFailuresRemaining = options.failTransactionsRequests ?? 0;
   let managedUsers = options.owner
     ? [{
         id: "synthetic-owner",
         email: "gamercreeper74@gmail.com",
         display_name: "Proprietário de teste",
         created_at: "2026-10-12T12:00:00-03:00",
-      }]
+        mfa_enrolled: true,
+      }, ...(options.managedUserEnrolled ? [{
+        id: "synthetic-mfa-user",
+        email: "mfa@example.com",
+        display_name: "Conta com MFA",
+        created_at: "2026-10-11T12:00:00-03:00",
+        mfa_enrolled: true,
+      }] : [])]
     : [];
   const mockConversations = options.largeLists
     ? Array.from({ length: 21 }, (_, index) => ({
@@ -394,6 +404,7 @@ export async function mockFinanceApi(
           email: payload.email.toLowerCase(),
           display_name: payload.display_name,
           created_at: "2026-10-12T12:00:00-03:00",
+          mfa_enrolled: false,
         };
         managedUsers = [created, ...managedUsers];
         await route.fulfill({
@@ -403,6 +414,18 @@ export async function mockFinanceApi(
         });
         return;
       }
+    }
+    if (
+      url.pathname.endsWith("/mfa/reset") &&
+      route.request().method() === "POST" &&
+      options.owner
+    ) {
+      const managedUserId = url.pathname.split("/").at(-3);
+      managedUsers = managedUsers.map((managedUser) => managedUser.id === managedUserId
+        ? { ...managedUser, mfa_enrolled: false }
+        : managedUser);
+      await route.fulfill({ status: 204, body: "" });
+      return;
     }
     if (
       url.pathname.startsWith("/api/admin/users/") &&
@@ -533,8 +556,26 @@ export async function mockFinanceApi(
       return;
     }
     if (url.pathname === "/api/transactions") {
+      state.transactionQueries.push(url.search);
+      if (transactionFailuresRemaining > 0) {
+        transactionFailuresRemaining -= 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "A consulta de lançamentos falhou." }),
+        });
+        return;
+      }
       const categoryId = url.searchParams.get("category_id");
-      await json(route, categoryId ? mockTransactions.filter((transaction) => transaction.category_id === categoryId) : mockTransactions);
+      const filtered = categoryId
+        ? mockTransactions.filter((transaction) => transaction.category_id === categoryId)
+        : mockTransactions;
+      const limit = Number(url.searchParams.get("limit") ?? "15");
+      const cursorOffset = Number(url.searchParams.get("cursor") ?? "0");
+      const items = filtered.slice(cursorOffset, cursorOffset + limit);
+      const nextOffset = cursorOffset + items.length;
+      const nextCursor = nextOffset < filtered.length ? String(nextOffset) : null;
+      await json(route, { items, next_cursor: nextCursor, has_more: nextCursor !== null });
       return;
     }
     if (

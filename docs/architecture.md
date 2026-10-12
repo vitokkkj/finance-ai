@@ -44,6 +44,12 @@ As entidades implementadas são apenas `accounts`, `categories` e `transactions`
 
 O dashboard solicita saldos e resumos calculados pela API. O frontend recebe valores como strings decimais e apenas os formata em BRL; não soma, subtrai ou deriva totais financeiros.
 
+### Contrato de consulta de lançamentos
+
+`GET /api/transactions` sempre responde com `{ "items": [...], "next_cursor": string | null, "has_more": boolean }`. A primeira página usa até 15 itens por padrão; `limit` aceita de 1 a 100. A ordenação decrescente é estável por `occurred_at`, `created_at` e `id`, e `cursor` é opaco para o cliente. Quando `has_more` é verdadeiro, envie `next_cursor` na próxima consulta. Para voltar, o cliente conserva os cursores usados nas páginas anteriores; a API não calcula contagem total.
+
+Os filtros `start_date`, `end_date`, `account_id`, `category_id`, `type` e `q` continuam disponíveis em todas as páginas. O cliente deve manter os mesmos filtros enquanto percorre cursores e limpar o cursor quando algum filtro mudar. Toda página continua limitada ao proprietário da sessão autenticada.
+
 ## Transferências e cartões — Fase 2B
 
 `transactions` continua sendo o registro financeiro único. `TRANSFER` contém origem e destino na mesma linha. `CARD_PURCHASE` contém categoria e fatura; `CARD_PAYMENT` contém a conta pagadora e a mesma fatura. A migration `0005_transfers_cards` cria `credit_cards` e `card_invoices` e amplia o schema de movimentos de forma incremental.

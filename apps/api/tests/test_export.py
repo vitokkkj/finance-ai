@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -160,6 +161,7 @@ def test_export_requires_an_authenticated_session(client: TestClient) -> None:
 def test_export_is_versioned_private_and_serializes_financial_values(
     client: TestClient,
     test_session_factory: sessionmaker[Session],
+    authenticate_as_user: Callable[[str], None],
 ) -> None:
     _setup_user(client)
     today = current_financial_date()
@@ -347,12 +349,7 @@ def test_export_is_versioned_private_and_serializes_financial_values(
     assert data["recurrence_occurrences"]
     assert all("user_id" not in row for rows in data.values() for row in rows)
 
-    client.post("/api/auth/logout")
-    other_login = client.post(
-        "/api/auth/login",
-        json={"email": "export-other@example.com", "password": "outra-senha-local-segura"},
-    )
-    assert other_login.status_code == 200
+    authenticate_as_user("export-other@example.com")
     other_data = client.get("/api/export").json()["data"]
     for collection, expected_ids in other_user_ids.items():
         assert {row["id"] for row in other_data[collection]} == set(expected_ids)

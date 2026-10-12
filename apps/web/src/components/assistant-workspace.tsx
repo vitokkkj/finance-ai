@@ -80,6 +80,21 @@ function readWorkspaceRefreshSnapshot(): WorkspaceRefreshSnapshot | null {
   }
 }
 
+function workspaceRouteFromLocation(): { view: WorkspaceView; section: FinanceSection } | null {
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view");
+  const section = params.get("section");
+  const views: WorkspaceView[] = ["chat", "finance", "settings", "account"];
+  const sections: FinanceSection[] = ["overview", "transactions", "accounts", "categories", "cards", "recurrences"];
+  if (!view && !section) return { view: "chat", section: "overview" };
+  if (view && !views.includes(view as WorkspaceView)) return null;
+  if (section && !sections.includes(section as FinanceSection)) return null;
+  return {
+    view: section ? "finance" : (view as WorkspaceView | null) ?? "chat",
+    section: (section as FinanceSection | null) ?? "overview",
+  };
+}
+
 type Conversation = {
   id: string;
   title: string;
@@ -160,7 +175,7 @@ type Usage = {
 };
 
 type Memory = { id: string; content: string; created_at: string };
-type ManagedUser = { id: string; email: string; display_name: string; created_at: string };
+type ManagedUser = { id: string; email: string; display_name: string; created_at: string; mfa_enrolled: boolean };
 type AssistantPreferences = {
   responseStyle: "concise" | "balanced" | "detailed";
   defaultAccount: string;
@@ -521,6 +536,28 @@ export function AssistantWorkspace({
 }) {
   const [view, setView] = useState<WorkspaceView>("chat");
   const [financeSection, setFinanceSection] = useState<FinanceSection>("overview");
+  const financeSectionRef = useRef<FinanceSection>(financeSection);
+  const navigateTo = useCallback((
+    nextView: WorkspaceView,
+    nextSection?: FinanceSection,
+    replace = false,
+  ) => {
+    const targetSection = nextSection ?? financeSectionRef.current;
+    setView(nextView);
+    setFinanceSection(targetSection);
+    financeSectionRef.current = targetSection;
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", nextView);
+    if (nextView === "finance") url.searchParams.set("section", targetSection);
+    else url.searchParams.delete("section");
+    if (replace) window.history.replaceState(null, "", url);
+    else {
+      const currentRoute = workspaceRouteFromLocation();
+      const sameRoute = currentRoute?.view === nextView &&
+        (nextView !== "finance" || currentRoute.section === targetSection);
+      if (!sameRoute) window.history.pushState(null, "", url);
+    }
+  }, []);
   const [financeFocusTarget, setFinanceFocusTarget] = useState<FinanceFocusTarget | null>(null);
   const financeFocusRequestId = useRef(0);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -680,6 +717,22 @@ export function AssistantWorkspace({
   }, []);
 
   useEffect(() => {
+    const applyLocation = () => {
+      const route = workspaceRouteFromLocation();
+      if (!route) return;
+      setView(route.view);
+      setFinanceSection(route.section);
+      financeSectionRef.current = route.section;
+      setFinanceFocusTarget(null);
+      setMobileMenuOpen(false);
+      if (route.view === "settings") void loadSettings();
+    };
+    applyLocation();
+    window.addEventListener("popstate", applyLocation);
+    return () => window.removeEventListener("popstate", applyLocation);
+  }, [loadSettings]);
+
+  useEffect(() => {
     setGreeting(currentGreeting());
     let mounted = true;
     async function loadInitialData() {
@@ -698,8 +751,7 @@ export function AssistantWorkspace({
         setConversations(rows);
         setFirstUseRequired(existingAccounts.length === 0);
         if (refreshSnapshot) {
-          setView(refreshSnapshot.view);
-          setFinanceSection(refreshSnapshot.financeSection);
+          navigateTo(refreshSnapshot.view, refreshSnapshot.financeSection, true);
           if (refreshSnapshot.view === "chat" && refreshSnapshot.conversationId && rows.some((row) => row.id === refreshSnapshot.conversationId)) {
             try {
               await loadConversation(refreshSnapshot.conversationId);
@@ -725,7 +777,7 @@ export function AssistantWorkspace({
     return () => {
       mounted = false;
     };
-  }, [loadConversation, loadDashboard, loadSettings]);
+  }, [loadConversation, loadDashboard, loadSettings, navigateTo]);
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -747,8 +799,7 @@ export function AssistantWorkspace({
   function openCardsFromFirstUse() {
     setFirstUseRequired(false);
     setFinanceFocusTarget(null);
-    setFinanceSection("cards");
-    setView("finance");
+    navigateTo("finance", "cards");
     void loadDashboard();
   }
 
@@ -766,7 +817,7 @@ export function AssistantWorkspace({
   async function selectConversation(id: string) {
     setError("");
     setFinanceFocusTarget(null);
-    setView("chat");
+    navigateTo("chat");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
     setMessages([]);
@@ -782,7 +833,7 @@ export function AssistantWorkspace({
   function startConversation() {
     setError("");
     setFinanceFocusTarget(null);
-    setView("chat");
+    navigateTo("chat");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
     setConversationMenuId(null);
@@ -1077,7 +1128,7 @@ export function AssistantWorkspace({
 
   function openSettings() {
     setFinanceFocusTarget(null);
-    setView("settings");
+    navigateTo("settings");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
     void loadSettings();
@@ -1161,15 +1212,13 @@ export function AssistantWorkspace({
     if (item.view === "settings") {
       void openSettings();
     } else {
-      setView(item.view);
-      if (item.section) setFinanceSection(item.section);
+      navigateTo(item.view, item.section ?? financeSection);
       setMobileMenuOpen(false);
     }
   }
 
   function openForecast(item?: Dashboard["forecast_items"][number]) {
     setError("");
-    setView("finance");
     if (item) {
       const separator = item.id.indexOf(":");
       financeFocusRequestId.current += 1;
@@ -1179,10 +1228,10 @@ export function AssistantWorkspace({
         credit_card_id: item.credit_card_id,
         request_id: financeFocusRequestId.current,
       });
-      setFinanceSection(item.source === "CARD_INVOICE" ? "cards" : "recurrences");
+      navigateTo("finance", item.source === "CARD_INVOICE" ? "cards" : "recurrences");
     } else {
       setFinanceFocusTarget(null);
-      setFinanceSection("overview");
+      navigateTo("finance", "overview");
     }
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
@@ -1191,7 +1240,7 @@ export function AssistantWorkspace({
 
   function openAccount() {
     setFinanceFocusTarget(null);
-    setView("account");
+    navigateTo("account");
     setMobileMenuOpen(false);
     setContextPanelOpen(false);
     setConversationMenuId(null);
@@ -1342,6 +1391,7 @@ export function AssistantWorkspace({
 
   return (
     <div className={sidebarCollapsed ? "assistant-layout sidebar-collapsed" : "assistant-layout"} data-theme={theme} onTouchEnd={handleSidebarTouchEnd} onTouchStart={handleSidebarTouchStart}>
+      <a className="skip-link" href="#assistant-main-content">Pular para o conteúdo principal</a>
       {mobileMenuOpen && <button aria-label="Fechar menu" className="assistant-backdrop" onClick={() => setMobileMenuOpen(false)} tabIndex={-1} type="button" />}
       {contextPanelOpen && contextPanelAvailable && <button aria-label="Fechar contexto" className="assistant-context-backdrop" onClick={() => setContextPanelOpen(false)} type="button" />}
       <aside
@@ -1421,6 +1471,7 @@ export function AssistantWorkspace({
               const key = item.view === "finance" ? `finance-${item.section}` : item.view;
               return (
                 <button
+                  aria-current={currentNav === key ? "page" : undefined}
                   aria-label={item.label}
                   className={currentNav === key ? "assistant-nav-item selected" : "assistant-nav-item"}
                   key={key}
@@ -1439,6 +1490,7 @@ export function AssistantWorkspace({
             const key = item.view === "finance" ? `finance-${item.section}` : item.view;
             return (
               <button
+                aria-current={currentNav === key ? "page" : undefined}
                 aria-label={item.label}
                 className={currentNav === key ? "assistant-nav-item selected" : "assistant-nav-item"}
                 key={key}
@@ -1461,7 +1513,7 @@ export function AssistantWorkspace({
         </div>
       </aside>
 
-      <main className="assistant-main" inert={mobileMenuOpen}>
+      <main className="assistant-main" id="assistant-main-content" inert={mobileMenuOpen} tabIndex={-1}>
         <header className="assistant-topbar">
           <button aria-controls="primary-navigation-drawer" aria-expanded={mobileMenuOpen} aria-label="Abrir menu de navegação" className="assistant-menu-toggle" onClick={() => setMobileMenuOpen(true)} ref={menuToggleRef} type="button"><Menu aria-hidden="true" size={20} /></button>
           <div className="assistant-topbar-title">
@@ -1502,12 +1554,13 @@ export function AssistantWorkspace({
         {error && <div className="assistant-error" role="alert">{error}<button onClick={() => setError("")} type="button">Fechar</button></div>}
 
         {view === "finance" ? (
-          <div className="assistant-finance-view" key={financeSection}>
+          <div className="assistant-finance-view">
             <FinanceWorkspace
               displayName={displayName}
               embedded
               focusTarget={financeFocusTarget}
               initialSection={financeSection}
+              onSectionChange={(section) => navigateTo("finance", section)}
               onOpenAssistant={(prompt) => { startConversation(); setDraft(prompt); }}
               onLogout={onLogout}
             />
@@ -2138,6 +2191,10 @@ function SettingsView({
   const [creatingUser, setCreatingUser] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [confirmingDeleteUserId, setConfirmingDeleteUserId] = useState<string | null>(null);
+  const [resettingMfaUserId, setResettingMfaUserId] = useState<string | null>(null);
+  const [resetMfaPassword, setResetMfaPassword] = useState("");
+  const [resetMfaTotp, setResetMfaTotp] = useState("");
+  const [resettingMfa, setResettingMfa] = useState(false);
   const [usersNotice, setUsersNotice] = useState("");
   const ownerCanManageUsers = email.trim().toLocaleLowerCase("en-US") === "gamercreeper74@gmail.com";
   const managedUsersPagination = usePagination(managedUsers, String(managedUsers.length));
@@ -2166,7 +2223,7 @@ function SettingsView({
         body: JSON.stringify({ email: userEmailDraft, display_name: userNameDraft, password: userPasswordDraft }),
       });
       setManagedUsers((current) => [created, ...current.filter((managedUser) => managedUser.id !== created.id)]);
-      setUsersNotice(`Conta de ${created.display_name} criada. A pessoa já pode entrar com o e-mail e a senha informados.`);
+      setUsersNotice(`Conta de ${created.display_name} criada. No primeiro acesso, a pessoa deverá configurar um autenticador individual.`);
       setUserNameDraft("");
       setUserEmailDraft("");
       setUserPasswordDraft("");
@@ -2190,6 +2247,29 @@ function SettingsView({
       setUsersError(error instanceof Error ? error.message : "Não foi possível excluir o acesso.");
     } finally {
       setDeletingUserId(null);
+    }
+  }
+
+  async function resetManagedUserMfa(event: FormEvent<HTMLFormElement>, managedUser: ManagedUser) {
+    event.preventDefault();
+    setResettingMfa(true);
+    setUsersError("");
+    setUsersNotice("");
+    try {
+      await apiRequest<void>(`/api/admin/users/${managedUser.id}/mfa/reset`, {
+        method: "POST",
+        body: JSON.stringify({ current_password: resetMfaPassword, totp_code: resetMfaTotp }),
+      });
+      setManagedUsers((current) => current.map((user) => user.id === managedUser.id ? { ...user, mfa_enrolled: false } : user));
+      setResettingMfaUserId(null);
+      setResetMfaPassword("");
+      setResetMfaTotp("");
+      setUsersNotice(`O autenticador de ${managedUser.display_name} foi redefinido e as sessões existentes foram encerradas. No próximo acesso, a pessoa deverá parear um novo autenticador.`);
+    } catch (error) {
+      setUsersError(error instanceof Error ? error.message : "Não foi possível redefinir o autenticador.");
+    } finally {
+      setResettingMfa(false);
+      setResetMfaTotp("");
     }
   }
   useEffect(() => {
@@ -2267,7 +2347,7 @@ function SettingsView({
           </section>
           {ownerCanManageUsers && <section className="assistant-settings-card settings-managed-users">
             <h2>Contas de acesso</h2>
-            <p>Crie contas de login para outras pessoas. Esta área e a API são restritas ao proprietário; cada pessoa mantém seus próprios dados financeiros. A conta proprietária usa MFA. Contas adicionais usam a senha inicial definida aqui.</p>
+            <p>Crie contas de login para outras pessoas. Esta área e a API são restritas ao proprietário; cada pessoa mantém seus próprios dados financeiros. Todas as contas exigem autenticador individual. A pessoa configura o MFA no primeiro acesso usando a senha inicial definida aqui.</p>
             <form className="settings-managed-user-form" onSubmit={(event) => void createManagedUser(event)}>
               <label>Nome da pessoa<input autoComplete="name" maxLength={100} onChange={(event) => setUserNameDraft(event.target.value)} required value={userNameDraft} /></label>
               <label>E-mail de acesso<input autoComplete="email" maxLength={320} onChange={(event) => setUserEmailDraft(event.target.value)} required type="email" value={userEmailDraft} /></label>
@@ -2281,8 +2361,15 @@ function SettingsView({
               {managedUsersPagination.items.map((managedUser) => {
                 const isOwner = managedUser.email.trim().toLocaleLowerCase("en-US") === "gamercreeper74@gmail.com";
                 return <div className="settings-managed-user-row" key={managedUser.id}>
-                  <span><strong>{managedUser.display_name}</strong><small>{managedUser.email}</small><small>Criada em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(managedUser.created_at))}</small></span>
-                  {!isOwner && <div className="settings-managed-user-actions">
+                  <span><strong>{managedUser.display_name}</strong><small>{managedUser.email}</small><small>Criada em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(managedUser.created_at))}</small>{!isOwner && <small className={managedUser.mfa_enrolled ? "settings-state ready" : "settings-state"}>{managedUser.mfa_enrolled ? "Autenticador configurado" : "Autenticador pendente"}</small>}</span>
+                  {!isOwner && <div className={`settings-managed-user-actions${resettingMfaUserId === managedUser.id ? " settings-reset-open" : ""}`}>
+                    {managedUser.mfa_enrolled && (resettingMfaUserId === managedUser.id ? <form className="settings-managed-user-reset" onSubmit={(event) => void resetManagedUserMfa(event, managedUser)}>
+                      <p>Confirme sua senha e o código MFA atual. Isso encerrará todas as sessões de {managedUser.display_name} e exigirá um novo pareamento.</p>
+                      <label>Sua senha<input autoComplete="current-password" minLength={12} name="current_password" onChange={(event) => setResetMfaPassword(event.target.value)} required type="password" value={resetMfaPassword} /></label>
+                      <label>Seu código MFA<input autoComplete="one-time-code" inputMode="numeric" maxLength={6} minLength={6} name="totp_code" onChange={(event) => setResetMfaTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required value={resetMfaTotp} /></label>
+                      <button disabled={resettingMfa || resetMfaPassword.length < 12 || resetMfaTotp.length !== 6} type="submit">{resettingMfa ? "Redefinindo…" : "Confirmar redefinição"}</button>
+                      <button disabled={resettingMfa} onClick={() => { setResettingMfaUserId(null); setResetMfaPassword(""); setResetMfaTotp(""); }} type="button">Cancelar</button>
+                    </form> : <button onClick={() => { setUsersError(""); setResettingMfaUserId(managedUser.id); }} type="button">Redefinir MFA</button>)}
                     {confirmingDeleteUserId === managedUser.id ? <>
                       <span>Excluir o acesso e encerrar as sessões desta pessoa?</span>
                       <button disabled={deletingUserId === managedUser.id} onClick={() => void deleteManagedUser(managedUser)} type="button">{deletingUserId === managedUser.id ? "Excluindo…" : `Confirmar exclusão de ${managedUser.display_name}`}</button>

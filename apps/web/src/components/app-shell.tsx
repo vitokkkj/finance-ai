@@ -30,6 +30,7 @@ export function AppShell() {
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaEnrolled, setMfaEnrolled] = useState(false);
   const [mfaEnrollmentAvailable, setMfaEnrollmentAvailable] = useState(false);
+  const [mfaEnrollmentTokenRequired, setMfaEnrollmentTokenRequired] = useState(false);
   const [mfaEnrollmentOpen, setMfaEnrollmentOpen] = useState(false);
   const [enrollmentToken, setEnrollmentToken] = useState("");
   const [enrollmentQr, setEnrollmentQr] = useState("");
@@ -110,6 +111,7 @@ export function AppShell() {
           mfa_required: boolean;
           mfa_enrolled: boolean;
           mfa_enrollment_available: boolean;
+          mfa_enrollment_token_required: boolean;
         }>("/api/auth/login/check", {
           method: "POST",
           body: JSON.stringify({ email, password }),
@@ -117,6 +119,7 @@ export function AppShell() {
         setMfaRequired(credentials.mfa_required);
         setMfaEnrolled(credentials.mfa_enrolled);
         setMfaEnrollmentAvailable(credentials.mfa_enrollment_available);
+        setMfaEnrollmentTokenRequired(credentials.mfa_enrollment_token_required);
         if (credentials.mfa_required) {
           setLoginStep("mfa");
           setMessageKind("success");
@@ -124,7 +127,7 @@ export function AppShell() {
             credentials.mfa_enrolled
               ? "Senha confirmada. O MFA é obrigatório para proteger suas finanças. Abra o Authy, escolha SophIA e informe o código atual."
               : credentials.mfa_enrollment_available
-                ? "Senha confirmada. O MFA é obrigatório para proteger suas finanças. Configure o Authy pela opção abaixo e confirme o primeiro código."
+                ? "Senha confirmada. Antes do primeiro acesso, configure seu autenticador individual pela opção abaixo."
                 : "Senha confirmada. O MFA é obrigatório para proteger suas finanças. Informe o código do Authy; se ainda não pareou, o responsável pelo servidor precisa habilitar o primeiro cadastro."
           );
           return;
@@ -162,7 +165,11 @@ export function AppShell() {
         expires_at: string;
       }>("/api/auth/mfa/enrollment/start", {
         method: "POST",
-        body: JSON.stringify({ email, password, enrollment_token: enrollmentToken }),
+        body: JSON.stringify({
+          email,
+          password,
+          ...(enrollmentToken ? { enrollment_token: enrollmentToken } : {}),
+        }),
       });
       setEnrollmentQr(enrollment.qr_code_data_url);
       setEnrollmentManualKey(enrollment.manual_key);
@@ -187,7 +194,7 @@ export function AppShell() {
         body: JSON.stringify({
           email,
           password,
-          enrollment_token: enrollmentToken,
+          ...(enrollmentToken ? { enrollment_token: enrollmentToken } : {}),
           totp_code: enrollmentCode,
         }),
       });
@@ -299,9 +306,13 @@ export function AppShell() {
                   : loginStep === "mfa"
                     ? mfaEnrollmentOpen
                       ? enrollmentQr
-                        ? "Escaneie o QR com o Authy e confirme o pareamento com o código de seis dígitos."
-                        : "Informe o código temporário do servidor para gerar o QR seguro do Authy."
-                      : "Sua conta exige autenticação multifator (MFA) para proteger suas finanças. Informe o código temporário do Authy."
+                      ? "Escaneie o QR com seu autenticador e confirme o pareamento com o código de seis dígitos."
+                        : mfaEnrollmentTokenRequired
+                          ? "Informe o token temporário do proprietário para gerar o QR seguro do autenticador."
+                          : "Confirme sua senha para gerar um QR individual do autenticador."
+                      : mfaEnrolled
+                        ? "Sua conta exige MFA. Informe o código atual do seu autenticador."
+                        : "Sua conta exige MFA. Configure seu autenticador individual antes de continuar."
                     : "Informe seu e-mail e senha. Em seguida, você confirmará o acesso com o MFA obrigatório."}
               </p>
             </div>
@@ -322,6 +333,7 @@ export function AppShell() {
                     <input
                       autoComplete="one-time-code"
                       inputMode="numeric"
+                      name="totp_code"
                       maxLength={6}
                       minLength={6}
                       pattern="[0-9]{6}"
@@ -339,20 +351,23 @@ export function AppShell() {
                 </form>
               ) : (
                 <form className="auth-form" onSubmit={startMfaEnrollment}>
-                  <label className="field-label">
-                    Código temporário de pareamento
-                    <input
-                      autoComplete="off"
-                      required
-                      minLength={32}
-                      maxLength={256}
-                      type="password"
-                      value={enrollmentToken}
-                      onChange={(event) => setEnrollmentToken(event.target.value)}
-                      placeholder="Gerado no servidor para este primeiro pareamento"
-                    />
-                  </label>
-                  <p className="mfa-enrollment-note">Esse código temporário autoriza somente o primeiro pareamento do Authy. Ele não é o código de seis dígitos do MFA.</p>
+                  {mfaEnrollmentTokenRequired && <>
+                    <label className="field-label">
+                      Token temporário de pareamento
+                      <input
+                        autoComplete="off"
+                        required
+                        minLength={32}
+                        maxLength={256}
+                        name="mfa-enrollment-token"
+                        type="password"
+                        value={enrollmentToken}
+                        onChange={(event) => setEnrollmentToken(event.target.value)}
+                        placeholder="Token temporário fornecido pelo proprietário…"
+                      />
+                    </label>
+                    <p className="mfa-enrollment-note">Este token temporário só autoriza o pareamento inicial do proprietário; ele não é o código de seis dígitos.</p>
+                  </>}
                   {message && <p className={`form-message ${messageKind === "success" ? "success-message" : ""}`} role={messageKind === "success" ? "status" : "alert"}>{message}</p>}
                   <button className="primary-button" type="submit" disabled={busy}>
                     {busy ? "Gerando QR…" : "Gerar QR code"}<span aria-hidden="true">↗</span>
@@ -393,6 +408,8 @@ export function AppShell() {
                 E-mail
                 <input
                   autoComplete="email"
+                  name="email"
+                  spellCheck={false}
                   required
                   maxLength={320}
                   type="email"
@@ -405,6 +422,7 @@ export function AppShell() {
                 Senha
                 <input
                   autoComplete={gate === "setup" ? "new-password" : "current-password"}
+                  name="password"
                   required
                   minLength={12}
                   maxLength={128}
@@ -414,12 +432,13 @@ export function AppShell() {
                   placeholder="Pelo menos 12 caracteres"
                 />
               </label>}
-              {mfaRequired && (gate === "setup" || loginStep === "mfa") && (
+              {mfaRequired && (gate === "setup" || (loginStep === "mfa" && mfaEnrolled)) && (
                 <label className="field-label">
                   Código de seis dígitos do Authy
                   <input
                     autoComplete="one-time-code"
                     inputMode="numeric"
+                    name="totp_code"
                     maxLength={6}
                     minLength={6}
                     pattern="[0-9]{6}"
@@ -449,10 +468,12 @@ export function AppShell() {
               {gate === "login" && loginStep === "mfa" && (
                 <button className="text-button auth-back-button" type="button" onClick={returnToCredentials}>Voltar e corrigir e-mail ou senha</button>
               )}
-              <button className="primary-button" type="submit" disabled={busy}>
-                {busy ? "Aguarde…" : gate === "setup" ? "Criar conta privada" : loginStep === "credentials" ? "Continuar" : "Entrar com MFA"}
-                <span aria-hidden="true">↗</span>
-              </button>
+              {(gate !== "login" || loginStep !== "mfa" || mfaEnrolled) && (
+                <button className="primary-button" type="submit" disabled={busy}>
+                  {busy ? "Aguarde…" : gate === "setup" ? "Criar conta privada" : loginStep === "credentials" ? "Continuar" : "Entrar com MFA"}
+                  <span aria-hidden="true">↗</span>
+                </button>
+              )}
             </form>
             )}
             <p className="security-caption">

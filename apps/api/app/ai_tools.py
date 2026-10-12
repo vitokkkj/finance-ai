@@ -423,8 +423,9 @@ def _transactions(db: Session, user: User, args: BaseModel) -> tuple[object, str
         account_id=payload.account_id,
         category_id=payload.category_id,
         type=payload.movement_type,
+        limit=payload.limit,
     )
-    return rows[: payload.limit], "transaction_card"
+    return rows.items, "transaction_card"
 
 
 def _search_transactions(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
@@ -435,8 +436,9 @@ def _search_transactions(db: Session, user: User, args: BaseModel) -> tuple[obje
         start_date=payload.start_date,
         end_date=payload.end_date,
         q=payload.query,
+        limit=payload.limit,
     )
-    return rows[: payload.limit], "transaction_card"
+    return rows.items, "transaction_card"
 
 
 def _create_transaction(

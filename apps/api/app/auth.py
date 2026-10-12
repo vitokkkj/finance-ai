@@ -20,6 +20,7 @@ from uuid import uuid4
 import qrcode
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 from qrcode.image.svg import SvgPathImage
@@ -67,9 +68,44 @@ def _totp_is_required() -> bool:
 
 
 def _email_requires_mfa(email: str) -> bool:
-    if not _totp_is_required():
-        return False
-    return settings.app_env.casefold() != "production" or email.strip().casefold() == OWNER_EMAIL
+    if email.strip().casefold() == OWNER_EMAIL:
+        return _totp_is_required()
+    return True
+
+
+def _is_managed_user(user: User) -> bool:
+    return user.email.strip().casefold() != OWNER_EMAIL
+
+
+def _managed_mfa_fernet() -> Fernet:
+    key = (settings.mfa_encryption_key or "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="O pareamento MFA ainda não está disponível neste servidor.",
+        )
+    try:
+        return Fernet(key.encode("ascii"))
+    except (ValueError, UnicodeEncodeError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="A configuração de criptografia do MFA está inválida.",
+        ) from error
+
+
+def _encrypt_managed_totp_secret(secret: str) -> str:
+    return _managed_mfa_fernet().encrypt(secret.encode("ascii")).decode("ascii")
+
+
+def _decrypt_managed_totp_secret(user: User) -> str | None:
+    if not user.mfa_secret_encrypted:
+        return None
+    try:
+        return _managed_mfa_fernet().decrypt(user.mfa_secret_encrypted.encode("ascii")).decode(
+            "ascii"
+        )
+    except (InvalidToken, UnicodeDecodeError, ValueError):
+        return None
 
 
 def _owner_totp_counter(code: str | None) -> int | None:
@@ -112,8 +148,13 @@ def _client_rate_keys(request: Request, action: str, email: str) -> tuple[str, .
     return (f"{action}:ip:{client_host}", f"{action}:account:{account_digest}")
 
 
-def _password_authenticated_user(db: Session, email: str, password: str) -> User | None:
-    user = db.scalar(select(User).where(User.email == email))
+def _password_authenticated_user(
+    db: Session, email: str, password: str, *, lock_user: bool = False
+) -> User | None:
+    statement = select(User).where(User.email == email)
+    if lock_user:
+        statement = statement.with_for_update()
+    user = db.scalar(statement)
     encoded_hash = user.password_hash if user is not None else dummy_password_hash
     try:
         password_hasher.verify(encoded_hash, password)
@@ -130,9 +171,8 @@ def _mfa_enrollment_token_matches(candidate: str) -> bool:
     )
 
 
-def _make_owner_totp_qr() -> str:
-    secret = (settings.owner_totp_secret or "").strip().upper()
-    label = quote("SophIA: proprietário", safe="")
+def _make_totp_qr(secret: str, label_text: str) -> str:
+    label = quote(f"SophIA: {label_text}", safe="")
     parameters = urlencode(
         {
             "secret": secret,
@@ -150,6 +190,16 @@ def _make_owner_totp_qr() -> str:
     qr.make_image(image_factory=SvgPathImage).save(output)
     encoded_svg = base64.b64encode(output.getvalue()).decode("ascii")
     return f"data:image/svg+xml;base64,{encoded_svg}"
+
+
+def _make_owner_totp_qr() -> str:
+    return _make_totp_qr((settings.owner_totp_secret or "").strip().upper(), "proprietário")
+
+
+def _managed_mfa_enrollment_available(user: User) -> bool:
+    if not _is_managed_user(user):
+        return bool(settings.mfa_enrollment_token and _totp_is_required())
+    return user.mfa_enrolled_at is None and bool(settings.mfa_encryption_key)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -314,7 +364,9 @@ def create_first_user(
             settings.initial_setup_token.encode("utf-8"),
         )
 
-    mfa_required = _email_requires_mfa(payload.email)
+    # The bootstrap account is the server owner. Managed accounts use their
+    # own encrypted authenticator after they are provisioned.
+    mfa_required = payload.email.strip().casefold() == OWNER_EMAIL and _totp_is_required()
     totp_counter = _owner_totp_counter(payload.totp_code) if mfa_required else -1
     if not token_matches or totp_counter is None:
         raise HTTPException(
@@ -372,11 +424,12 @@ def check_login_password(
     return LoginCheckResponse(
         mfa_required=_email_requires_mfa(user.email),
         mfa_enrolled=user.mfa_enrolled_at is not None,
-        mfa_enrollment_available=bool(
+        mfa_enrollment_available=(
             _email_requires_mfa(user.email)
-            and settings.mfa_enrollment_token
             and user.mfa_enrolled_at is None
+            and _managed_mfa_enrollment_available(user)
         ),
+        mfa_enrollment_token_required=not _is_managed_user(user),
     )
 
 
@@ -391,34 +444,42 @@ def start_mfa_enrollment(
     if not login_rate_limiter.allow_attempt(keys, now_monotonic):
         _raise_rate_limit()
     user = _password_authenticated_user(db, payload.email, payload.password)
-    if user is None or not _mfa_enrollment_token_matches(payload.enrollment_token):
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível autorizar o pareamento do autenticador.",
         )
-    if not _email_requires_mfa(user.email):
+    managed_user = _is_managed_user(user)
+    if not managed_user and not _mfa_enrollment_token_matches(payload.enrollment_token or ""):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Esta conta não usa o autenticador do proprietário.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Não foi possível autorizar o pareamento do autenticador.",
         )
     if user.mfa_enrolled_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="O autenticador desta conta já foi configurado.",
         )
-    if not _totp_is_required():
+    if not managed_user and not _totp_is_required():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="O MFA ainda não foi configurado pelo proprietário do servidor.",
         )
 
+    secret = (
+        base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+        if managed_user
+        else (settings.owner_totp_secret or "").strip().upper().rstrip("=")
+    )
+    if managed_user:
+        user.mfa_secret_encrypted = _encrypt_managed_totp_secret(secret)
     expires_at = datetime.now(UTC) + timedelta(minutes=10)
     user.mfa_enrollment_expires_at = expires_at
     db.commit()
     login_rate_limiter.clear(keys)
     return MFAEnrollmentResponse(
-        qr_code_data_url=_make_owner_totp_qr(),
-        manual_key=(settings.owner_totp_secret or "").strip().upper().rstrip("="),
+        qr_code_data_url=_make_totp_qr(secret, user.email if managed_user else "proprietário"),
+        manual_key=secret,
         expires_at=expires_at,
     )
 
@@ -434,16 +495,17 @@ def confirm_mfa_enrollment(
     now_monotonic = time.monotonic()
     if not login_rate_limiter.allow_attempt(keys, now_monotonic):
         _raise_rate_limit()
-    user = _password_authenticated_user(db, payload.email, payload.password)
-    if user is None or not _mfa_enrollment_token_matches(payload.enrollment_token):
+    user = _password_authenticated_user(db, payload.email, payload.password, lock_user=True)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível confirmar o pareamento do autenticador.",
         )
-    if not _email_requires_mfa(user.email):
+    managed_user = _is_managed_user(user)
+    if not managed_user and not _mfa_enrollment_token_matches(payload.enrollment_token or ""):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Esta conta não usa o autenticador do proprietário.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Não foi possível confirmar o pareamento do autenticador.",
         )
     if user.mfa_enrolled_at is not None:
         raise HTTPException(
@@ -456,7 +518,17 @@ def confirm_mfa_enrollment(
             status_code=status.HTTP_410_GONE,
             detail="O QR expirou. Gere um novo para continuar.",
         )
-    totp_counter = _owner_totp_counter(payload.totp_code)
+    secret = _decrypt_managed_totp_secret(user) if managed_user else settings.owner_totp_secret
+    if secret is None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="O pareamento expirou ou não está disponível. Gere um novo QR.",
+        )
+    totp_counter = (
+        matching_totp_counter(secret, payload.totp_code)
+        if managed_user
+        else _owner_totp_counter(payload.totp_code)
+    )
     if totp_counter is None or not _consume_totp_counter(db, user, totp_counter):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -483,12 +555,35 @@ def login(
     if not login_rate_limiter.allow_attempt(keys, now):
         _raise_rate_limit()
 
-    user = _password_authenticated_user(db, payload.email, payload.password)
+    user = _password_authenticated_user(db, payload.email, payload.password, lock_user=True)
     mfa_required = user is not None and _email_requires_mfa(user.email)
-    totp_counter = _owner_totp_counter(payload.totp_code) if mfa_required else None
+    managed_user = user is not None and _is_managed_user(user)
+    if user is not None and managed_user and user.mfa_enrolled_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Configure o autenticador antes de entrar.",
+        )
+    secret = (
+        _decrypt_managed_totp_secret(user)
+        if managed_user and user is not None
+        else settings.owner_totp_secret
+    )
+    totp_counter = (
+        (
+            matching_totp_counter(secret or "", payload.totp_code)
+            if managed_user
+            else _owner_totp_counter(payload.totp_code)
+        )
+        if mfa_required
+        else None
+    )
     if user is None or (
         mfa_required
-        and (totp_counter is None or not _consume_totp_counter(db, user, totp_counter))
+        and (
+            secret is None
+            or totp_counter is None
+            or not _consume_totp_counter(db, user, totp_counter)
+        )
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

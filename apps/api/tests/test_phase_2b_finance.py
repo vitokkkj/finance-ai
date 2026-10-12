@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from threading import Barrier
 from typing import cast
@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import transactions as transactions_module
@@ -142,6 +142,81 @@ def test_card_purchase_creates_one_expense_and_does_not_change_bank_balance(
     assert cards[0]["used_limit"] == "100.00"
     assert cards[0]["available_limit"] == "9900.00"
     assert account["id"] in {item["id"] for item in client.get("/api/accounts").json()}
+
+
+def test_card_read_endpoints_batch_invoice_queries(
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+) -> None:
+    setup_user(client)
+    card = create_card(client)
+    category_id = create_expense_category(client)
+    card_id = cast(str, card["id"])
+    today = datetime.now(UTC).astimezone(SAO_PAULO).date()
+
+    def add_purchase(month_offset: int) -> None:
+        purchase_date = today - timedelta(days=60 * month_offset)
+        response = client.post(
+            "/api/card-purchases",
+            json={
+                "credit_card_id": card_id,
+                "category_id": category_id,
+                "description": f"Compra do ciclo {month_offset}",
+                "amount": "10.00",
+                "occurred_at": purchase_date.isoformat(),
+            },
+        )
+        assert response.status_code == 201
+
+    def get_with_select_count(path: str) -> tuple[int, object]:
+        statements: list[str] = []
+
+        def record_select(
+            _connection: object,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: object,
+            _executemany: bool,
+        ) -> None:
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement)
+
+        engine = test_session_factory.kw["bind"]
+        event.listen(engine, "before_cursor_execute", record_select)
+        try:
+            response = client.get(path)
+        finally:
+            event.remove(engine, "before_cursor_execute", record_select)
+        assert response.status_code == 200
+        return len(statements), response.json()
+
+    add_purchase(0)
+    paths = (
+        "/api/cards",
+        f"/api/cards/{card_id}/invoices",
+        "/api/cards/invoices/upcoming",
+        "/api/dashboard/summary",
+    )
+    counts_with_one_invoice = {path: get_with_select_count(path)[0] for path in paths}
+
+    for month_offset in range(1, 5):
+        add_purchase(month_offset)
+
+    counts_with_five_invoices: dict[str, int] = {}
+    responses: dict[str, object] = {}
+    for path in paths:
+        counts_with_five_invoices[path], responses[path] = get_with_select_count(path)
+
+    assert counts_with_five_invoices == counts_with_one_invoice
+    cards = cast(list[dict[str, object]], responses["/api/cards"])
+    invoices = cast(list[dict[str, object]], responses[f"/api/cards/{card_id}/invoices"])
+    upcoming = cast(list[dict[str, object]], responses["/api/cards/invoices/upcoming"])
+    assert cards[0]["used_limit"] == "50.00"
+    assert cards[0]["available_limit"] == "9950.00"
+    assert len(invoices) == 5
+    assert all(invoice["total"] == "10.00" for invoice in invoices)
+    assert len(upcoming) == 5
 
 
 def test_acceptance_transfer_card_purchase_and_invoice_payment_are_not_double_counted(
@@ -560,7 +635,7 @@ def test_specialized_movements_cannot_be_changed_through_manual_transaction_endp
         == 409
     )
     assert client.delete(f"/api/transactions/{transaction_id}").status_code == 204
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_transfer_rejects_same_account_and_card_payment_rejects_overpayment(
@@ -627,7 +702,8 @@ def test_deleting_paid_card_purchase_cannot_make_payments_exceed_invoice_total(
     assert deleted.status_code == 409
     assert client.get(f"/api/invoices/{invoice_id}").json()["outstanding"] == "60.00"
     assert any(
-        row["id"] == purchase.json()["id"] for row in client.get("/api/transactions").json()
+        row["id"] == purchase.json()["id"]
+        for row in client.get("/api/transactions").json()["items"]
     )
 
 
@@ -813,7 +889,7 @@ def test_idempotency_key_remains_reserved_after_transaction_deletion(client: Tes
     assert deleted.status_code == 204
     assert replay.status_code == 410
     assert changed_replay.status_code == 409
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_idempotency_falls_back_to_legacy_transaction_columns_during_rollback(
@@ -863,7 +939,7 @@ def test_idempotency_falls_back_to_legacy_transaction_columns_during_rollback(
     assert replay.status_code == 201
     assert replay.json()["id"] == created.json()["id"]
     assert changed.status_code == 409
-    assert len(client.get("/api/transactions").json()) == 1
+    assert len(client.get("/api/transactions").json()["items"]) == 1
 
 
 def test_concurrent_idempotency_retries_create_one_transaction(
@@ -955,7 +1031,7 @@ def test_deleting_invoice_removes_purchases_and_payments_and_reconciles_account(
 
     assert deleted.status_code == 204
     assert client.get(f"/api/invoices/{invoice_id}").status_code == 404
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     assert client.get("/api/accounts").json()[0]["balance"] == "1000.00"
     assert client.get("/api/accounts").json()[0]["balance"] == "1000.00"
     assert client.get("/api/cards").json()[0]["used_limit"] == "0.00"

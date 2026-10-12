@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date
 from typing import cast
 from uuid import UUID
@@ -94,13 +94,32 @@ def transaction_response(
 
 
 def invoice_movements(db: Session, invoice: CardInvoice) -> list[FinancialMovement]:
-    rows = db.execute(
-        transaction_rows(invoice.user_id).where(Transaction.card_invoice_id == invoice.id)
-    ).all()
+    rows_by_invoice = _invoice_transaction_rows(db, invoice.user_id, [invoice.id])
     return [
         transaction_movement(transaction, category_name)
-        for transaction, category_name, _, _ in rows
+        for transaction, category_name, _, _ in rows_by_invoice[invoice.id]
     ]
+
+
+def _invoice_transaction_rows(
+    db: Session, user_id: UUID, invoice_ids: Sequence[UUID]
+) -> dict[UUID, list[tuple[Transaction, str | None, UUID | None, str | None]]]:
+    rows_by_invoice: dict[
+        UUID, list[tuple[Transaction, str | None, UUID | None, str | None]]
+    ] = {invoice_id: [] for invoice_id in invoice_ids}
+    if not invoice_ids:
+        return rows_by_invoice
+
+    rows = db.execute(
+        transaction_rows(user_id)
+        .where(Transaction.card_invoice_id.in_(invoice_ids))
+        .order_by(Transaction.card_invoice_id, Transaction.occurred_at, Transaction.created_at)
+    ).all()
+    for row in rows:
+        invoice_id = row[0].card_invoice_id
+        if invoice_id is not None:
+            rows_by_invoice[invoice_id].append(row)
+    return rows_by_invoice
 
 
 def invoice_amounts(db: Session, invoice: CardInvoice, as_of: date | None = None) -> InvoiceAmounts:
@@ -123,20 +142,36 @@ def card_limit_summary(
             CardInvoice.user_id == card.user_id,
         )
     ).all()
-    invoice_values = [
-        (
-            invoice.due_date,
-            calculate_invoice_amounts(
-                invoice_movements(db, invoice),
-                invoice.id,
-                invoice.closing_date,
-                invoice.due_date,
-                as_of or current_financial_date(),
-                invoice.opening_balance,
-            ),
+    rows_by_invoice = _invoice_transaction_rows(
+        db, card.user_id, [invoice.id for invoice in invoices]
+    )
+    return _card_limit_summary_from_rows(card, invoices, rows_by_invoice, as_of)
+
+
+def _card_limit_summary_from_rows(
+    card: CreditCard,
+    invoices: Sequence[CardInvoice],
+    rows_by_invoice: dict[
+        UUID, list[tuple[Transaction, str | None, UUID | None, str | None]]
+    ],
+    as_of: date | None,
+) -> CardLimitSummary:
+    as_of_date = as_of or current_financial_date()
+    invoice_values = []
+    for invoice in invoices:
+        movements = (
+            transaction_movement(transaction, category_name)
+            for transaction, category_name, _, _ in rows_by_invoice[invoice.id]
         )
-        for invoice in invoices
-    ]
+        amounts = calculate_invoice_amounts(
+            movements,
+            invoice.id,
+            invoice.closing_date,
+            invoice.due_date,
+            as_of_date,
+            invoice.opening_balance,
+        )
+        invoice_values.append((invoice.due_date, amounts))
     return calculate_card_limit(card.credit_limit, invoice_values)
 
 
@@ -144,6 +179,45 @@ def credit_card_response(
     db: Session, card: CreditCard, as_of: date | None = None
 ) -> CreditCardResponse:
     limit_summary = card_limit_summary(db, card, as_of)
+    return _credit_card_response(card, limit_summary)
+
+
+def credit_card_responses(
+    db: Session, cards: Sequence[CreditCard], as_of: date | None = None
+) -> list[CreditCardResponse]:
+    if not cards:
+        return []
+    user_id = cards[0].user_id
+    if any(card.user_id != user_id for card in cards):
+        raise ValueError("Os cartões do lote precisam pertencer ao mesmo usuário.")
+
+    invoices = db.scalars(
+        select(CardInvoice).where(
+            CardInvoice.user_id == user_id,
+            CardInvoice.credit_card_id.in_([card.id for card in cards]),
+        )
+    ).all()
+    rows_by_invoice = _invoice_transaction_rows(
+        db, user_id, [invoice.id for invoice in invoices]
+    )
+    invoices_by_card: dict[UUID, list[CardInvoice]] = {card.id: [] for card in cards}
+    for invoice in invoices:
+        invoices_by_card[invoice.credit_card_id].append(invoice)
+
+    return [
+        _credit_card_response(
+            card,
+            _card_limit_summary_from_rows(
+                card, invoices_by_card[card.id], rows_by_invoice, as_of
+            ),
+        )
+        for card in cards
+    ]
+
+
+def _credit_card_response(
+    card: CreditCard, limit_summary: CardLimitSummary
+) -> CreditCardResponse:
     return CreditCardResponse(
         id=card.id,
         name=card.name,
@@ -165,43 +239,73 @@ def credit_card_response(
 def card_invoice_response(
     db: Session, invoice: CardInvoice, as_of: date | None = None
 ) -> CardInvoiceResponse:
-    card = db.scalar(
-        select(CreditCard).where(
-            CreditCard.id == invoice.credit_card_id,
-            CreditCard.user_id == invoice.user_id,
+    return card_invoice_responses(db, [invoice], as_of)[0]
+
+
+def card_invoice_responses(
+    db: Session, invoices: Sequence[CardInvoice], as_of: date | None = None
+) -> list[CardInvoiceResponse]:
+    if not invoices:
+        return []
+    user_id = invoices[0].user_id
+    if any(invoice.user_id != user_id for invoice in invoices):
+        raise ValueError("As faturas do lote precisam pertencer ao mesmo usuário.")
+
+    card_ids = {invoice.credit_card_id for invoice in invoices}
+    cards_by_id = {
+        card.id: card
+        for card in db.scalars(
+            select(CreditCard).where(
+                CreditCard.user_id == user_id,
+                CreditCard.id.in_(card_ids),
+            )
+        ).all()
+    }
+    rows_by_invoice = _invoice_transaction_rows(
+        db, user_id, [invoice.id for invoice in invoices]
+    )
+    as_of_date = as_of or current_financial_date()
+    responses: list[CardInvoiceResponse] = []
+    for invoice in invoices:
+        card = cards_by_id.get(invoice.credit_card_id)
+        if card is None:
+            raise RuntimeError("A fatura referencia um cartão inexistente.")
+        rows = rows_by_invoice[invoice.id]
+        amounts = calculate_invoice_amounts(
+            (transaction_movement(row[0], row[1]) for row in rows),
+            invoice.id,
+            invoice.closing_date,
+            invoice.due_date,
+            as_of_date,
+            invoice.opening_balance,
         )
-    )
-    if card is None:
-        raise RuntimeError("A fatura referencia um cartão inexistente.")
-    rows = db.execute(
-        transaction_rows(invoice.user_id)
-        .where(Transaction.card_invoice_id == invoice.id)
-        .order_by(Transaction.occurred_at, Transaction.created_at)
-    ).all()
-    amounts = calculate_invoice_amounts(
-        (transaction_movement(row[0], row[1]) for row in rows),
-        invoice.id,
-        invoice.closing_date,
-        invoice.due_date,
-        as_of or current_financial_date(),
-        invoice.opening_balance,
-    )
-    return CardInvoiceResponse(
-        id=invoice.id,
-        credit_card_id=card.id,
-        credit_card_name=card.name,
-        period_start=invoice.period_start,
-        period_end=invoice.period_end,
-        closing_date=invoice.closing_date,
-        due_date=invoice.due_date,
-        opening_balance=invoice.opening_balance,
-        total=amounts.total,
-        paid_amount=amounts.paid_amount,
-        outstanding=amounts.outstanding,
-        status=amounts.status,
-        purchases=[transaction_response(*row) for row in rows if row[0].type == "CARD_PURCHASE"],
-        payments=[transaction_response(*row) for row in rows if row[0].type == "CARD_PAYMENT"],
-    )
+        responses.append(
+            CardInvoiceResponse(
+                id=invoice.id,
+                credit_card_id=card.id,
+                credit_card_name=card.name,
+                period_start=invoice.period_start,
+                period_end=invoice.period_end,
+                closing_date=invoice.closing_date,
+                due_date=invoice.due_date,
+                opening_balance=invoice.opening_balance,
+                total=amounts.total,
+                paid_amount=amounts.paid_amount,
+                outstanding=amounts.outstanding,
+                status=amounts.status,
+                purchases=[
+                    transaction_response(*row)
+                    for row in rows
+                    if row[0].type == "CARD_PURCHASE"
+                ],
+                payments=[
+                    transaction_response(*row)
+                    for row in rows
+                    if row[0].type == "CARD_PAYMENT"
+                ],
+            )
+        )
+    return responses
 
 
 def movements_for_account(transactions: Iterable[Transaction]) -> list[FinancialMovement]:

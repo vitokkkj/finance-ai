@@ -1,6 +1,6 @@
 # SophIA — sua assistente financeira
 
-Aplicação financeira pessoal e privada, administrada por `gamercreeper74@gmail.com`. Não há cadastro público. A conta inicial é criada pelo fluxo controlado de bootstrap; depois disso, somente o proprietário autenticado pode criar contas de login adicionais. Os dados financeiros de cada pessoa são isolados pelo usuário autenticado. O Finance Engine calcula saldos, faturas e resumos no backend. A SophIA é a interface principal: conversa com você e consulta ou registra operações financeiras por ferramentas explícitas.
+Aplicação financeira pessoal e privada, administrada por uma conta proprietária. Não há cadastro público. A conta inicial é criada pelo fluxo controlado de bootstrap; depois disso, somente o proprietário autenticado pode criar contas de login adicionais. Todas as contas exigem senha e TOTP individual; os segredos das contas gerenciadas são cifrados com a chave Fernet privada `MFA_ENCRYPTION_KEY`. Os dados financeiros de cada pessoa são isolados pelo usuário autenticado. O Finance Engine calcula saldos, faturas e resumos no backend. A SophIA é a interface principal: conversa com você e consulta ou registra operações financeiras por ferramentas explícitas.
 
 O código está publicado em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai) sob a licença MIT; consulte [LICENSE](LICENSE). A instância da SophIA, as credenciais e os dados financeiros do proprietário continuam privados e ficam fora deste repositório.
 
@@ -13,6 +13,8 @@ Na primeira execução, crie o arquivo local de ambiente e substitua a senha de 
 ```powershell
 Copy-Item .env.example .env
 ```
+
+Para testar contas gerenciadas no ambiente local, gere uma chave Fernet e preencha `MFA_ENCRYPTION_KEY` no `.env` conforme o procedimento em [docs/deployment.md](docs/deployment.md). O valor fica em branco no `.env.example` de propósito; não reutilize a chave local em produção.
 
 Depois, na raiz do projeto, inicie todos os serviços com um único comando:
 
@@ -40,7 +42,7 @@ Frontend, API, worker, Caddy, cloudflared e PostgreSQL permanecem em serviços s
 
 ## Acesso externo na VM
 
-Não exponha a execução local `docker compose up` à internet. Para a VM pública, use exclusivamente o perfil de produção documentado em [docs/deployment.md](docs/deployment.md): Cloudflare Tunnel é a única entrada da aplicação; nenhum serviço Compose publica portas no host. A VM mantém SSH na porta 22; `sophia` continua aceitando senha e o proprietário pode usar `su -`, enquanto `root` aceita somente chave pública. Caddy aplica cabeçalhos de segurança atrás do túnel e o login do proprietário exige TOTP. API e banco não têm portas públicas; a conta inicial é criada pelo bootstrap controlado com token temporário. Depois, somente o proprietário autenticado pode administrar contas de login, cujos dados financeiros permanecem isolados por usuário. Configure a rota `finance.ruralflow.com.br`, `APP_DOMAIN` e os segredos privados antes de iniciar esse perfil. Os backups da VM são gerenciados pelo Proxmox, fora do repositório.
+Não exponha a execução local `docker compose up` à internet. Para a VM pública, use exclusivamente o perfil de produção documentado em [docs/deployment.md](docs/deployment.md): Cloudflare Tunnel é a única entrada da aplicação; nenhum serviço Compose publica portas no host. A VM mantém SSH na porta 22; `sophia` continua aceitando senha e o proprietário pode usar `su -`, enquanto `root` aceita somente chave pública. Caddy aplica cabeçalhos de segurança atrás do túnel e todas as contas exigem TOTP individual. API e banco não têm portas públicas; a conta inicial é criada pelo bootstrap controlado com token temporário. Depois, somente o proprietário autenticado pode administrar contas de login, cujos dados financeiros permanecem isolados por usuário. Configure a rota `finance.ruralflow.com.br`, `APP_DOMAIN` e os segredos privados antes de iniciar esse perfil. `MFA_ENCRYPTION_KEY` precisa estar no `.env` privado e em backup separado do banco; a documentação de [deploy](docs/deployment.md) explica geração, perda e rotação da chave. Os backups da VM são gerenciados pelo Proxmox, fora do repositório.
 
 O padrão usa OAuth do plano ChatGPT, sem chave da API e sem fallback para chamadas pagas da API. O repositório já é público sob MIT; a instância, as credenciais OAuth e os dados financeiros continuam privados. O uso feito pela SophIA entra nos limites do próprio plano autorizado e não dá acesso ao histórico ou às memórias do ChatGPT. Confira as permissões e os limites do aplicativo em ChatGPT → Configurações → Uso. Consulte a [documentação oficial de Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) e o guia para [VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
 
@@ -78,7 +80,7 @@ O Ollama continua disponível como alternativa local explicitamente iniciada com
 - Regras de receita/despesa recorrentes com ocorrências previstas até 90 dias à frente, incluindo frequências diária, semanal, mensal e anual.
 - Ocorrências não afetam saldos até serem registradas; registrar cria uma única transação confirmada, e ignorar ou encerrar preserva o histórico sem criar movimento.
 - A previsão “A pagar” reúne compromissos avulsos, ocorrências recorrentes e faturas abertas por vencimento. O centro de avisos leva ao item correspondente e permite registrar o pagamento após conferência.
-- O proprietário cria e administra contas de login em Preferências; não há cadastro público. A API restringe essa administração à sessão do proprietário e bloqueia a exclusão quando a conta tem dados associados.
+- O proprietário cria e administra contas de login em Preferências; não há cadastro público. A API restringe essa administração à sessão do proprietário e bloqueia a exclusão quando a conta tem dados associados. Cada conta gerenciada precisa concluir o pareamento MFA individual antes do primeiro login; o reset exige senha e TOTP do proprietário, revoga as sessões da conta e preserva seus dados financeiros.
 - Minha conta permite exportar dados em JSON; Lançamentos aceita o modelo CSV descrito em [docs/importacao-csv.md](docs/importacao-csv.md), com prévia e confirmação explícita.
 - O fluxo padrão usa OAuth do ChatGPT exclusivamente no backend e o endpoint Responses API; nenhuma chave da API é configurada. AI_MODEL_FAST e AI_MODEL_SMART são configuráveis por ambiente. O Ollama só inicia com o perfil local-ai e não é fallback automático. Pedidos inequívocos de despesas e recorrências mensais podem ser interpretados por regras determinísticas; pedidos ambíguos seguem para o modelo SMART, que deve sugerir e perguntar antes de executar. Os testes automatizados usam providers e transportes simulados.
 

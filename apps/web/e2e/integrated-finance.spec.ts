@@ -47,7 +47,7 @@ async function setupTotp(secret: string) {
 test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(240_000);
   await page.goto("/");
 
   const setupName = page.getByLabel("Como podemos chamar você?");
@@ -56,6 +56,7 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     .poll(async () => (await setupName.count()) + (await email.count()))
     .toBeGreaterThan(0);
   let setupCounter: number | undefined;
+  let ownerLastCounter: number | undefined;
   if (await setupName.count()) {
     await setupName.fill("Pessoa E2E Sintética");
     await email.fill("gamercreeper74@gmail.com");
@@ -90,6 +91,7 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
       page.getByLabel("Código de seis dígitos do Authy"),
     ).toBeVisible();
     const loginTotp = await freshTotp(totpSecret, setupCounter);
+    ownerLastCounter = loginTotp.counter;
     await page
       .getByLabel("Código de seis dígitos do Authy")
       .fill(loginTotp.code);
@@ -117,6 +119,63 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     await page.getByRole("button", { name: "Ir para o chat" }).click();
   }
   await expect(overviewButton).toBeVisible();
+
+  await page.evaluate(async () => {
+    const response = await fetch("/api/categories");
+    const categories = await response.json();
+    if (!response.ok || !Array.isArray(categories)) {
+      throw new Error(`Leitura das categorias respondeu ${response.status}.`);
+    }
+    if (
+      categories.some(
+        (item) => item.name === "Categoria de interface integrada E2E",
+      )
+    ) {
+      return;
+    }
+    const created = await fetch("/api/categories", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-SophIA-Request": "1",
+      },
+      body: JSON.stringify({
+        name: "Categoria de interface integrada E2E",
+        type: "EXPENSE",
+      }),
+    });
+    if (!created.ok) {
+      throw new Error(`Criação da categoria respondeu ${created.status}.`);
+    }
+  });
+
+  // Recarrega o workspace para incluir a categoria sintética criada via API.
+  await page.reload();
+  await expect(overviewButton).toBeVisible();
+  await page.getByRole("button", { name: "Lançamentos", exact: true }).click();
+  await page.getByRole("button", { name: "Novo lançamento" }).click();
+  const transactionForm = page.locator("form.editor-form").filter({
+    has: page.getByRole("heading", { name: "Adicionar lançamento" }),
+  });
+  await expect(transactionForm).toBeVisible();
+  await transactionForm.getByLabel("Conta", { exact: true }).selectOption({
+    label: "Conta integrada E2E",
+  });
+  await transactionForm
+    .getByLabel("Valor", { exact: true })
+    .fill("27,89");
+  await transactionForm
+    .getByLabel("Descrição", { exact: true })
+    .fill("Despesa pela interface integrada E2E");
+  await transactionForm
+    .getByLabel("Categoria", { exact: true })
+    .selectOption({ label: "Categoria de interface integrada E2E" });
+  await transactionForm
+    .getByRole("button", { name: "Salvar lançamento" })
+    .click();
+  await expect(page.locator(".workspace-notice.success")).toContainText(
+    "Lançamento registrado.",
+  );
 
   const result = await page.evaluate(async () => {
     async function requestJson<T>(
@@ -208,11 +267,19 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     );
 
     const listResponse = await fetch("/api/transactions");
-    const transactions = await listResponse.json();
+    const transactionPage = await listResponse.json();
+    const transactions = transactionPage.items;
     if (!listResponse.ok || !Array.isArray(transactions)) {
       throw new Error(
         `Leitura dos lançamentos respondeu ${listResponse.status}.`,
       );
+    }
+    const uiTransaction = transactions.find(
+      (transaction) =>
+        transaction.description === "Despesa pela interface integrada E2E",
+    );
+    if (!uiTransaction) {
+      throw new Error("O lançamento feito pela interface não persistiu na API.");
     }
 
     const transferPayload = {
@@ -293,14 +360,6 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
         password: "Senha-sintetica-E2E-2026!",
       },
     );
-    const managedUserDelete = await fetch(`/api/admin/users/${managedUser.id}`, {
-      method: "DELETE",
-      headers: { "X-SophIA-Request": "1" },
-    });
-    const remainingManagedUsers = await requestJson<Array<Record<string, unknown>>>(
-      "/api/admin/users",
-    );
-
     return {
       first,
       retry,
@@ -311,9 +370,8 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
       payment,
       paymentRetry,
       payments,
-      managedUserCreated: Boolean(managedUser.id),
-      managedUserDeleteStatus: managedUserDelete.status,
-      remainingManagedUserCount: remainingManagedUsers.length,
+      uiTransaction,
+      managedUserId: managedUser.id,
       matching: transactions.filter(
         (transaction) =>
           transaction.description === "Compra sintética integrada E2E",
@@ -325,13 +383,152 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     description: "Compra sintética integrada E2E",
     amount: "12.34",
   });
+  expect(result.uiTransaction).toMatchObject({
+    description: "Despesa pela interface integrada E2E",
+    amount: "27.89",
+    type: "EXPENSE",
+    category_name: "Categoria de interface integrada E2E",
+  });
   expect(result.retry.id).toBe(result.first.id);
   expect(result.matching).toHaveLength(1);
   expect(result.transferRetry.id).toBe(result.transfer.id);
   expect(result.cardPurchaseRetry.id).toBe(result.cardPurchase.id);
   expect(result.paymentRetry.id).toBe(result.payment.id);
   expect(result.payments).toHaveLength(1);
-  expect(result.managedUserCreated).toBe(true);
-  expect(result.managedUserDeleteStatus).toBe(204);
-  expect(result.remainingManagedUserCount).toBe(1);
+  expect(result.managedUserId).toEqual(expect.any(String));
+
+  if (totpSecret) {
+    const managedEmail = "acesso-e2e@example.invalid";
+    const managedPassword = "Senha-sintetica-E2E-2026!";
+    await page.getByRole("button", { name: "Sair" }).click();
+    await expect(page.getByLabel("E-mail", { exact: true })).toBeVisible();
+
+    await page.getByLabel("E-mail", { exact: true }).fill(managedEmail);
+    await page.getByLabel("Senha", { exact: true }).fill(managedPassword);
+    await page.getByRole("button", { name: "Continuar" }).click();
+    await page.getByRole("button", { name: "Configurar autenticador" }).click();
+    await page.getByRole("button", { name: "Gerar QR code" }).click();
+    const manualKey = page.locator(".mfa-enrollment-qr-panel code");
+    await page.getByText("Não consegue escanear?").click();
+    await expect(manualKey).toBeVisible();
+    const managedSecret = (await manualKey.innerText()).trim();
+    const pairingCode = await freshTotp(managedSecret);
+    await page
+      .getByLabel("Código de seis dígitos do Authy")
+      .fill(pairingCode.code);
+    await page.getByRole("button", { name: "Confirmar e entrar" }).click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Qual conta você quer acompanhar primeiro?",
+      }),
+    ).toBeVisible();
+
+    // The managed user has no financial rows, so logging out via the authenticated API
+    // keeps the synthetic account eligible for deletion after the owner reset check.
+    const firstManagedLogout = await page.evaluate(async () =>
+      fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "X-SophIA-Request": "1" },
+      }).then((response) => response.status),
+    );
+    expect(firstManagedLogout).toBe(200);
+    await page.reload();
+    await expect(page.getByLabel("E-mail", { exact: true })).toBeVisible();
+
+    await page.getByLabel("E-mail", { exact: true }).fill(managedEmail);
+    await page.getByLabel("Senha", { exact: true }).fill(managedPassword);
+    await page.getByRole("button", { name: "Continuar" }).click();
+    await expect(
+      page.getByLabel("Código de seis dígitos do Authy"),
+    ).toBeVisible();
+    const managedLoginCode = await freshTotp(
+      managedSecret,
+      pairingCode.counter,
+    );
+    await page
+      .getByLabel("Código de seis dígitos do Authy")
+      .fill(managedLoginCode.code);
+    await page.getByRole("button", { name: "Entrar com MFA" }).click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Qual conta você quer acompanhar primeiro?",
+      }),
+    ).toBeVisible();
+    const secondManagedLogout = await page.evaluate(async () =>
+      fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "X-SophIA-Request": "1" },
+      }).then((response) => response.status),
+    );
+    expect(secondManagedLogout).toBe(200);
+    await page.reload();
+    await expect(page.getByLabel("E-mail", { exact: true })).toBeVisible();
+
+    await page.getByLabel("E-mail", { exact: true }).fill("gamercreeper74@gmail.com");
+    await page
+      .getByLabel("Senha", { exact: true })
+      .fill("Senha-sintetica-E2E-2026!");
+    await page.getByRole("button", { name: "Continuar" }).click();
+    await expect(
+      page.getByLabel("Código de seis dígitos do Authy"),
+    ).toBeVisible();
+    const ownerResetCode = await freshTotp(totpSecret, ownerLastCounter);
+    ownerLastCounter = ownerResetCode.counter;
+    await page
+      .getByLabel("Código de seis dígitos do Authy")
+      .fill(ownerResetCode.code);
+    await page.getByRole("button", { name: "Entrar com MFA" }).click();
+    await expect(
+      page.getByRole("button", { name: "Visão geral", exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Preferências", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Preferências da SophIA" }),
+    ).toBeVisible();
+    const managedUserRow = page
+      .locator(".settings-managed-user-row")
+      .filter({ hasText: managedEmail });
+    await expect(managedUserRow).toContainText("Autenticador configurado");
+    await managedUserRow.getByRole("button", { name: "Redefinir MFA" }).click();
+    await managedUserRow.getByLabel("Sua senha").fill("Senha-sintetica-E2E-2026!");
+    const ownerReauthenticationCode = await freshTotp(
+      totpSecret,
+      ownerLastCounter,
+    );
+    ownerLastCounter = ownerReauthenticationCode.counter;
+    await managedUserRow
+      .getByLabel("Seu código MFA")
+      .fill(ownerReauthenticationCode.code);
+    await managedUserRow
+      .getByRole("button", { name: "Confirmar redefinição" })
+      .click();
+    await expect(managedUserRow).toContainText("Autenticador pendente");
+
+    const cleanup = await page.evaluate(async (userId) => {
+      const response = await fetch(`/api/admin/users/${userId}`, {
+        method: "DELETE",
+        headers: { "X-SophIA-Request": "1" },
+      });
+      const usersResponse = await fetch("/api/admin/users");
+      const users = await usersResponse.json();
+      return {
+        deleteStatus: response.status,
+        remainingManagedUsers: Array.isArray(users)
+          ? users.filter((user) => user.email !== "gamercreeper74@gmail.com")
+              .length
+          : -1,
+      };
+    }, result.managedUserId as string);
+    expect(cleanup.deleteStatus).toBe(204);
+    expect(cleanup.remainingManagedUsers).toBe(0);
+  } else {
+    const cleanup = await page.evaluate(async (userId) =>
+      fetch(`/api/admin/users/${userId}`, {
+        method: "DELETE",
+        headers: { "X-SophIA-Request": "1" },
+      }).then((response) => response.status),
+    result.managedUserId as string);
+    expect(cleanup).toBe(204);
+  }
 });

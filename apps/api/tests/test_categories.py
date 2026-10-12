@@ -64,5 +64,5 @@ def test_category_can_be_renamed_and_archived_without_deletion(client: TestClien
     assert history.json()[0]["name"] == "Mercado"
     transactions = client.get("/api/transactions")
     assert transactions.status_code == 200
-    assert transactions.json()[0]["id"] == transaction.json()["id"]
-    assert transactions.json()[0]["category_name"] == "Mercado"
+    assert transactions.json()["items"][0]["id"] == transaction.json()["id"]
+    assert transactions.json()["items"][0]["category_name"] == "Mercado"

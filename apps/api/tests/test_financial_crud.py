@@ -60,7 +60,7 @@ def test_transactions_and_accounts_can_be_edited_and_history_deleted(client: Tes
 
     deleted = client.delete(f"/api/transactions/{transaction_id}")
     assert deleted.status_code == 204
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_money_inputs_require_exact_decimal_strings(client: TestClient) -> None:

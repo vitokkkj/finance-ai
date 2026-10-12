@@ -70,6 +70,12 @@ type Transaction = {
   notes: string | null;
 };
 
+type TransactionPage = {
+  items: Transaction[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
 type Dashboard = {
   as_of: string;
   period_start: string;
@@ -135,7 +141,7 @@ type TransactionFilters = {
   q: string;
 };
 
-type Notice = { kind: "success" | "error"; message: string } | null;
+type Notice = { kind: "success" | "error"; message: string; retryFinanceLoad?: boolean } | null;
 
 const FINANCE_NAV_ITEMS: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: "overview", label: "Visão geral", icon: LayoutDashboard },
@@ -271,6 +277,7 @@ export function FinanceWorkspace({
   embedded = false,
   initialSection = "overview",
   focusTarget = null,
+  onSectionChange,
 }: {
   displayName: string;
   onLogout: () => void;
@@ -278,6 +285,7 @@ export function FinanceWorkspace({
   embedded?: boolean;
   initialSection?: Section;
   focusTarget?: FinanceFocusTarget | null;
+  onSectionChange?: (section: Section) => void;
 }) {
   const [section, setSection] = useState<Section>(initialSection);
   const [cardFocusId, setCardFocusId] = useState<string | null>(null);
@@ -285,6 +293,9 @@ export function FinanceWorkspace({
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionCursor, setTransactionCursor] = useState<string | null>(null);
+  const [transactionCursorHistory, setTransactionCursorHistory] = useState<(string | null)[]>([]);
+  const [transactionNextCursor, setTransactionNextCursor] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -310,26 +321,33 @@ export function FinanceWorkspace({
   const loadVersion = useRef(0);
   const workspaceHeadingRef = useRef<HTMLDivElement>(null);
 
+  function navigateToSection(nextSection: Section) {
+    setSection(nextSection);
+    onSectionChange?.(nextSection);
+  }
+
   const loadFinance = useCallback(async () => {
     const version = loadVersion.current + 1;
     loadVersion.current = version;
     setLoading(true);
     const [year, selectedMonth] = month.split("-").map(Number);
-    const transactionPath = appliedFilters
-      ? `/api/transactions?${appliedFilters}`
-      : "/api/transactions";
+    const transactionQuery = new URLSearchParams(appliedFilters);
+    transactionQuery.set("limit", "15");
+    if (transactionCursor) transactionQuery.set("cursor", transactionCursor);
+    const transactionPath = `/api/transactions?${transactionQuery.toString()}`;
 
     try {
       const [accountRows, categoryRows, transactionRows, summary] = await Promise.all([
         apiRequest<Account[]>("/api/accounts?include_archived=true"),
         apiRequest<Category[]>("/api/categories?include_archived=true"),
-        apiRequest<Transaction[]>(transactionPath),
+        apiRequest<TransactionPage>(transactionPath),
         apiRequest<Dashboard>(`/api/dashboard/summary?year=${year}&month=${selectedMonth}`),
       ]);
       if (version !== loadVersion.current) return;
       setAccounts(accountRows);
       setCategories(categoryRows);
-      setTransactions(transactionRows);
+      setTransactions(transactionRows.items);
+      setTransactionNextCursor(transactionRows.next_cursor);
       setDashboard(summary);
     } catch (error) {
       if (version !== loadVersion.current) return;
@@ -340,19 +358,46 @@ export function FinanceWorkspace({
       setNotice({
         kind: "error",
         message: error instanceof Error ? error.message : "Não foi possível carregar os dados.",
+        retryFinanceLoad: true,
       });
     } finally {
       if (version === loadVersion.current) setLoading(false);
     }
-  }, [appliedFilters, month]);
+  }, [appliedFilters, month, transactionCursor]);
 
   useEffect(() => {
     void loadFinance();
   }, [loadFinance]);
 
-  function refreshAfterMutation(message: string) {
+  useEffect(() => {
+    setSection(initialSection);
+  }, [initialSection]);
+
+  function refreshAfterMutation(message: string, resetTransactionPage = false) {
     setNotice({ kind: "success", message });
+    if (resetTransactionPage) {
+      setTransactionCursorHistory([]);
+      if (transactionCursor !== null) {
+        setTransactionCursor(null);
+      } else {
+        void loadFinance();
+      }
+      return;
+    }
     void loadFinance();
+  }
+
+  function nextTransactionPage() {
+    if (!transactionNextCursor) return;
+    setTransactionCursorHistory((history) => [...history, transactionCursor]);
+    setTransactionCursor(transactionNextCursor);
+  }
+
+  function previousTransactionPage() {
+    if (transactionCursorHistory.length === 0) return;
+    const previousCursor = transactionCursorHistory[transactionCursorHistory.length - 1];
+    setTransactionCursorHistory((history) => history.slice(0, -1));
+    setTransactionCursor(previousCursor);
   }
 
   async function saveAccount(event: FormEvent<HTMLFormElement>) {
@@ -383,7 +428,7 @@ export function FinanceWorkspace({
         setTransactionForm((current) => ({ ...current, account_id: savedAccount.id }));
         setTransactionFormOpen(true);
         setReturnToTransactionsAfterAccount(false);
-        setSection("transactions");
+        navigateToSection("transactions");
       }
       refreshAfterMutation(accountEditingId ? "Conta atualizada." : "Conta criada.");
     } catch (error) {
@@ -464,7 +509,7 @@ export function FinanceWorkspace({
         setTransactionForm((current) => ({ ...current, category_id: savedCategory.id }));
         setTransactionFormOpen(true);
         setReturnToTransactionsAfterCategory(false);
-        setSection("transactions");
+        navigateToSection("transactions");
       }
       refreshAfterMutation(wasEditing ? "Categoria atualizada." : "Categoria criada.");
     } catch (error) {
@@ -534,6 +579,7 @@ export function FinanceWorkspace({
       setTransactionFormOpen(false);
       refreshAfterMutation(
         transactionEditingId ? "Lançamento atualizado." : "Lançamento registrado.",
+        true,
       );
     } catch (error) {
       setNotice({
@@ -560,7 +606,7 @@ export function FinanceWorkspace({
       });
       setTransferForm(emptyTransfer());
       setTransferFormOpen(false);
-      refreshAfterMutation("Transferência registrada. Ela não altera receitas nem despesas.");
+      refreshAfterMutation("Transferência registrada. Ela não altera receitas nem despesas.", true);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -581,7 +627,7 @@ export function FinanceWorkspace({
     setBusy(true);
     try {
       await apiRequest<void>(`/api/transactions/${transaction.id}`, { method: "DELETE" });
-      refreshAfterMutation("Lançamento excluído.");
+      refreshAfterMutation("Lançamento excluído.", true);
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Falha ao excluir." });
     } finally {
@@ -595,11 +641,15 @@ export function FinanceWorkspace({
     for (const [key, value] of Object.entries(filters)) {
       if (value) query.set(key, value);
     }
+    setTransactionCursor(null);
+    setTransactionCursorHistory([]);
     setAppliedFilters(query.toString());
   }
 
   function clearTransactionFilters() {
     setFilters(emptyFilters());
+    setTransactionCursor(null);
+    setTransactionCursorHistory([]);
     setAppliedFilters("");
   }
 
@@ -626,7 +676,7 @@ export function FinanceWorkspace({
     setAccountForm(emptyAccount());
     setAccountFormOpen(true);
     setReturnToTransactionsAfterAccount(true);
-    setSection("accounts");
+    navigateToSection("accounts");
   }
 
   function addCategoryForCurrentTransaction() {
@@ -635,7 +685,7 @@ export function FinanceWorkspace({
     setCategoryType(transactionForm.type);
     setCategoryFormOpen(true);
     setReturnToTransactionsAfterCategory(true);
-    setSection("categories");
+    navigateToSection("categories");
   }
 
   function editTransaction(transaction: Transaction) {
@@ -666,7 +716,6 @@ export function FinanceWorkspace({
     { type: "INCOME" as const, label: "Receitas", pagination: incomeCategoryPagination },
     { type: "EXPENSE" as const, label: "Despesas", pagination: expenseCategoryPagination },
   ].filter((group) => group.pagination.total > 0);
-  const transactionPagination = usePagination(transactions, `${appliedFilters}:${month}`);
   const overviewCategoryPagination = usePagination(dashboard?.expenses_by_category ?? [], month);
   const overviewCardPagination = usePagination(dashboard?.cards ?? [], month);
   const forecastExpenses = dashboard?.forecast_items.filter((item) => item.type === "EXPENSE") ?? [];
@@ -683,6 +732,7 @@ export function FinanceWorkspace({
     cards: "Cartões e faturas",
     recurrences: "Programados",
   };
+  const ContentContainer = embedded ? "div" : "main";
 
   function openCategoryTransactions(categoryId: string, period?: { start_date: string; end_date: string }) {
     const params = new URLSearchParams({ category_id: categoryId });
@@ -691,8 +741,10 @@ export function FinanceWorkspace({
       params.set("end_date", period.end_date);
     }
     setFilters({ ...emptyFilters(), category_id: categoryId, ...period });
+    setTransactionCursor(null);
+    setTransactionCursorHistory([]);
     setAppliedFilters(params.toString());
-    setSection("transactions");
+    navigateToSection("transactions");
     window.requestAnimationFrame(() => {
       workspaceHeadingRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
@@ -700,7 +752,7 @@ export function FinanceWorkspace({
 
   function openCardInvoices(cardId: string) {
     setCardFocusId(cardId);
-    setSection("cards");
+    navigateToSection("cards");
   }
 
   useEffect(() => {
@@ -717,9 +769,10 @@ export function FinanceWorkspace({
         <nav className="finance-nav" aria-label="Navegação financeira">
           {FINANCE_NAV_ITEMS.map(({ section: key, label, icon: Icon }) => (
             <button
+              aria-current={section === key ? "page" : undefined}
               className={section === key ? "finance-nav-item selected" : "finance-nav-item"}
               key={key}
-              onClick={() => setSection(key)}
+              onClick={() => navigateToSection(key)}
               type="button"
             >
               <Icon aria-hidden="true" className="finance-nav-icon" size={17} strokeWidth={1.8} />{label}
@@ -738,7 +791,7 @@ export function FinanceWorkspace({
           </div>
         </header>}
 
-        <main className="finance-content">
+        <ContentContainer className="finance-content">
           <div className="workspace-heading" ref={workspaceHeadingRef}>
             <div>
               <p className="eyebrow">SophIA</p>
@@ -779,7 +832,7 @@ export function FinanceWorkspace({
             )}
           </div>
 
-          {notice && <div className={`workspace-notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.message}</div>}
+          {notice && <div className={`workspace-notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}><span>{notice.message}</span>{notice.retryFinanceLoad && <button className="workspace-notice-retry" onClick={() => { setNotice(null); void loadFinance(); }} type="button">Tentar carregar novamente</button>}</div>}
 
           {loading ? (
             <div className="finance-loading" role="status"><BrandMark className="loading-mark" size={30} />Carregando seus dados…</div>
@@ -847,7 +900,7 @@ export function FinanceWorkspace({
                       <PaginationControls end={overviewCategoryPagination.end} label="Paginação das despesas por categoria" onPageChange={overviewCategoryPagination.setPage} page={overviewCategoryPagination.page} pageCount={overviewCategoryPagination.pageCount} start={overviewCategoryPagination.start} total={overviewCategoryPagination.total} />
                     </section>
                     <section className="surface-card">
-                      <div className="surface-heading"><div><p className="eyebrow">Movimentação</p><h2>Últimos lançamentos</h2></div><button className="link-button" onClick={() => setSection("transactions")} type="button">Ver todos ↗</button></div>
+                      <div className="surface-heading"><div><p className="eyebrow">Movimentação</p><h2>Últimos lançamentos</h2></div><button className="link-button" onClick={() => navigateToSection("transactions")} type="button">Ver todos ↗</button></div>
                       {dashboard.recent_transactions.length === 0 ? (
                         <EmptyState actionLabel={onOpenAssistant ? "Conversar sobre movimentações" : undefined} message="Seus lançamentos recentes aparecerão aqui." onAction={onOpenAssistant ? () => onOpenAssistant("Quero registrar ou entender uma movimentação financeira.") : undefined} />
                       ) : (
@@ -867,7 +920,7 @@ export function FinanceWorkspace({
                   </div>
                   <section className="card-summary-grid" aria-label="Cartões de crédito">
                     {dashboard.cards.length === 0 ? (
-                      <div className="surface-card card-summary-empty"><p className="eyebrow">Cartões</p><h2>Nenhum cartão cadastrado</h2><button className="link-button" onClick={() => setSection("cards")} type="button">Adicionar cartão ↗</button></div>
+                      <div className="surface-card card-summary-empty"><p className="eyebrow">Cartões</p><h2>Nenhum cartão cadastrado</h2><button className="link-button" onClick={() => navigateToSection("cards")} type="button">Adicionar cartão ↗</button></div>
                     ) : overviewCardPagination.items.map((card) => (
                       <article className="surface-card card-summary card-summary-clickable" key={card.id}>
                         <button aria-label={`Abrir faturas do cartão ${card.name}`} className="card-summary-hit-target" onClick={() => openCardInvoices(card.id)} type="button" />
@@ -985,13 +1038,13 @@ export function FinanceWorkspace({
                     <label className="field-label search-field">Buscar<input onChange={(event) => setFilters({ ...filters, q: event.target.value })} placeholder="Descrição, categoria…" value={filters.q} /></label>
                     <div className="filter-actions"><button className="primary-button compact-button" type="submit">Filtrar</button><button className="text-button" onClick={clearTransactionFilters} type="button">Limpar</button></div>
                   </form>
-                  {transactions.length === 0 ? <EmptyState actionLabel={appliedFilters ? "Limpar filtros" : onOpenAssistant ? "Conversar com o assistente" : undefined} message={appliedFilters ? "Nenhum lançamento corresponde aos filtros." : "Ainda não há lançamentos neste período."} onAction={appliedFilters ? clearTransactionFilters : onOpenAssistant ? () => onOpenAssistant("Quero registrar um lançamento financeiro.") : undefined} /> : (
+                  {transactions.length === 0 ? <><EmptyState actionLabel={appliedFilters ? "Limpar filtros" : onOpenAssistant ? "Conversar com o assistente" : undefined} message={appliedFilters ? "Nenhum lançamento corresponde aos filtros." : "Ainda não há lançamentos neste período."} onAction={appliedFilters ? clearTransactionFilters : onOpenAssistant ? () => onOpenAssistant("Quero registrar um lançamento financeiro.") : undefined} /><TransactionCursorControls hasPrevious={transactionCursorHistory.length > 0} hasNext={transactionNextCursor !== null} onPrevious={previousTransactionPage} onNext={nextTransactionPage} page={transactionCursorHistory.length + 1} itemCount={transactions.length} /></> : (
                     <><div className="table-wrap"><table className="data-table transaction-table"><thead><tr><th>Lançamento</th><th>Categoria / origem / destino</th><th>Data</th><th>Tipo</th><th>Valor</th><th aria-label="Ações" /></tr></thead><tbody>
-                      {transactionPagination.items.map((transaction) => {
+                      {transactions.map((transaction) => {
                         const tone = transaction.type === "INCOME" ? "income" : transaction.type === "EXPENSE" || transaction.type === "CARD_PURCHASE" ? "expense" : "neutral";
                         return <tr key={transaction.id}><td><strong className="cell-primary">{transaction.description}</strong>{transaction.notes && <small className="cell-secondary">{transaction.notes}</small>}</td><td>{transactionContext(transaction, accounts)}</td><td>{displayDate(transaction.occurred_at)}</td><td><span className={`type-text ${tone}`}>{financialTransactionLabel(transaction.type)}</span></td><td className="table-money">{financialAmountSign(transaction.type)}{formatCurrency(transaction.amount)}</td><td className="row-actions">{isEditableTransaction(transaction) && <button className="table-action" onClick={() => editTransaction(transaction)} type="button">Editar</button>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteTransaction(transaction)} type="button">Excluir</button></td></tr>;
                       })}
-                    </tbody></table></div><PaginationControls end={transactionPagination.end} label="Paginação dos lançamentos" onPageChange={transactionPagination.setPage} page={transactionPagination.page} pageCount={transactionPagination.pageCount} start={transactionPagination.start} total={transactionPagination.total} /></>
+                    </tbody></table></div><TransactionCursorControls hasPrevious={transactionCursorHistory.length > 0} hasNext={transactionNextCursor !== null} onPrevious={previousTransactionPage} onNext={nextTransactionPage} page={transactionCursorHistory.length + 1} itemCount={transactions.length} /></>
                   )}
                 </section>
               )}
@@ -1009,9 +1062,39 @@ export function FinanceWorkspace({
           )}
           <footer className="finance-footer"><span>SophIA</span><span>BRL · America/Sao_Paulo · dados privados</span></footer>
           {confirmationDialog}
-        </main>
+        </ContentContainer>
       </div>
     </div>
+  );
+}
+
+function TransactionCursorControls({
+  hasPrevious,
+  hasNext,
+  page,
+  itemCount,
+  onPrevious,
+  onNext,
+}: {
+  hasPrevious: boolean;
+  hasNext: boolean;
+  page: number;
+  itemCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (!hasPrevious && !hasNext) return null;
+  return (
+    <nav aria-label="Paginação dos lançamentos" className="pagination-controls">
+      <span aria-live="polite">
+        Mostrando {itemCount} {itemCount === 1 ? "lançamento" : "lançamentos"} nesta página
+      </span>
+      <div className="pagination-controls-actions">
+        <button disabled={!hasPrevious} onClick={onPrevious} type="button">Anterior</button>
+        <span>Página {page}</span>
+        <button disabled={!hasNext} onClick={onNext} type="button">Próxima</button>
+      </div>
+    </nav>
   );
 }
 
