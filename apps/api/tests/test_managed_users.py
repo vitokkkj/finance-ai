@@ -46,10 +46,10 @@ def test_owner_can_create_list_and_delete_empty_managed_user(
     assert created["email"] == "richard@example.com"
     assert "password" not in created
     assert "password_hash" not in created
-    assert [row["email"] for row in client.get("/api/admin/users").json()] == [
+    assert {row["email"] for row in client.get("/api/admin/users").json()} == {
         OWNER_EMAIL,
         "richard@example.com",
-    ]
+    }
 
     self_delete = client.delete(f"/api/admin/users/{owner_id}")
     assert self_delete.status_code == 409
