@@ -17,7 +17,7 @@ Esta revisão cobre a API, regras financeiras, frontend, segurança e operação
 - **Visão de faturas:** a página de cartões ganha uma lista consolidada de todas as faturas em aberto, ordenada pelo vencimento mais próximo e com atalho para detalhes/pagamento. Os ciclos selecionados por cartão também ficam em ordem crescente de vencimento; valores são derivados pelo Finance Engine e o endpoint respeita `users.id` da sessão. Faturas futuras só aparecem quando já há saldo ou compras registradas para o ciclo.
 - **Navegação de dados:** listas extensas usam páginas de 15 itens, inclusive faturas e compras/pagamentos de ciclos, cartões, lançamentos, ocorrências, compromissos, regras, conversas, avisos e listas de Preferências. O controle confere com a lista filtrada e o foco em item vindo de aviso respeita sua página. A navegação geral de ocorrências fica paginada, sem o antigo controle “Mostrar histórico”.
 - **Consulta por categoria:** abrir o nome ou a ação “Ver lançamentos” em uma categoria leva aos movimentos daquela categoria com o filtro aplicado.
-- **Contas de acesso:** correção após esclarecimento do proprietário em 12/10/2026: contas de login gerenciadas devem permanecer disponíveis, com criação/exclusão restrita ao proprietário e sem cadastro público. A remoção anterior da interface/rota foi uma regressão e está sendo corrigida. A API não deve excluir registros financeiros associados; a contagem da VM registrada acima é histórica e não foi repetida para evitar leitura desnecessária de dados pessoais.
+- **Contas de acesso:** correção após esclarecimento do proprietário em 12/10/2026: contas de login gerenciadas permanecem disponíveis, com criação/exclusão restrita ao proprietário e sem cadastro público. A implementação foi validada e publicada na VM. A API recusa excluir o próprio proprietário ou qualquer conta com registros pessoais/financeiros associados; nenhum registro de produção foi consultado ou removido.
 - **Cartões e ciclo futuro:** a regra de saldo inicial importado de fatura futura está documentada: compras/parcelas assumidas reduzem o limite disponível; intenção de compra ainda não realizada não deve ser lançada como fatura.
 
 ### Frontend e uso móvel
@@ -39,16 +39,18 @@ Esta revisão cobre a API, regras financeiras, frontend, segurança e operação
 | Prioridade | Item | Estado e próxima ação |
 |---|---|---|
 | P0 dados | Backup e recuperação | Proprietário confirmou em 12/10/2026 que os backups do Proxmox são criptografados e a restauração foi testada; registrado como validado com base nessa confirmação operacional. A exportação autoatendida em JSON foi implementada. Desfazer/recuperar exclusões continua como evolução possível. |
-| P1 operacional | Rate limits e WAF no Cloudflare | Painel revisado: a zona está no plano Free, não há regras personalizadas nem regra de rate limiting configurada. Browser Integrity Check está ligado; Bot Fight Mode e Under Attack estão desligados; a proteção HTTP DDoS padrão aparece ativa. Não foram feitas mudanças no painel. Criar limites específicos para login, bootstrap e MFA segue como ação recomendada. |
-| P1 operacional | Firewall e SSH da VM | Atualização em 12/10/2026: TCP/22 permanece aberto; `sophia` continua com senha e chave. Após autorização explícita do proprietário, `root` aceita chave pública, com `PermitRootLogin prohibit-password` e `AllowUsers sophia root`; a chave dedicada do Codex foi instalada e o login root foi confirmado. O proprietário pode continuar usando `su -`. O serviço está ativo e a política efetiva foi conferida. A cadeia `input` do nftables segue `accept`; a camada de rede anterior à VM/exposição pela internet não foi inspecionada. |
+| P1 concluído | Rate limit no Cloudflare | Em 12/10/2026 foi ativada a regra **Autenticacao - limite por IP**, restrita ao host financeiro e aos POSTs de setup, login e pareamento MFA: 20 requisições por IP em 10 segundos, com bloqueio por 10 segundos. O painel mostrou a regra ativa e sem eventos no momento da conferência. A regra não altera os demais domínios da zona. |
+| P1 concluído; P2 rede upstream | SSH e firewall da VM | Atualização em 12/10/2026: TCP/22 permanece aberto; `sophia` continua com senha e chave. `root` aceita chave pública, com `PermitRootLogin prohibit-password` e `AllowUsers sophia root`; a chave dedicada foi instalada e o login root foi confirmado. O proprietário pode continuar usando `su -`. O serviço está ativo e a política efetiva foi conferida. A cadeia `input` do nftables segue `accept`; o caminho de rede anterior à VM permanece sem verificação. |
 | P2 segurança | MFA por conta gerenciada | Contas de login adicionais usam senha Argon2id, sem MFA individual. Projetar inscrição TOTP por usuário, recuperação segura e revogação de sessões antes de tratar MFA como requisito universal. |
 | P2 segurança | CSP com `unsafe-inline` | Permanece para compatibilidade com Next.js. Avaliar nonce/hash em ambiente de produção e remover a exceção apenas após validar hidratação, fontes e navegação. Não há XSS confirmado nesta revisão. |
 | P2 produto | Notificações do sistema | Os avisos são internos enquanto o site está aberto. Push no iPhone requer service worker, inscrição iniciada por ação explícita e configuração de push; manter opt-in e links diretos para o item. |
 | P2 qualidade | Automação do navegador | Playwright agora cobre seleção de período e previsão, resposta financeira do chat, exportação, importação CSV com decisão de duplicidade, faturas ordenadas, resumo e avisos em larguras móveis. Expandir para login/MFA, baixa de compromissos, faturas parcial/total, upload de imagens, tema, navegação por gestos e Safari iOS. |
 | P2 UX | Verificação visual em telas reais | Larguras de 390 px e 820 px passaram em Chromium com API sintética; isso verifica layout e interações básicas, não reproduz teclado, safe area, PWA, gestos ou Safari do iPhone real. A checagem física no iPhone continua pendente. |
 | P2 operação | Histórico de ocorrências fora do horizonte | A lista paginada contém as ocorrências materializadas no horizonte móvel de 90 dias. O aviso abre o registro exato; ocorrências fora desse horizonte não são materializadas nem pesquisáveis como histórico completo. |
+| P2 operação | Revisar limite de borda após uso | A regra Cloudflare está ativa e cobre apenas rotas de autenticação no host financeiro. Acompanhar eventos e relatos de bloqueio legítimo; ajustar o teto se o uso real mostrar falso positivo, mantendo o limitador por conta/IP da API. |
+| P2 operação | Evidência direta de rede e Proxmox | A configuração do host, Compose, SSH e aplicação foi inspecionada na VM. Não foi verificado o firewall/roteador anterior à VM nem coletada evidência direta de jobs, retenção e restore drill no Proxmox. O proprietário confirmou backup criptografado e restauração testada em 12/10/2026; um dump temporário pré-deploy também foi validado e removido após a publicação. |
 
-Pontos fortes confirmados no código: não há cadastro público; o bootstrap inicial é protegido por token; somente o proprietário administra contas de login; senhas usam Argon2; sessões persistem apenas hashes aleatórios; cookie de sessão é `HttpOnly`, `Secure` e `SameSite=Strict`; operações financeiras usam a sessão autenticada e filtram por `users.id`; PostgreSQL não publica porta; imagens do chat não são persistidas no histórico. Contas gerenciadas ainda precisam de MFA individual, registrado como P2. Isso não substitui auditoria das regras operacionais do Cloudflare e do host.
+Pontos fortes confirmados no código: não há cadastro público; o bootstrap inicial é protegido por token; somente o proprietário administra contas de login; senhas usam Argon2; sessões persistem apenas hashes aleatórios; cookie de sessão é `HttpOnly`, `Secure` e `SameSite=Strict`; operações financeiras usam a sessão autenticada e filtram por `users.id`; PostgreSQL não publica porta; imagens do chat não são persistidas no histórico. Contas gerenciadas ainda precisam de MFA individual, registrado como P2. A regra de borda do Cloudflare está ativa; o caminho de rede anterior à VM permanece sem verificação direta.
 
 ## Avisos de vencimento
 
@@ -60,24 +62,24 @@ As referências consultadas mostram padrões úteis: [Organizze — alertas de c
 
 | Verificação | Resultado |
 |---|---|
-| API — testes | **185 passaram; 2 ignorados** porque dependem de permissões POSIX indisponíveis no Windows. |
+| API — CI PostgreSQL 17 | **193 passaram; 2 avisos não bloqueantes** no [workflow final](https://github.com/vitokkkj/finance-ai/actions/runs/38312160754). |
+| API — execução local no Windows | **191 passaram; 2 ignorados** porque dependem de permissões POSIX indisponíveis no Windows. |
 | Ruff | Passou. |
-| Mypy | Passou em 51 arquivos. |
+| Mypy | Passou em 33 arquivos da API. |
 | Biome lint | Passou com quatro avisos existentes sobre `!important` na regra `prefers-reduced-motion`. |
 | TypeScript | Passou. |
 | Build Next.js | Passou; rotas estáticas geradas. |
-| Playwright E2E | 17 fluxos em Chromium com rotas financeiras sintéticas; sem acesso nem alteração dos dados reais. |
-| Publicação deste lote | Em 12/10/2026, o código foi copiado para a VM, construído e iniciado com Compose; API, web e worker ficaram saudáveis, os health checks públicos retornaram 200 e chamadas financeiras sem sessão retornaram 401. O estado em execução foi posteriormente sincronizado com o commit publicado em `main`. |
+| Playwright E2E | **20 passaram** no CI em Chromium, incluindo fluxo integrado de gestão de conta sintética pelo proprietário; nenhum dado real foi usado. |
+| Publicação deste lote | Em 12/10/2026, a VM foi atualizada para `01488a4c161fedac7444d1885b2b0b177a2bd546`; seis serviços estão ativos, API/web/PostgreSQL saudáveis, migration `0017_financial_idempotency` aplicada e health checks públicos retornam 200. |
 | Caddyfile 2.11.6 | Configuração validada no ambiente da VM. |
 | Compose da VM | Configuração validada sem imprimir valores interpolados. |
-| Deploy e migration | A versão atual permaneceu em Alembic `0016_totp_replay`; nenhuma migration nova foi necessária. API, web, worker e demais serviços ficaram saudáveis; PostgreSQL não publica porta no host. Caddy e Cloudflare não precisaram de alterações para este lote. |
-| HTTP público | `/api/health/live` e `/api/health/ready` retornam 200; `/api/accounts` sem sessão retorna 401; `/api/docs` retorna 404; HTTP redireciona para HTTPS. HSTS, CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy e Permissions-Policy foram observados. |
-| Painel Cloudflare | Conferido: Full TLS com modo automático; Browser Integrity Check ligado; regras customizadas e rate limiting ausentes; tunnel DNS do subdomínio está proxied. |
+| Deploy e migration | Commit `01488a4c161fedac7444d1885b2b0b177a2bd546` publicado; Alembic `0017_financial_idempotency (head)`. Seis serviços ativos; API/web/PostgreSQL saudáveis; PostgreSQL não publica porta no host. |
+| HTTP público | `/api/health/live` e `/api/health/ready` retornam 200; `/api/accounts` e `/api/admin/users` sem sessão retornam 401; `/api/docs` retorna 404. HSTS, CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy e Permissions-Policy foram observados na revisão anterior; não foram reamostrados neste deploy. |
+| Painel Cloudflare | Regra de rate limit ativa e limitada ao host financeiro e rotas de autenticação; painel validou a expressão. O estado atual de Full TLS, Browser Integrity Check, Bot Fight Mode, Under Attack e DNS permanece conforme a inspeção de 11/10/2026, não foi novamente alterado. |
 
 ## Próximos passos
 
-1. Criar regras de rate limiting para login, bootstrap e MFA, com limites definidos para o padrão real de uso e sem bloquear o usuário legítimo.
+1. Acompanhar eventos e possíveis falsos positivos da regra de rate limit ativa após uso real.
 2. Fazer a verificação final no iPhone: teclado, safe areas, PWA, rolagem/gestos e interação do menu/contexto.
 3. Refinar o importador após uso de arquivos de exemplo; decidir sobre OFX, mapeamento de colunas, imagens revisáveis e desfazer antes de ampliar o escopo.
-4. Configurar rate limiting na Cloudflare após definir limites adequados ao uso real; a leitura do painel foi somente consulta.
-5. Planejar push opt-in depois de validar o fluxo no iPhone, sem colocar conversas financeiras em cache.
+4. Planejar push opt-in depois de validar o fluxo no iPhone, sem colocar conversas financeiras em cache.
