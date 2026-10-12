@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.accounts import list_accounts
 from app.cards import create_card, list_cards
 from app.categories import create_category, list_categories
-from app.finance_engine import billing_cycle_for_closing_month, current_financial_date
+from app.finance_engine import billing_cycle_for_due_month, current_financial_date
 from app.finance_views import credit_card_response
 from app.invoices import (
     create_card_purchase,
@@ -209,14 +209,14 @@ class CreateCardPurchaseInput(ToolInput):
 
 
 class InvoiceOpeningBalanceInput(ToolInput):
-    closing_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    due_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     amount: str = Field(min_length=1, max_length=32)
 
     @field_validator("amount")
     @classmethod
     def validate_money(cls, value: str) -> str:
         normalized = normalize_money(value)
-        CardInvoiceOpeningBalanceSet(closing_month="2000-01", amount=normalized)
+        CardInvoiceOpeningBalanceSet(due_month="2000-01", amount=normalized)
         return normalized
 
 
@@ -226,9 +226,9 @@ class SetInvoiceOpeningBalancesInput(ToolInput):
 
     @model_validator(mode="after")
     def validate_unique_cycles(self) -> SetInvoiceOpeningBalancesInput:
-        months = [item.closing_month for item in self.invoices]
+        months = [item.due_month for item in self.invoices]
         if len(months) != len(set(months)):
-            raise ValueError("Cada mês de fechamento deve aparecer uma única vez.")
+            raise ValueError("Cada mês de vencimento deve aparecer uma única vez.")
         return self
 
 
@@ -237,9 +237,9 @@ class CreateCreditCardWithInvoicesInput(CreateCreditCardInput):
 
     @model_validator(mode="after")
     def validate_unique_cycles(self) -> CreateCreditCardWithInvoicesInput:
-        months = [item.closing_month for item in self.invoices]
+        months = [item.due_month for item in self.invoices]
         if len(months) != len(set(months)):
-            raise ValueError("Cada mês de fechamento deve aparecer uma única vez.")
+            raise ValueError("Cada mês de vencimento deve aparecer uma única vez.")
         return self
 
 
@@ -656,12 +656,12 @@ def _create_credit_card_with_invoices_preview(
         "janeiro", "fevereiro", "março", "abril", "maio", "junho",
         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
     )
-    for item in sorted(payload.invoices, key=lambda value: value.closing_month):
-        year, month = (int(part) for part in item.closing_month.split("-"))
-        cycle = billing_cycle_for_closing_month(year, month, payload.closing_day, payload.due_day)
+    for item in sorted(payload.invoices, key=lambda value: value.due_month):
+        year, month = (int(part) for part in item.due_month.split("-"))
+        cycle = billing_cycle_for_due_month(year, month, payload.closing_day, payload.due_day)
         label = (
-            f"Fatura {month_names[month - 1].capitalize()}/{year} · "
-            f"vence {cycle.due_date:%d/%m/%Y}"
+            f"Vencimento {month_names[month - 1].capitalize()}/{year} · "
+            f"ciclo {cycle.period_start:%d/%m}–{cycle.period_end:%d/%m/%Y}"
         )
         changes[label] = format_brl(Decimal(item.amount))
     return {
@@ -692,7 +692,7 @@ def _create_credit_card_with_invoices(
     db.flush()
     invoices = [
         CardInvoiceOpeningBalanceSet(
-            closing_month=item.closing_month,
+            due_month=item.due_month,
             amount=item.amount,
         )
         for item in payload.invoices
@@ -742,9 +742,9 @@ def _card_invoice_opening_balance_preview(
         "janeiro", "fevereiro", "março", "abril", "maio", "junho",
         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
     )
-    for item in sorted(payload.invoices, key=lambda value: value.closing_month):
-        year, month = (int(part) for part in item.closing_month.split("-"))
-        cycle = billing_cycle_for_closing_month(year, month, card.closing_day, card.due_day)
+    for item in sorted(payload.invoices, key=lambda value: value.due_month):
+        year, month = (int(part) for part in item.due_month.split("-"))
+        cycle = billing_cycle_for_due_month(year, month, card.closing_day, card.due_day)
         invoice = db.scalar(
             select(CardInvoice).where(
                 CardInvoice.credit_card_id == card.id,
@@ -763,7 +763,7 @@ def _card_invoice_opening_balance_preview(
             )
             current_opening = invoice.opening_balance
 
-        label = f"{month_names[month - 1].capitalize()}/{year}"
+        label = f"Vencimento {month_names[month - 1].capitalize()}/{year}"
         summary = (
             f"fatura informada {format_brl(amount)} · "
             f"compras já lançadas {format_brl(purchase_total)} · "
@@ -792,7 +792,7 @@ def _set_card_invoice_opening_balances(
     payload = cast(SetInvoiceOpeningBalancesInput, args)
     requests = [
         CardInvoiceOpeningBalanceSet(
-            closing_month=item.closing_month,
+            due_month=item.due_month,
             amount=item.amount,
         )
         for item in payload.invoices
@@ -806,12 +806,13 @@ def _set_card_invoice_opening_balances(
     )
     db.commit()
     months = ", ".join(
-        f"{int(item.closing_month[5:]):02d}/{item.closing_month[:4]}"
+        f"{int(item.due_month[5:]):02d}/{item.due_month[:4]}"
         for item in payload.invoices
     )
     return {
         "message": (
-            f"Registrei os saldos iniciais das faturas de {months} no cartão {card.name}. "
+            f"Registrei os saldos iniciais das faturas com vencimento em {months} "
+            f"no cartão {card.name}. "
             "Eles representam dívidas existentes e não criaram compras ou despesas históricas."
         ),
         "invoice_count": len(invoices),
@@ -1050,7 +1051,9 @@ TOOL_DEFINITIONS = (
         (
             "Prepara em uma única confirmação o cadastro de um cartão novo e a importação dos "
             "totais das faturas informados. Exige nome, instituição se conhecida, limite, dias "
-            "de fechamento e vencimento; nunca deduza termos ausentes. Importa apenas totais "
+            "de fechamento e vencimento; cada mês de fatura informado significa o mês do "
+            "vencimento, e o Finance Engine calcula o ciclo que fecha antes dele. Nunca deduza "
+            "termos ausentes. Importa apenas totais "
             "mensais, sem criar compras nem despesas históricas."
         ),
         CreateCreditCardWithInvoicesInput,
@@ -1069,8 +1072,10 @@ TOOL_DEFINITIONS = (
         (
             "Importa o total atual de uma ou mais faturas que já existem. Converte o total em "
             "saldo inicial da dívida, descontando compras daquela fatura que já estejam "
-            "registradas para evitar duplicá-las. Não gera compras nem despesas históricas. "
-            "Use os valores totais e meses exatos informados; sempre exige confirmação. "
+            "registradas para evitar duplicá-las. Informe o mês do vencimento da fatura; o "
+            "Finance Engine calcula automaticamente o ciclo conforme os dias do cartão. Não "
+            "gera compras nem despesas históricas. Use os valores totais e meses exatos "
+            "informados; sempre exige confirmação. "
             "Não use para registrar compras novas já feitas."
         ),
         SetInvoiceOpeningBalancesInput,

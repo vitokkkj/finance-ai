@@ -124,6 +124,21 @@ def billing_cycle_for_closing_month(
     return billing_cycle_for_purchase(closing_date, closing_day, due_day)
 
 
+def billing_cycle_for_due_month(
+    year: int, month: int, closing_day: int, due_day: int
+) -> BillingCycle:
+    """Return the scheduled invoice cycle for a month in which the invoice is due."""
+    due_date_in_month = _month_date(year, month, due_day)
+    closing_date_in_month = _month_date(year, month, closing_day)
+    if due_date_in_month > closing_date_in_month:
+        closing_year, closing_month = year, month
+    else:
+        closing_year, closing_month = _previous_month(year, month)
+    return billing_cycle_for_closing_month(
+        closing_year, closing_month, closing_day, due_day
+    )
+
+
 def calculate_account_balance(
     opening_balance: Decimal,
     opening_balance_date: date,

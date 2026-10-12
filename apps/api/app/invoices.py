@@ -11,7 +11,7 @@ from app.database import get_db
 from app.finance_deletion import delete_invoice_record
 from app.finance_engine import (
     BillingCycle,
-    billing_cycle_for_closing_month,
+    billing_cycle_for_due_month,
     billing_cycle_for_purchase,
     current_financial_date,
     financial_day_start,
@@ -106,9 +106,9 @@ def set_invoice_opening_balances(
     prepared: list[
         tuple[CardInvoiceOpeningBalanceSet, BillingCycle, CardInvoice | None, Decimal]
     ] = []
-    for payload in sorted(payloads, key=lambda item: item.closing_month):
-        year, month = (int(part) for part in payload.closing_month.split("-"))
-        cycle = billing_cycle_for_closing_month(year, month, card.closing_day, card.due_day)
+    for payload in sorted(payloads, key=lambda item: item.due_month):
+        year, month = (int(part) for part in payload.due_month.split("-"))
+        cycle = billing_cycle_for_due_month(year, month, card.closing_day, card.due_day)
         invoice = db.scalar(
             select(CardInvoice)
             .where(
@@ -232,6 +232,67 @@ def set_invoice_opening_balance(
 ) -> CardInvoiceResponse:
     _, invoices = set_invoice_opening_balances(db, user, card_id, [payload])
     invoice = invoices[0]
+    db.commit()
+    db.refresh(invoice)
+    return card_invoice_response(db, invoice)
+
+
+@router.put("/api/invoices/{invoice_id}/opening-balance", response_model=CardInvoiceResponse)
+def update_invoice_opening_balance(
+    invoice_id: UUID,
+    payload: CardInvoiceOpeningBalanceSet,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CardInvoiceResponse:
+    invoice = _get_invoice(db, user.id, invoice_id)
+    card = db.scalar(
+        select(CreditCard)
+        .where(CreditCard.id == invoice.credit_card_id, CreditCard.user_id == user.id)
+        .with_for_update()
+    )
+    if card is None:
+        raise HTTPException(status_code=404, detail="Cartão não encontrado.")
+    invoice = _get_invoice(db, user.id, invoice_id, lock=True)
+    if invoice.opening_balance <= Decimal("0.00"):
+        raise HTTPException(
+            status_code=409,
+            detail="Somente faturas com saldo inicial podem ter o ciclo ajustado.",
+        )
+    linked_transaction = db.scalar(
+        select(Transaction.id)
+        .where(Transaction.user_id == user.id, Transaction.card_invoice_id == invoice.id)
+        .limit(1)
+    )
+    if linked_transaction is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Esta fatura tem compras ou pagamentos vinculados. Ajuste os registros "
+                "associados para preservar a competência financeira."
+            ),
+        )
+
+    year, month = (int(part) for part in payload.due_month.split("-"))
+    cycle = billing_cycle_for_due_month(year, month, card.closing_day, card.due_day)
+    other_invoice = db.scalar(
+        select(CardInvoice.id).where(
+            CardInvoice.credit_card_id == card.id,
+            CardInvoice.user_id == user.id,
+            CardInvoice.closing_date == cycle.closing_date,
+            CardInvoice.id != invoice.id,
+        )
+    )
+    if other_invoice is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe uma fatura neste ciclo. Nenhum saldo foi movido.",
+        )
+
+    invoice.period_start = cycle.period_start
+    invoice.period_end = cycle.period_end
+    invoice.closing_date = cycle.closing_date
+    invoice.due_date = cycle.due_date
+    invoice.opening_balance = payload.amount
     db.commit()
     db.refresh(invoice)
     return card_invoice_response(db, invoice)

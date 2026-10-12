@@ -2,15 +2,21 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.finance_engine import (
+    billing_cycle_for_due_month,
+    billing_cycle_for_purchase,
+    current_financial_date,
+)
 from app.finance_views import card_invoice_response, credit_card_response
 from app.models import Account, CardInvoice, CreditCard, User
 from app.schemas import (
+    BillingCyclePreviewResponse,
     CardInvoiceResponse,
     CreditCardCreate,
     CreditCardResponse,
@@ -64,6 +70,40 @@ def list_upcoming_invoices(
             )
         )
     return upcoming
+
+
+@router.get("/{card_id}/billing-cycle", response_model=BillingCyclePreviewResponse)
+def preview_billing_cycle(
+    card_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    due_month: Annotated[
+        str | None,
+        Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    ] = None,
+) -> BillingCyclePreviewResponse:
+    card = db.scalar(
+        select(CreditCard).where(
+            CreditCard.id == card_id,
+            CreditCard.user_id == user.id,
+            CreditCard.is_active.is_(True),
+        )
+    )
+    if card is None:
+        raise HTTPException(status_code=404, detail="Cartão ativo não encontrado.")
+    if due_month is None:
+        cycle = billing_cycle_for_purchase(
+            current_financial_date(), card.closing_day, card.due_day
+        )
+    else:
+        year, month = (int(part) for part in due_month.split("-"))
+        cycle = billing_cycle_for_due_month(year, month, card.closing_day, card.due_day)
+    return BillingCyclePreviewResponse(
+        period_start=cycle.period_start,
+        period_end=cycle.period_end,
+        closing_date=cycle.closing_date,
+        due_date=cycle.due_date,
+    )
 
 
 @router.get("", response_model=list[CreditCardResponse])

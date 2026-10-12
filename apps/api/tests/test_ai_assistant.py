@@ -412,8 +412,8 @@ def test_chat_can_confirm_new_card_and_invoice_totals_together(client: TestClien
                                 "closing_day": 5,
                                 "due_day": 12,
                                 "invoices": [
-                                    {"closing_month": "2026-11", "amount": "357.40"},
-                                    {"closing_month": "2026-12", "amount": "136.09"},
+                                    {"due_month": "2026-11", "amount": "357.40"},
+                                    {"due_month": "2026-12", "amount": "136.09"},
                                 ],
                             }
                         ),
@@ -443,8 +443,8 @@ def test_chat_can_confirm_new_card_and_invoice_totals_together(client: TestClien
     )
     changes = confirmation["data"]["changes"]
     assert changes["Cartão"] == "Nubank"
-    assert changes["Fatura Novembro/2026 · vence 12/11/2026"] == "R$ 357,40"
-    assert changes["Fatura Dezembro/2026 · vence 12/12/2026"] == "R$ 136,09"
+    assert changes["Vencimento Novembro/2026 · ciclo 06/10–05/11/2026"] == "R$ 357,40"
+    assert changes["Vencimento Dezembro/2026 · ciclo 06/11–05/12/2026"] == "R$ 136,09"
 
     confirmed = client.post(
         f"/api/ai/conversations/{conversation['id']}/tool-calls/"
@@ -2108,8 +2108,18 @@ def test_chat_imports_multiple_invoice_totals_with_confirmation_without_duplicat
     )
     assert existing_purchase.status_code == 201
 
+    current_invoice = client.get(f"/api/cards/{card['id']}/invoices").json()[0]
+    due_year, due_month = (int(part) for part in current_invoice["due_date"][:7].split("-"))
     next_year, next_month = (
-        (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+        (due_year + 1, 1) if due_month == 12 else (due_year, due_month + 1)
+    )
+    closing_year, closing_month = (
+        int(part) for part in current_invoice["closing_date"][:7].split("-")
+    )
+    next_closing_year, next_closing_month = (
+        (closing_year + 1, 1)
+        if closing_month == 12
+        else (closing_year, closing_month + 1)
     )
     conversation = client.post("/api/ai/conversations", json={}).json()
     fake = FakeAIProvider(
@@ -2125,11 +2135,11 @@ def test_chat_imports_multiple_invoice_totals_with_confirmation_without_duplicat
                                 "credit_card_id": card["id"],
                                 "invoices": [
                                     {
-                                        "closing_month": f"{today.year}-{today.month:02d}",
+                                        "due_month": f"{due_year}-{due_month:02d}",
                                         "amount": "654,63",
                                     },
                                     {
-                                        "closing_month": f"{next_year}-{next_month:02d}",
+                                        "due_month": f"{next_year}-{next_month:02d}",
                                         "amount": "519.63",
                                     },
                                 ],
@@ -2166,8 +2176,8 @@ def test_chat_imports_multiple_invoice_totals_with_confirmation_without_duplicat
 
     invoices = client.get(f"/api/cards/{card['id']}/invoices").json()
     by_month = {invoice["closing_date"][:7]: invoice for invoice in invoices}
-    current_invoice = by_month[f"{today.year}-{today.month:02d}"]
-    next_invoice = by_month[f"{next_year}-{next_month:02d}"]
+    current_invoice = by_month[f"{closing_year}-{closing_month:02d}"]
+    next_invoice = by_month[f"{next_closing_year}-{next_closing_month:02d}"]
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "SUCCEEDED"
     assert current_invoice["opening_balance"] == "554.63"

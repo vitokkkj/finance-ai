@@ -174,7 +174,7 @@ def test_open_card_invoice_is_forecast_and_reduces_only_its_selected_account_typ
 ) -> None:
     account_id, _, _, _ = setup_commitment_finances(client)
     today = current_financial_date()
-    closing_month = f"{today.year:04d}-{today.month:02d}"
+    due_month = f"{today.year:04d}-{today.month:02d}"
     card = client.post(
         "/api/cards",
         json={
@@ -188,7 +188,7 @@ def test_open_card_invoice_is_forecast_and_reduces_only_its_selected_account_typ
     assert card.status_code == 201
     invoice = client.put(
         f"/api/cards/{card.json()['id']}/invoices/opening-balance",
-        json={"closing_month": closing_month, "amount": "250.00"},
+        json={"due_month": due_month, "amount": "250.00"},
     )
     assert invoice.status_code == 200
 
@@ -216,7 +216,7 @@ def test_upcoming_card_invoices_are_sorted_by_due_date_and_exclude_paid_invoices
 ) -> None:
     account_id, _, _, _ = setup_commitment_finances(client)
     today = current_financial_date()
-    closing_month = f"{today.year:04d}-{today.month:02d}"
+    due_month = f"{today.year:04d}-{today.month:02d}"
 
     def create_card(name: str, due_day: int) -> dict[str, str]:
         response = client.post(
@@ -238,15 +238,15 @@ def test_upcoming_card_invoices_are_sorted_by_due_date_and_exclude_paid_invoices
 
     earlier_invoice = client.put(
         f"/api/cards/{earlier_card['id']}/invoices/opening-balance",
-        json={"closing_month": closing_month, "amount": "120.00"},
+        json={"due_month": due_month, "amount": "120.00"},
     ).json()
     later_invoice = client.put(
         f"/api/cards/{later_card['id']}/invoices/opening-balance",
-        json={"closing_month": closing_month, "amount": "80.00"},
+        json={"due_month": due_month, "amount": "80.00"},
     ).json()
     paid_invoice = client.put(
         f"/api/cards/{paid_card['id']}/invoices/opening-balance",
-        json={"closing_month": closing_month, "amount": "40.00"},
+        json={"due_month": due_month, "amount": "40.00"},
     ).json()
     payment = client.post(
         f"/api/invoices/{paid_invoice['id']}/payments",

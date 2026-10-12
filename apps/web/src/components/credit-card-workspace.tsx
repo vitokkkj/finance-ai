@@ -48,6 +48,7 @@ type CardInvoice = {
   purchases: InvoiceItem[];
   payments: InvoiceItem[];
 };
+type BillingCyclePreview = Pick<CardInvoice, "period_start" | "period_end" | "closing_date" | "due_date">;
 type UpcomingCardInvoice = Pick<
   CardInvoice,
   | "id"
@@ -104,10 +105,6 @@ function localDate(): string {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-function localMonth(): string {
-  return localDate().slice(0, 7);
-}
-
 function displayDate(value: string): string {
   const [year, month, day] = value.split("-");
   return `${day}/${month}/${year}`;
@@ -161,11 +158,14 @@ export function CreditCardWorkspace({
   });
   const [paymentForm, setPaymentForm] = useState({ account_id: "", amount: "", occurred_at: localDate() });
   const [openingInvoiceFormOpen, setOpeningInvoiceFormOpen] = useState(false);
-  const [openingInvoiceForm, setOpeningInvoiceForm] = useState({ closing_month: localMonth(), amount: "" });
+  const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null);
+  const [openingInvoiceForm, setOpeningInvoiceForm] = useState({ due_month: "", amount: "" });
+  const [openingInvoiceCycle, setOpeningInvoiceCycle] = useState<BillingCyclePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const invoiceDetailsRef = useRef<HTMLDivElement>(null);
   const invoiceCyclesHeadingRef = useRef<HTMLDivElement>(null);
+  const openingInvoiceFormRef = useRef<HTMLFormElement>(null);
   const initialCardFocusHandled = useRef(false);
   const { confirm, dialog: confirmationDialog } = useSophiaConfirmation();
 
@@ -307,6 +307,25 @@ export function CreditCardWorkspace({
     void loadUpcomingInvoices();
   }, [loadUpcomingInvoices]);
 
+  useEffect(() => {
+    if (!openingInvoiceFormOpen || !selectedCardId || !openingInvoiceForm.due_month) {
+      setOpeningInvoiceCycle(null);
+      return;
+    }
+    let active = true;
+    setOpeningInvoiceCycle(null);
+    void apiRequest<BillingCyclePreview>(
+      `/api/cards/${selectedCardId}/billing-cycle?due_month=${encodeURIComponent(openingInvoiceForm.due_month)}`,
+    ).then((cycle) => {
+      if (active) setOpeningInvoiceCycle(cycle);
+    }).catch(() => {
+      if (active) setOpeningInvoiceCycle(null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [openingInvoiceForm.due_month, openingInvoiceFormOpen, selectedCardId]);
+
   async function refresh(message: string) {
     setNotice({ kind: "success", message });
     await Promise.all([loadCards(), loadInvoices(), loadUpcomingInvoices()]);
@@ -318,6 +337,19 @@ export function CreditCardWorkspace({
     setSelectedInvoiceId("");
     setPendingInvoiceId(invoice.id);
     document.getElementById("card-invoice-cycles")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function editOpeningInvoice(invoice: CardInvoice) {
+    if (invoice.opening_balance === "0.00" || invoice.purchases.length > 0 || invoice.payments.length > 0) return;
+    setSelectedCardId(invoice.credit_card_id);
+    setSelectedInvoiceId("");
+    setOpeningInvoiceId(invoice.id);
+    setOpeningInvoiceForm({ due_month: invoice.due_date.slice(0, 7), amount: invoice.opening_balance });
+    setOpeningInvoiceFormOpen(true);
+    window.requestAnimationFrame(() => {
+      openingInvoiceFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      openingInvoiceFormRef.current?.querySelector<HTMLInputElement>("input[type='month']")?.focus({ preventScroll: true });
+    });
   }
 
   function editCard(card: CreditCard) {
@@ -474,20 +506,26 @@ export function CreditCardWorkspace({
     setNotice(null);
     try {
       const invoice = await apiRequest<CardInvoice>(
-        `/api/cards/${selectedCard.id}/invoices/opening-balance`,
+        openingInvoiceId
+          ? `/api/invoices/${openingInvoiceId}/opening-balance`
+          : `/api/cards/${selectedCard.id}/invoices/opening-balance`,
         {
           method: "PUT",
           body: JSON.stringify({
-            closing_month: openingInvoiceForm.closing_month,
+            due_month: openingInvoiceForm.due_month,
             amount: toDecimalString(openingInvoiceForm.amount),
           }),
         },
       );
       setSelectedCardId(selectedCard.id);
       setSelectedInvoiceId(invoice.id);
-      setOpeningInvoiceForm({ closing_month: openingInvoiceForm.closing_month, amount: "" });
+      const wasEditing = openingInvoiceId !== null;
+      setOpeningInvoiceId(null);
+      setOpeningInvoiceForm({ due_month: "", amount: "" });
       setOpeningInvoiceFormOpen(false);
-      await refresh("Saldo da fatura importado. Ele não foi lançado como despesa.");
+      await refresh(wasEditing
+        ? "Ciclo e saldo inicial da fatura ajustados. Compras e pagamentos não foram alterados."
+        : "Saldo da fatura importado. Ele não foi lançado como despesa.");
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível registrar a fatura existente." });
     } finally {
@@ -575,18 +613,19 @@ export function CreditCardWorkspace({
           <div><p className="eyebrow">Ciclos do cartão</p><h3>Faturas de {selectedCard?.name ?? "um cartão"}</h3><p className="form-note">Escolha um cartão para consultar seus ciclos, valores pagos e saldo em aberto.</p></div>
           <div className="invoice-heading-actions">
             <label className="month-picker">Cartão para visualizar<select aria-label="Cartão para visualizar" onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label>
-            <button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceFormOpen(true); }} type="button">＋ Registrar fatura existente</button>
+            <button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceId(null); setOpeningInvoiceForm({ due_month: "", amount: "" }); setOpeningInvoiceFormOpen(true); }} type="button">＋ Registrar fatura existente</button>
           </div>
         </div>
         {openingInvoiceFormOpen && (
-          <form className="editor-form opening-invoice-form" onSubmit={(event) => void saveOpeningInvoice(event)}>
-            <div className="editor-heading"><div><h3>Saldo de uma fatura existente</h3><p className="form-note">Registre o total que já deve ao cartão. Isso aumenta o valor em aberto, sem criar uma despesa histórica.</p></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setOpeningInvoiceFormOpen(false)} type="button">Fechar</button></div>
+          <form className="editor-form opening-invoice-form" onSubmit={(event) => void saveOpeningInvoice(event)} ref={openingInvoiceFormRef}>
+            <div className="editor-heading"><div><h3>{openingInvoiceId ? "Ajustar ciclo da fatura" : "Saldo de uma fatura existente"}</h3><p className="form-note">Informe o total em aberto e o mês em que a fatura vence. A SophIA associa automaticamente o ciclo pelo fechamento do cartão.</p></div><button aria-label="Fechar formulário" className="text-button" onClick={() => { setOpeningInvoiceFormOpen(false); setOpeningInvoiceId(null); }} type="button">Fechar</button></div>
             <div className="form-grid transaction-form-grid">
               <label className="field-label">Cartão<select onChange={(event) => setSelectedCardId(event.target.value)} required value={selectedCardId}><option value="">Selecione</option>{activeCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></label>
-              <label className="field-label">Mês de fechamento<input onChange={(event) => setOpeningInvoiceForm({ ...openingInvoiceForm, closing_month: event.target.value })} required type="month" value={openingInvoiceForm.closing_month} /><small>O vencimento é calculado pelos dias de fechamento e vencimento deste cartão.</small></label>
+              <label className="field-label">Mês do vencimento<input onChange={(event) => setOpeningInvoiceForm({ ...openingInvoiceForm, due_month: event.target.value })} required type="month" value={openingInvoiceForm.due_month} /><small>Ex.: a fatura que vence em novembro pode fechar em outubro, conforme o cartão.</small></label>
               <div className="field-label"><label htmlFor="invoice-opening-amount">Saldo da fatura</label><CurrencyInput id="invoice-opening-amount" onChange={(value) => setOpeningInvoiceForm({ ...openingInvoiceForm, amount: value })} placeholder="0,00" required value={openingInvoiceForm.amount} /></div>
             </div>
-            <div className="form-actions"><button className="primary-button compact-button" disabled={busy || !selectedCardId} type="submit">{busy ? "Salvando…" : "Registrar saldo"}</button><span className="form-note">O pagamento poderá ser registrado depois e reduzirá o saldo da conta selecionada.</span></div>
+            {openingInvoiceCycle && <p className="form-note opening-invoice-cycle-preview">Ciclo {displayDate(openingInvoiceCycle.period_start)}–{displayDate(openingInvoiceCycle.period_end)} · fechamento {displayDate(openingInvoiceCycle.closing_date)} · vencimento {displayDate(openingInvoiceCycle.due_date)}</p>}
+            <div className="form-actions"><button className="primary-button compact-button" disabled={busy || !selectedCardId} type="submit">{busy ? "Salvando…" : openingInvoiceId ? "Salvar ajuste" : "Registrar saldo"}</button><span className="form-note">O pagamento poderá ser registrado depois e reduzirá o saldo da conta selecionada.</span></div>
           </form>
         )}
         {invoices.length === 0 ? <EmptyState actionLabel={cards.length === 0 ? "Cadastrar cartão" : "Registrar fatura existente"} message={cards.length === 0 ? "Cadastre um cartão para acompanhar suas faturas." : "Informe o saldo de uma fatura que já existe ou registre a primeira compra no cartão."} onAction={() => {
@@ -597,11 +636,13 @@ export function CreditCardWorkspace({
           } else {
             const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0];
             if (card) setSelectedCardId(card.id);
+            setOpeningInvoiceId(null);
+            setOpeningInvoiceForm({ due_month: "", amount: "" });
             setOpeningInvoiceFormOpen(true);
           }
         }} /> : (
           <><div className="table-wrap"><table className="data-table"><thead><tr><th>Ciclo</th><th>Fechamento</th><th>Vencimento</th><th>Total</th><th>Pago</th><th>Em aberto</th><th>Status</th><th /></tr></thead><tbody>
-            {invoicesPagination.items.map((invoice) => <tr className={focusTarget?.source === "CARD_INVOICE" && focusTarget.id === invoice.id ? "notification-target" : undefined} key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions"><button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir</button></td></tr>)}
+            {invoicesPagination.items.map((invoice) => <tr className={focusTarget?.source === "CARD_INVOICE" && focusTarget.id === invoice.id ? "notification-target" : undefined} key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions">{invoice.opening_balance !== "0.00" && invoice.purchases.length === 0 && invoice.payments.length === 0 && <button className="table-action" disabled={busy} onClick={() => editOpeningInvoice(invoice)} type="button">Corrigir ciclo</button>}<button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir</button></td></tr>)}
           </tbody></table></div><PaginationControls end={invoicesPagination.end} label="Paginação das faturas do cartão" onPageChange={invoicesPagination.setPage} page={invoicesPagination.page} pageCount={invoicesPagination.pageCount} start={invoicesPagination.start} total={invoicesPagination.total} /></>
         )}
         {selectedInvoice && (

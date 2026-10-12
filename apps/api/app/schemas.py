@@ -664,7 +664,7 @@ class UpcomingCardInvoiceResponse(BaseModel):
 
 
 class CardInvoiceOpeningBalanceSet(BaseModel):
-    closing_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    due_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     amount: Decimal = Field(ge=Decimal("0"), max_digits=14, decimal_places=2)
 
     @field_validator("amount", mode="before")
@@ -673,6 +673,13 @@ class CardInvoiceOpeningBalanceSet(BaseModel):
         if not isinstance(value, (str, Decimal)):
             raise ValueError("Informe o valor da fatura como texto decimal.")
         return value
+
+
+class BillingCyclePreviewResponse(BaseModel):
+    period_start: date
+    period_end: date
+    closing_date: date
+    due_date: date
 
 
 class RecurrenceCreate(BaseModel):

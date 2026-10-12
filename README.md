@@ -88,6 +88,8 @@ A tabela `transactions` guarda cada evento uma única vez. Uma transferência é
 
 O dia de fechamento é inclusivo: uma compra no próprio dia entra na fatura que fecha naquele dia; uma compra no dia seguinte entra no ciclo seguinte. Quando o dia não existe no mês (por exemplo, fechamento 31 em fevereiro), o fechamento usa o último dia do mês. O vencimento usa o dia configurado no mesmo mês apenas se for posterior ao fechamento; caso contrário, fica no mês seguinte, também ajustado ao último dia existente. Ciclos e datas são datas civis em `America/Sao_Paulo`.
 
+Ao importar um saldo de fatura, informe o mês do **vencimento**. Por exemplo, em um cartão que fecha dia 26 e vence dia 10, a fatura com vencimento em novembro corresponde ao ciclo de 27 de setembro a 26 de outubro. A prévia da tela mostra o ciclo calculado antes do registro.
+
 Status da fatura é derivado do ciclo e dos pagamentos: `OPEN` até a data de fechamento, `CLOSED` depois do fechamento, `PARTIALLY_PAID` enquanto houver saldo após pagamento parcial, `PAID` quando o saldo chega a zero e `OVERDUE` após o vencimento enquanto restar saldo. Total comprado, valor pago, saldo aberto, limite utilizado e limite disponível são calculados no Finance Engine.
 
 As datas inseridas representam o dia civil em `America/Sao_Paulo`; os limites do mês são convertidos para instantes com timezone nas consultas. A interface e a moeda são `pt-BR` e BRL.

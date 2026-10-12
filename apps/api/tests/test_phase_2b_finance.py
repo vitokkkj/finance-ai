@@ -236,7 +236,7 @@ def test_existing_invoice_balance_can_be_imported_and_paid_without_creating_expe
 
     imported = client.put(
         f"/api/cards/{card['id']}/invoices/opening-balance",
-        json={"closing_month": "2026-11", "amount": "654.63"},
+        json={"due_month": "2026-11", "amount": "654.63"},
     )
 
     assert imported.status_code == 200
@@ -267,10 +267,75 @@ def test_existing_invoice_balance_can_be_imported_and_paid_without_creating_expe
 
     repeated = client.put(
         f"/api/cards/{card['id']}/invoices/opening-balance",
-        json={"closing_month": "2026-11", "amount": "654.63"},
+        json={"due_month": "2026-11", "amount": "654.63"},
     )
     assert repeated.status_code == 200
     assert repeated.json()["total"] == "654.63"
+
+
+def test_existing_invoice_balance_can_be_moved_to_its_correct_due_month(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    cards = [
+        {
+            "name": "Gold",
+            "closing_day": 26,
+            "due_day": 10,
+            "expected": ("2026-09-27", "2026-10-26", "2026-10-26", "2026-11-10"),
+        },
+        {
+            "name": "Cresol",
+            "closing_day": 23,
+            "due_day": 3,
+            "expected": ("2026-09-24", "2026-10-23", "2026-10-23", "2026-11-03"),
+        },
+    ]
+
+    for card_data in cards:
+        card = client.post(
+            "/api/cards",
+            json={
+                "name": card_data["name"],
+                "credit_limit": "5000.00",
+                "closing_day": card_data["closing_day"],
+                "due_day": card_data["due_day"],
+            },
+        ).json()
+        preview = client.get(
+            f"/api/cards/{card['id']}/billing-cycle?due_month=2026-11"
+        )
+        assert preview.status_code == 200, preview.text
+        assert (
+            preview.json()["period_start"],
+            preview.json()["period_end"],
+            preview.json()["closing_date"],
+            preview.json()["due_date"],
+        ) == card_data["expected"]
+
+        imported = client.put(
+            f"/api/cards/{card['id']}/invoices/opening-balance",
+            json={"due_month": "2026-12", "amount": "654.63"},
+        )
+        assert imported.status_code == 200, imported.text
+
+        corrected = client.put(
+            f"/api/invoices/{imported.json()['id']}/opening-balance",
+            json={"due_month": "2026-11", "amount": "654.63"},
+        )
+
+        assert corrected.status_code == 200, corrected.text
+        invoice = corrected.json()
+        assert (
+            invoice["period_start"],
+            invoice["period_end"],
+            invoice["closing_date"],
+            invoice["due_date"],
+        ) == card_data["expected"]
+        assert invoice["opening_balance"] == "654.63"
+        assert invoice["total"] == "654.63"
+        assert invoice["purchases"] == []
+        assert invoice["payments"] == []
 
 
 def test_card_closing_is_inclusive_and_next_day_moves_to_next_invoice(client: TestClient) -> None:
