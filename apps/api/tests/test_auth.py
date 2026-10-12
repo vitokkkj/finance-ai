@@ -555,7 +555,7 @@ def test_production_bootstrap_needs_owner_token_and_totp(
     created = client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
             "bootstrap_token": "a" * 64,
@@ -565,3 +565,15 @@ def test_production_bootstrap_needs_owner_token_and_totp(
     assert created.status_code == 201
     assert created.cookies.get("finance_ai_session") is None
     assert client.get("/api/auth/me").status_code == 401
+
+    wrong_owner = client.post(
+        "/api/auth/setup",
+        json={
+            "email": "usuario@example.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+            "bootstrap_token": "a" * 64,
+            "totp_code": "123456",
+        },
+    )
+    assert wrong_owner.status_code == 403

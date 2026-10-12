@@ -6,7 +6,9 @@ A visão geral financeira permanece como uma área própria. Na conversa, o pain
 
 O composer permite anexar até quatro imagens quando o ChatGPT conectado está ativo. Cada anexo tem prévia e ação para remover; a interface informa que os arquivos serão enviados para análise e não serão salvos no histórico. As páginas de Preferências e Minha conta rolam dentro da área principal e mantêm espaço ao final para que o último conteúdo e as ações continuem acessíveis.
 
-Categorias aparecem em grupos separados de **Despesas** e **Receitas**, com contagem e acento de cor próprios para reduzir a confusão entre o tipo e o nome de cada categoria.
+Categorias aparecem em grupos separados, com **Receitas antes de Despesas**, contagem e acento de cor próprios para reduzir a confusão entre o tipo e o nome de cada categoria. Abrir o nome de uma categoria leva aos lançamentos filtrados por ela.
+
+Listas extensas usam a paginação padrão da SophIA, com 15 itens por página e indicação de intervalo/total. Os controles mantêm o estilo visual do sistema, funcionam por teclado e preservam a navegação para o item aberto a partir de um aviso.
 
 - cartão: limite, fechamento, vencimento e fatura mais recente;
 - conta: saldo e movimentações associadas;

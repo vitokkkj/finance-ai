@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "biome lint src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "lucide-react": "^1.53.0",
@@ -17,6 +18,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
+    "@playwright/cli": "^0.1.22",
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "24.19.1",
     "@types/react": "19.3.0",

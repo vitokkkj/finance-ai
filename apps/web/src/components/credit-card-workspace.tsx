@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
+import { PaginationControls, usePagination } from "@/components/pagination";
 import { useSophiaConfirmation } from "@/components/sophia-confirmation-dialog";
 import type { FinanceFocusTarget } from "@/lib/finance-types";
 
@@ -69,6 +70,28 @@ type CardForm = {
   payment_account_id: string;
 };
 type Notice = { kind: "success" | "error"; message: string } | null;
+
+const invoiceMonthFormatter = new Intl.DateTimeFormat("pt-BR", {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+function groupUpcomingInvoicesByDueMonth(invoices: UpcomingCardInvoice[]) {
+  const groups = new Map<string, UpcomingCardInvoice[]>();
+  for (const invoice of invoices) {
+    const month = invoice.due_date.slice(0, 7);
+    const group = groups.get(month) ?? [];
+    group.push(invoice);
+    groups.set(month, group);
+  }
+
+  return Array.from(groups, ([month, monthInvoices]) => ({
+    month,
+    label: invoiceMonthFormatter.format(new Date(`${month}-01T00:00:00.000Z`)),
+    invoices: monthInvoices,
+  }));
+}
 
 function localDate(): string {
   const pieces = new Intl.DateTimeFormat("en-CA", {
@@ -148,7 +171,24 @@ export function CreditCardWorkspace({
     () => categories.filter((category) => !category.is_archived && category.type === "EXPENSE"),
     [categories],
   );
+  const selectedCard = cards.find((card) => card.id === selectedCardId) ?? null;
   const selectedInvoice = invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null;
+  const orderedUpcomingInvoices = useMemo(
+    () => [...upcomingInvoices].sort((left, right) =>
+      left.due_date.localeCompare(right.due_date)
+      || left.credit_card_name.localeCompare(right.credit_card_name, "pt-BR")
+      || left.period_start.localeCompare(right.period_start)),
+    [upcomingInvoices],
+  );
+  const cardsPagination = usePagination(cards, String(cards.length));
+  const upcomingPagination = usePagination(orderedUpcomingInvoices, "upcoming-invoices");
+  const invoicesPagination = usePagination(invoices, selectedCardId);
+  const purchasePagination = usePagination(selectedInvoice?.purchases ?? [], selectedInvoiceId);
+  const paymentPagination = usePagination(selectedInvoice?.payments ?? [], selectedInvoiceId);
+  const upcomingInvoiceGroups = useMemo(
+    () => groupUpcomingInvoicesByDueMonth(upcomingPagination.items),
+    [upcomingPagination.items],
+  );
 
   useEffect(() => {
     if (focusTarget?.source !== "CARD_INVOICE" || !focusTarget.credit_card_id) return;
@@ -161,17 +201,24 @@ export function CreditCardWorkspace({
     }
     const invoice = invoices.find((item) => item.id === focusTarget.id);
     if (!invoice) return;
+    const invoiceIndex = invoices.findIndex((item) => item.id === invoice.id);
+    const targetPage = Math.floor(invoiceIndex / invoicesPagination.pageSize) + 1;
+    if (invoicesPagination.page !== targetPage) {
+      invoicesPagination.setPage(targetPage);
+    }
     setSelectedInvoiceId(invoice.id);
     const defaultAccountId = card.payment_account_id && activeAccounts.some((item) => item.id === card.payment_account_id)
       ? card.payment_account_id
       : activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "";
     setPaymentForm({ account_id: defaultAccountId, amount: invoice.outstanding, occurred_at: localDate() });
-  }, [activeAccounts, cards, focusTarget, invoices, selectedCardId]);
+  }, [activeAccounts, cards, focusTarget, invoices, invoicesPagination.page, invoicesPagination.pageSize, invoicesPagination.setPage, selectedCardId]);
 
   useEffect(() => {
     if (!pendingInvoiceId) return;
     const invoice = invoices.find((item) => item.id === pendingInvoiceId);
     if (!invoice) return;
+    const invoiceIndex = invoices.findIndex((item) => item.id === invoice.id);
+    invoicesPagination.setPage(Math.floor(invoiceIndex / invoicesPagination.pageSize) + 1);
     const card = cards.find((item) => item.id === invoice.credit_card_id);
     setSelectedInvoiceId(invoice.id);
     const defaultAccountId = card?.payment_account_id && activeAccounts.some((item) => item.id === card.payment_account_id)
@@ -179,7 +226,7 @@ export function CreditCardWorkspace({
       : activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "";
     setPaymentForm({ account_id: defaultAccountId, amount: invoice.outstanding, occurred_at: localDate() });
     setPendingInvoiceId(null);
-  }, [activeAccounts, cards, invoices, pendingInvoiceId]);
+  }, [activeAccounts, cards, invoices, invoicesPagination.pageSize, invoicesPagination.setPage, pendingInvoiceId]);
 
   useEffect(() => {
     if (focusTarget?.source !== "CARD_INVOICE" || selectedInvoiceId !== focusTarget.id || !selectedInvoice) return;
@@ -456,9 +503,9 @@ export function CreditCardWorkspace({
           </form>
         )}
         {cards.length === 0 ? <EmptyState actionLabel="Cadastrar primeiro cartão" message="Cadastre um cartão para acompanhar compras e faturas." onAction={() => { setCardEditingId(null); setCardForm(emptyCard()); setCardFormOpen(true); }} /> : (
-          <div className="table-wrap"><table className="data-table"><thead><tr><th>Cartão</th><th>Limite</th><th>Utilizado</th><th>Disponível</th><th>Próximo vencimento</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-            {cards.map((card) => <tr key={card.id}><td><strong className="cell-primary">{card.name}</strong><small className="cell-secondary">{card.institution ?? "Cartão de crédito"} · fecha {card.closing_day} · vence {card.due_day}</small></td><td className="table-money">{formatCurrency(card.credit_limit)}</td><td className="table-money">{formatCurrency(card.used_limit)}</td><td className="table-money">{formatCurrency(card.available_limit)}</td><td>{card.next_due_date ? displayDate(card.next_due_date) : "—"}</td><td><span className={card.is_active ? "state-pill active" : "state-pill archived"}>{card.is_active ? "Ativo" : "Arquivado"}</span></td><td className="row-actions">{card.is_active && <><button className="table-action" onClick={() => editCard(card)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCard(card)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCard(card)} type="button">Excluir</button></td></tr>)}
-          </tbody></table></div>
+          <><div className="table-wrap"><table className="data-table"><thead><tr><th>Cartão</th><th>Limite</th><th>Utilizado</th><th>Disponível</th><th>Próximo vencimento</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
+            {cardsPagination.items.map((card) => <tr key={card.id}><td><strong className="cell-primary">{card.name}</strong><small className="cell-secondary">{card.institution ?? "Cartão de crédito"} · fecha {card.closing_day} · vence {card.due_day}</small></td><td className="table-money">{formatCurrency(card.credit_limit)}</td><td className="table-money">{formatCurrency(card.used_limit)}</td><td className="table-money">{formatCurrency(card.available_limit)}</td><td>{card.next_due_date ? displayDate(card.next_due_date) : "—"}</td><td><span className={card.is_active ? "state-pill active" : "state-pill archived"}>{card.is_active ? "Ativo" : "Arquivado"}</span></td><td className="row-actions">{card.is_active && <><button className="table-action" onClick={() => editCard(card)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCard(card)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCard(card)} type="button">Excluir</button></td></tr>)}
+          </tbody></table></div><PaginationControls end={cardsPagination.end} label="Paginação dos cartões" onPageChange={cardsPagination.setPage} page={cardsPagination.page} pageCount={cardsPagination.pageCount} start={cardsPagination.start} total={cardsPagination.total} /></>
         )}
       </section>
 
@@ -485,21 +532,36 @@ export function CreditCardWorkspace({
       </section>
 
       <section className="surface-card data-card" id="card-invoice-cycles">
-        <div className="surface-heading"><div><p className="eyebrow">Ciclos mensais</p><h2>Faturas</h2></div><div className="invoice-heading-actions"><label className="month-picker">Cartão<select onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label><button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceFormOpen(true); }} type="button">＋ Registrar fatura existente</button></div></div>
+        <div className="surface-heading"><div><p className="eyebrow">Ciclos mensais</p><h2>Faturas</h2></div></div>
         <section aria-label="Próximas faturas de todos os cartões" className="upcoming-invoices">
-          <div className="editor-heading"><div><h3>Próximas faturas</h3><p className="form-note">Em aberto, ordenadas pelo vencimento mais próximo.</p></div><span className="state-pill active">{upcomingInvoices.length}</span></div>
+          <div className="editor-heading"><div><h3>Próximas faturas de todos os cartões</h3><p className="form-note">Visão consolidada, agrupada por vencimento mais próximo.</p></div><span className="state-pill active">{upcomingInvoices.length}</span></div>
           {upcomingInvoices.length === 0 ? <p className="invoice-detail-empty">Nenhuma fatura em aberto cadastrada.</p> : (
-            <div className="upcoming-invoice-list">
-              {upcomingInvoices.map((invoice) => <article className="upcoming-invoice-row" key={invoice.id}>
-                <div className="upcoming-invoice-due"><span>Vencimento</span><strong>{displayDate(invoice.due_date)}</strong></div>
-                <div className="upcoming-invoice-card"><strong>{invoice.credit_card_name}</strong><span>Ciclo {displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</span></div>
-                <div className="upcoming-invoice-amount"><span>Em aberto</span><strong>{formatCurrency(invoice.outstanding)}</strong></div>
-                <span className={`state-pill ${invoice.status === "OVERDUE" ? "overdue" : "active"}`}>{statusLabel(invoice.status)}</span>
-                <div className="upcoming-invoice-actions"><button className="table-action" onClick={() => openUpcomingInvoice(invoice)} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir fatura</button></div>
-              </article>)}
-            </div>
+            <>
+              <div className="upcoming-invoice-groups" id="upcoming-invoice-groups">
+                {upcomingInvoiceGroups.map((group) => <section aria-labelledby={`upcoming-invoice-month-${group.month}`} className="upcoming-invoice-month-group" key={group.month}>
+                  <div className="upcoming-invoice-month-heading"><h4 id={`upcoming-invoice-month-${group.month}`}>{group.label}</h4><span>{group.invoices.length} {group.invoices.length === 1 ? "fatura" : "faturas"}</span></div>
+                  <div className="upcoming-invoice-list">
+                    {group.invoices.map((invoice) => <article className="upcoming-invoice-row" key={invoice.id}>
+                      <div className="upcoming-invoice-due"><span>Vencimento</span><strong>{displayDate(invoice.due_date)}</strong></div>
+                      <div className="upcoming-invoice-card"><strong>{invoice.credit_card_name}</strong><span>Ciclo {displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</span></div>
+                      <div className="upcoming-invoice-amount"><span>Em aberto</span><strong>{formatCurrency(invoice.outstanding)}</strong></div>
+                      <span className={`state-pill ${invoice.status === "OVERDUE" ? "overdue" : "active"}`}>{statusLabel(invoice.status)}</span>
+                      <div className="upcoming-invoice-actions"><button className="table-action" onClick={() => openUpcomingInvoice(invoice)} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir fatura</button></div>
+                    </article>)}
+                  </div>
+                </section>)}
+              </div>
+              <PaginationControls end={upcomingPagination.end} label="Paginação das próximas faturas" onPageChange={upcomingPagination.setPage} page={upcomingPagination.page} pageCount={upcomingPagination.pageCount} start={upcomingPagination.start} total={upcomingPagination.total} />
+            </>
           )}
         </section>
+        <div className="editor-heading invoice-card-cycle-heading">
+          <div><p className="eyebrow">Ciclos do cartão</p><h3>Faturas de {selectedCard?.name ?? "um cartão"}</h3><p className="form-note">Escolha um cartão para consultar seus ciclos, valores pagos e saldo em aberto.</p></div>
+          <div className="invoice-heading-actions">
+            <label className="month-picker">Cartão para visualizar<select aria-label="Cartão para visualizar" onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label>
+            <button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceFormOpen(true); }} type="button">＋ Registrar fatura existente</button>
+          </div>
+        </div>
         {openingInvoiceFormOpen && (
           <form className="editor-form opening-invoice-form" onSubmit={(event) => void saveOpeningInvoice(event)}>
             <div className="editor-heading"><div><h3>Saldo de uma fatura existente</h3><p className="form-note">Registre o total que já deve ao cartão. Isso aumenta o valor em aberto, sem criar uma despesa histórica.</p></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setOpeningInvoiceFormOpen(false)} type="button">Fechar</button></div>
@@ -522,9 +584,9 @@ export function CreditCardWorkspace({
             setOpeningInvoiceFormOpen(true);
           }
         }} /> : (
-          <div className="table-wrap"><table className="data-table"><thead><tr><th>Ciclo</th><th>Fechamento</th><th>Vencimento</th><th>Total</th><th>Pago</th><th>Em aberto</th><th>Status</th><th /></tr></thead><tbody>
-            {invoices.map((invoice) => <tr className={focusTarget?.source === "CARD_INVOICE" && focusTarget.id === invoice.id ? "notification-target" : undefined} key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions"><button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir</button></td></tr>)}
-          </tbody></table></div>
+          <><div className="table-wrap"><table className="data-table"><thead><tr><th>Ciclo</th><th>Fechamento</th><th>Vencimento</th><th>Total</th><th>Pago</th><th>Em aberto</th><th>Status</th><th /></tr></thead><tbody>
+            {invoicesPagination.items.map((invoice) => <tr className={focusTarget?.source === "CARD_INVOICE" && focusTarget.id === invoice.id ? "notification-target" : undefined} key={invoice.id}><td>{displayDate(invoice.period_start)} – {displayDate(invoice.period_end)}</td><td>{displayDate(invoice.closing_date)}</td><td>{displayDate(invoice.due_date)}</td><td className="table-money">{formatCurrency(invoice.total)}</td><td>{formatCurrency(invoice.paid_amount)}</td><td>{formatCurrency(invoice.outstanding)}</td><td><span className={`state-pill ${invoice.status === "PAID" ? "active" : "archived"}`}>{statusLabel(invoice.status)}</span></td><td className="row-actions"><button className="table-action" onClick={() => { setSelectedInvoiceId(invoice.id); setPaymentForm({ account_id: activeAccounts.length === 1 ? activeAccounts[0]?.id ?? "" : "", amount: invoice.outstanding, occurred_at: localDate() }); }} type="button">Detalhes / pagar</button><button className="table-action danger-action" disabled={busy} onClick={() => void deleteInvoice(invoice)} type="button">Excluir</button></td></tr>)}
+          </tbody></table></div><PaginationControls end={invoicesPagination.end} label="Paginação das faturas do cartão" onPageChange={invoicesPagination.setPage} page={invoicesPagination.page} pageCount={invoicesPagination.pageCount} start={invoicesPagination.start} total={invoicesPagination.total} /></>
         )}
         {selectedInvoice && (
           <section aria-label="Detalhes da fatura e registro de pagamento" className="invoice-details" ref={invoiceDetailsRef} tabIndex={-1}>
@@ -555,13 +617,13 @@ export function CreditCardWorkspace({
               <section className="invoice-detail-group">
                 <h4>Compras registradas</h4>
                 {selectedInvoice.purchases.length > 0
-                  ? selectedInvoice.purchases.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)
+                  ? <>{purchasePagination.items.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)}<PaginationControls end={purchasePagination.end} label="Paginação das compras da fatura" onPageChange={purchasePagination.setPage} page={purchasePagination.page} pageCount={purchasePagination.pageCount} start={purchasePagination.start} total={purchasePagination.total} /></>
                   : <p className="invoice-detail-empty">Nenhuma compra detalhada neste ciclo.</p>}
               </section>
               <section className="invoice-detail-group">
                 <h4>Pagamentos registrados</h4>
                 {selectedInvoice.payments.length > 0
-                  ? selectedInvoice.payments.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)
+                  ? <>{paymentPagination.items.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)}<PaginationControls end={paymentPagination.end} label="Paginação dos pagamentos da fatura" onPageChange={paymentPagination.setPage} page={paymentPagination.page} pageCount={paymentPagination.pageCount} start={paymentPagination.start} total={paymentPagination.total} /></>
                   : <p className="invoice-detail-empty">Nenhum pagamento registrado neste ciclo.</p>}
               </section>
             </div>

@@ -10,9 +10,40 @@ from app.ai_intents import (
     format_brl,
     parse_manual_expense,
     parse_manual_recurrence,
+    parse_month_forecast_period,
     suggest_expense_category_name,
 )
 from app.models import Account, Category
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("Quais são meus gastos previstos para novembro?", (2026, 11)),
+        ("O que tenho que pagar em janeiro?", (2027, 1)),
+        ("Quais contas a pagar em 02/2027?", (2027, 2)),
+        ("Previsão deste mês", (2026, 10)),
+        ("Contas previstas para o próximo mês", (2026, 11)),
+    ],
+)
+def test_month_forecast_query_resolves_requested_period(
+    content: str, expected: tuple[int, int]
+) -> None:
+    assert parse_month_forecast_period(content, date(2026, 10, 12)) == expected
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Quanto gastei em novembro?",
+        "Mostre meu saldo em novembro",
+        "Quais são meus gastos previstos para novembro e dezembro?",
+        "O que tenho que pagar neste mês e no próximo mês?",
+        "O que tenho que pagar em novembro e no próximo mês?",
+    ],
+)
+def test_month_forecast_query_does_not_capture_other_or_ambiguous_requests(content: str) -> None:
+    assert parse_month_forecast_period(content, date(2026, 10, 12)) is None
 
 
 def _account(name: str = "Sicredi", *, active: bool = True) -> Account:

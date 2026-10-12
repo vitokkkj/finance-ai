@@ -22,9 +22,11 @@ import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { CalendarMonthInput } from "@/components/calendar-month-input";
 import { CreditCardWorkspace } from "@/components/credit-card-workspace";
+import { TransactionImport } from "@/components/transaction-import";
 import { RecurrenceWorkspace } from "@/components/recurrence-workspace";
 import { BrandMark } from "@/components/brand-mark";
 import { useSophiaConfirmation } from "@/components/sophia-confirmation-dialog";
+import { PaginationControls, usePagination } from "@/components/pagination";
 
 type Section = "overview" | "transactions" | "accounts" | "categories" | "cards" | "recurrences";
 type AccountType = "CHECKING" | "SAVINGS" | "CASH" | "OTHER";
@@ -653,6 +655,21 @@ export function FinanceWorkspace({
 
   const activeAccounts = accounts.filter((account) => account.is_active);
   const activeCategories = categories.filter((category) => !category.is_archived);
+  const accountPagination = usePagination(accounts, String(accounts.length));
+  const incomeCategories = categories.filter((category) => category.type === "INCOME");
+  const expenseCategories = categories.filter((category) => category.type === "EXPENSE");
+  const incomeCategoryPagination = usePagination(incomeCategories, String(incomeCategories.length));
+  const expenseCategoryPagination = usePagination(expenseCategories, String(expenseCategories.length));
+  const categoryGroups = [
+    { type: "INCOME" as const, label: "Receitas", pagination: incomeCategoryPagination },
+    { type: "EXPENSE" as const, label: "Despesas", pagination: expenseCategoryPagination },
+  ].filter((group) => group.pagination.total > 0);
+  const transactionPagination = usePagination(transactions, `${appliedFilters}:${month}`);
+  const overviewCategoryPagination = usePagination(dashboard?.expenses_by_category ?? [], month);
+  const overviewCardPagination = usePagination(dashboard?.cards ?? [], month);
+  const forecastExpenses = dashboard?.forecast_items.filter((item) => item.type === "EXPENSE") ?? [];
+  const forecastPagination = usePagination(forecastExpenses, dashboard?.forecast_end ?? month);
+  const activeCategoryFilter = categories.find((category) => category.id === filters.category_id);
   const transactionCategories = activeCategories.filter(
     (category) => category.type === transactionForm.type,
   );
@@ -787,7 +804,7 @@ export function FinanceWorkspace({
                       <div><span>Saldo corrente projetado</span><strong>{projectedCheckingLabel(dashboard)}</strong></div>
                     </div>
                     {dashboard.forecast_unassigned_invoice_total !== "0.00" && <p className="forecast-unassigned-note">Faturas sem conta pagadora definida: {formatCurrency(dashboard.forecast_unassigned_invoice_total)}. Elas aparecem na lista, mas não reduzem o saldo projetado.</p>}
-                    {dashboard.forecast_items.filter((item) => item.type === "EXPENSE").length === 0 ? <p className="forecast-empty">Nenhuma conta ou fatura prevista até {displayDate(dashboard.forecast_end)}.</p> : <div className="forecast-list">{dashboard.forecast_items.filter((item) => item.type === "EXPENSE").slice(0, 8).map((item) => <div className="forecast-row" key={item.id}><span><strong>{item.description}</strong><small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}{item.account_name ? ` · ${item.account_name}` : ""}</small></span><b>{formatCurrency(item.amount)}</b></div>)}</div>}
+                    {forecastExpenses.length === 0 ? <p className="forecast-empty">Nenhuma conta ou fatura prevista até {displayDate(dashboard.forecast_end)}.</p> : <><div className="forecast-list">{forecastPagination.items.map((item) => <div className="forecast-row" key={item.id}><span><strong>{item.description}</strong><small>{displayDate(item.due_date)} · {item.status === "OVERDUE" ? "Em atraso" : item.status === "DUE_SOON" ? "Próximos 7 dias" : "Neste mês"}{item.account_name ? ` · ${item.account_name}` : ""}</small></span><b>{formatCurrency(item.amount)}</b></div>)}</div><PaginationControls end={forecastPagination.end} label="Paginação das contas previstas" onPageChange={forecastPagination.setPage} page={forecastPagination.page} pageCount={forecastPagination.pageCount} start={forecastPagination.start} total={forecastPagination.total} /></>}
                   </section>
 
                   <div className="overview-grid">
@@ -797,11 +814,12 @@ export function FinanceWorkspace({
                         <EmptyState actionLabel={onOpenAssistant ? "Perguntar sobre o mês" : undefined} message="Ainda não há despesas neste período." onAction={onOpenAssistant ? () => onOpenAssistant("O que você pode me dizer sobre meus gastos neste mês?") : undefined} />
                       ) : (
                         <ul className="category-summary-list">
-                          {dashboard.expenses_by_category.map((item) => (
+                          {overviewCategoryPagination.items.map((item) => (
                             <li key={item.category_id}><span className="category-dot" /><span>{item.category_name}</span><strong className="category-amount">{formatCurrency(item.amount)}</strong></li>
                           ))}
                         </ul>
                       )}
+                      <PaginationControls end={overviewCategoryPagination.end} label="Paginação das despesas por categoria" onPageChange={overviewCategoryPagination.setPage} page={overviewCategoryPagination.page} pageCount={overviewCategoryPagination.pageCount} start={overviewCategoryPagination.start} total={overviewCategoryPagination.total} />
                     </section>
                     <section className="surface-card">
                       <div className="surface-heading"><div><p className="eyebrow">Movimentação</p><h2>Últimos lançamentos</h2></div><button className="link-button" onClick={() => setSection("transactions")} type="button">Ver todos ↗</button></div>
@@ -825,7 +843,7 @@ export function FinanceWorkspace({
                   <section className="card-summary-grid" aria-label="Cartões de crédito">
                     {dashboard.cards.length === 0 ? (
                       <div className="surface-card card-summary-empty"><p className="eyebrow">Cartões</p><h2>Nenhum cartão cadastrado</h2><button className="link-button" onClick={() => setSection("cards")} type="button">Adicionar cartão ↗</button></div>
-                    ) : dashboard.cards.map((card) => (
+                    ) : overviewCardPagination.items.map((card) => (
                       <article className="surface-card card-summary" key={card.id}>
                         <div className="surface-heading"><div><p className="eyebrow">Cartão de crédito</p><h2>{card.name}</h2></div><span className="card-summary-mark"><CreditCard aria-hidden="true" size={18} /></span></div>
                         <div className="card-summary-values"><div><span>Em aberto</span><strong>{formatCurrency(card.used_limit)}</strong></div><div><span>Limite disponível</span><strong>{formatCurrency(card.available_limit)}</strong></div></div>
@@ -834,6 +852,7 @@ export function FinanceWorkspace({
                       </article>
                     ))}
                   </section>
+                  <PaginationControls end={overviewCardPagination.end} label="Paginação dos cartões do resumo" onPageChange={overviewCardPagination.setPage} page={overviewCardPagination.page} pageCount={overviewCardPagination.pageCount} start={overviewCardPagination.start} total={overviewCardPagination.total} />
                 </>
               )}
 
@@ -861,9 +880,9 @@ export function FinanceWorkspace({
                     </form>
                   )}
                   {accounts.length === 0 ? <EmptyState actionLabel="Adicionar primeira conta" message="Cadastre uma conta para começar a acompanhar seu saldo." onAction={() => { setAccountForm(emptyAccount()); setAccountEditingId(null); setAccountFormOpen(true); }} /> : (
-                    <div className="table-wrap"><table className="data-table"><thead><tr><th>Conta</th><th>Tipo</th><th>Saldo atual</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-                      {accounts.map((account) => <tr key={account.id}><td><strong className="cell-primary">{account.name}</strong><small className="cell-secondary">{account.opening_balance_date ? `Saldo inicial em ${displayDate(account.opening_balance_date)}` : "Saldo inicial não informado"}</small></td><td>{accountTypeLabel(account.type)}</td><td className="table-money">{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</td><td><span className={account.is_active ? "state-pill active" : "state-pill archived"}>{account.is_active ? "Ativa" : "Arquivada"}</span></td><td className="row-actions">{account.is_active && <><button className="table-action" onClick={() => editAccount(account)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveAccount(account)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteAccount(account)} type="button">Excluir</button></td></tr>)}
-                    </tbody></table></div>
+                    <><div className="table-wrap"><table className="data-table"><thead><tr><th>Conta</th><th>Tipo</th><th>Saldo atual</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
+                      {accountPagination.items.map((account) => <tr key={account.id}><td><strong className="cell-primary">{account.name}</strong><small className="cell-secondary">{account.opening_balance_date ? `Saldo inicial em ${displayDate(account.opening_balance_date)}` : "Saldo inicial não informado"}</small></td><td>{accountTypeLabel(account.type)}</td><td className="table-money">{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</td><td><span className={account.is_active ? "state-pill active" : "state-pill archived"}>{account.is_active ? "Ativa" : "Arquivada"}</span></td><td className="row-actions">{account.is_active && <><button className="table-action" onClick={() => editAccount(account)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveAccount(account)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteAccount(account)} type="button">Excluir</button></td></tr>)}
+                    </tbody></table></div><PaginationControls end={accountPagination.end} label="Paginação das contas" onPageChange={accountPagination.setPage} page={accountPagination.page} pageCount={accountPagination.pageCount} start={accountPagination.start} total={accountPagination.total} /></>
                   )}
                 </section>
               )}
@@ -883,15 +902,12 @@ export function FinanceWorkspace({
                   )}
                   {categories.length === 0 ? <EmptyState actionLabel="Criar categoria" message="Crie categorias para classificar receitas e despesas." onAction={() => { setCategoryName(""); setCategoryEditingId(null); setCategoryFormOpen(true); }} /> : (
                     <div className="category-groups">
-                      {([
-                        { type: "INCOME" as const, label: "Receitas", items: categories.filter((category) => category.type === "INCOME") },
-                        { type: "EXPENSE" as const, label: "Despesas", items: categories.filter((category) => category.type === "EXPENSE") },
-                      ]).filter((group) => group.items.length > 0).map((group) => (
+                      {categoryGroups.map((group) => (
                         <section aria-label={`Categorias de ${group.label.toLowerCase()}`} className={`category-group category-group-${group.type.toLowerCase()}`} key={group.type}>
-                          <div className="category-group-heading"><h3>{group.label}</h3><span>{group.items.length} {group.items.length === 1 ? "categoria" : "categorias"}</span></div>
+                          <div className="category-group-heading"><h3>{group.label}</h3><span>{group.pagination.total} {group.pagination.total === 1 ? "categoria" : "categorias"}</span></div>
                           <div className="table-wrap"><table className="data-table"><thead><tr><th>Categoria</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-                            {group.items.map((category) => <tr key={category.id}><td><strong className="cell-primary">{category.name}</strong></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={() => editCategory(category)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCategory(category)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCategory(category)} type="button">Excluir</button></td></tr>)}
-                          </tbody></table></div>
+                            {group.pagination.items.map((category) => <tr key={category.id}><td><button aria-label={`Ver lançamentos da categoria ${category.name}`} className="category-name-drilldown" onClick={() => { const params = new URLSearchParams({ category_id: category.id }); setFilters({ ...emptyFilters(), category_id: category.id }); setAppliedFilters(params.toString()); setSection("transactions"); }} type="button"><strong className="cell-primary">{category.name}</strong></button><button className="category-transactions-link" onClick={() => { const params = new URLSearchParams({ category_id: category.id }); setFilters({ ...emptyFilters(), category_id: category.id }); setAppliedFilters(params.toString()); setSection("transactions"); }} type="button">Ver lançamentos</button></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={() => editCategory(category)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCategory(category)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCategory(category)} type="button">Excluir</button></td></tr>)}
+                          </tbody></table></div><PaginationControls end={group.pagination.end} label={`Paginação das categorias de ${group.label.toLowerCase()}`} onPageChange={group.pagination.setPage} page={group.pagination.page} pageCount={group.pagination.pageCount} start={group.pagination.start} total={group.pagination.total} />
                         </section>
                       ))}
                     </div>
@@ -901,7 +917,8 @@ export function FinanceWorkspace({
 
               {section === "transactions" && (
                 <section className="surface-card data-card">
-                  <div className="surface-heading"><div><p className="eyebrow">Histórico financeiro</p><h2>Receitas, despesas e movimentos</h2></div><span className="record-count">{transactions.length} {transactions.length === 1 ? "lançamento" : "lançamentos"}</span></div>
+                  <div className="surface-heading"><div><p className="eyebrow">Histórico financeiro</p><h2>{activeCategoryFilter ? `Lançamentos · ${activeCategoryFilter.name}` : "Receitas, despesas e movimentos"}</h2></div><span className="record-count">{transactions.length} {transactions.length === 1 ? "lançamento" : "lançamentos"}</span></div>
+                  <TransactionImport onImported={async (message) => { await loadFinance(); setNotice({ kind: "success", message }); }} />
                   {transactionFormOpen && (
                     <form className="editor-form" onSubmit={saveTransaction}>
                       <div className="editor-heading"><h3>{transactionEditingId ? "Editar lançamento" : "Adicionar lançamento"}</h3><button className="text-button" onClick={() => setTransactionFormOpen(false)} type="button">Fechar</button></div>
@@ -943,12 +960,12 @@ export function FinanceWorkspace({
                     <div className="filter-actions"><button className="primary-button compact-button" type="submit">Filtrar</button><button className="text-button" onClick={clearTransactionFilters} type="button">Limpar</button></div>
                   </form>
                   {transactions.length === 0 ? <EmptyState actionLabel={appliedFilters ? "Limpar filtros" : onOpenAssistant ? "Conversar com o assistente" : undefined} message={appliedFilters ? "Nenhum lançamento corresponde aos filtros." : "Ainda não há lançamentos neste período."} onAction={appliedFilters ? clearTransactionFilters : onOpenAssistant ? () => onOpenAssistant("Quero registrar um lançamento financeiro.") : undefined} /> : (
-                    <div className="table-wrap"><table className="data-table transaction-table"><thead><tr><th>Lançamento</th><th>Categoria / origem / destino</th><th>Data</th><th>Tipo</th><th>Valor</th><th aria-label="Ações" /></tr></thead><tbody>
-                      {transactions.map((transaction) => {
+                    <><div className="table-wrap"><table className="data-table transaction-table"><thead><tr><th>Lançamento</th><th>Categoria / origem / destino</th><th>Data</th><th>Tipo</th><th>Valor</th><th aria-label="Ações" /></tr></thead><tbody>
+                      {transactionPagination.items.map((transaction) => {
                         const tone = transaction.type === "INCOME" ? "income" : transaction.type === "EXPENSE" || transaction.type === "CARD_PURCHASE" ? "expense" : "neutral";
                         return <tr key={transaction.id}><td><strong className="cell-primary">{transaction.description}</strong>{transaction.notes && <small className="cell-secondary">{transaction.notes}</small>}</td><td>{transactionContext(transaction, accounts)}</td><td>{displayDate(transaction.occurred_at)}</td><td><span className={`type-text ${tone}`}>{financialTransactionLabel(transaction.type)}</span></td><td className="table-money">{financialAmountSign(transaction.type)}{formatCurrency(transaction.amount)}</td><td className="row-actions">{isEditableTransaction(transaction) && <button className="table-action" onClick={() => editTransaction(transaction)} type="button">Editar</button>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteTransaction(transaction)} type="button">Excluir</button></td></tr>;
                       })}
-                    </tbody></table></div>
+                    </tbody></table></div><PaginationControls end={transactionPagination.end} label="Paginação dos lançamentos" onPageChange={transactionPagination.setPage} page={transactionPagination.page} pageCount={transactionPagination.pageCount} start={transactionPagination.start} total={transactionPagination.total} /></>
                   )}
                 </section>
               )}

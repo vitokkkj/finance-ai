@@ -22,6 +22,7 @@ from app.ai_intents import (
     is_manual_expense_candidate,
     parse_manual_expense,
     parse_manual_recurrence,
+    parse_month_forecast_period,
     suggest_expense_category_name,
 )
 from app.ai_pricing import estimated_cost
@@ -976,13 +977,32 @@ async def stream_assistant_reply(
         if not image_data_urls and category_source is None and expense_decision is None
         else None
     )
+    forecast_period = (
+        parse_month_forecast_period(user_message.content, current_financial_date())
+        if not image_data_urls and expense_decision is None and recurrence_decision is None
+        else None
+    )
     direct_expense = expense_decision is not None and expense_decision.kind == "READY"
     direct_recurrence_call: FunctionCall | None = None
+    direct_forecast_call = (
+        FunctionCall(
+            call_id=uuid4().hex,
+            name="get_month_forecast",
+            arguments=json.dumps(
+                {"year": forecast_period[0], "month": forecast_period[1]},
+                ensure_ascii=False,
+            ),
+        )
+        if forecast_period is not None
+        else None
+    )
     recurrence_category_created = False
     recurrence_category_name: str | None = None
     model = (
         settings.ai_model_smart
         if image_data_urls
+        else settings.ai_model_smart
+        if direct_forecast_call is not None
         else LOCAL_EXPENSE_MODEL
         if expense_decision is not None or category_source is not None
         else LOCAL_RECURRENCE_MODEL
@@ -1317,13 +1337,16 @@ async def stream_assistant_reply(
                 )
             elif direct_recurrence_call is not None:
                 calls.append(direct_recurrence_call)
+            elif direct_forecast_call is not None:
+                calls.append(direct_forecast_call)
+                direct_forecast_call = None
             else:
                 request = ProviderRequest(
                     model=model,
                     instructions=instructions,
                     input_items=input_items,
                     tools=tool_schemas(IMAGE_ANALYSIS_TOOL_NAMES if image_data_urls else None),
-                    tool_choice="auto",
+                    tool_choice="none" if forecast_period is not None else "auto",
                 )
                 async for event in provider.stream(request):
                     if event.type == "text_delta" and event.text:

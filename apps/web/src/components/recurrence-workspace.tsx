@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { CalendarClock, Check, CircleOff, Pencil, Plus, Repeat2, Trash2, X } from "lucide-react";
 
 import { ApiError, apiRequest } from "@/lib/api";
@@ -10,6 +10,7 @@ import { HelpTip } from "@/components/help-tip";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { BrandMark } from "@/components/brand-mark";
 import { useSophiaConfirmation } from "@/components/sophia-confirmation-dialog";
+import { PAGE_SIZE, PaginationControls, usePagination } from "@/components/pagination";
 import type { FinanceFocusTarget } from "@/lib/finance-types";
 
 type MovementType = "INCOME" | "EXPENSE";
@@ -158,10 +159,13 @@ export function RecurrenceWorkspace({
     notes: "",
     scope: "THIS",
   });
-  const [showHistory, setShowHistory] = useState(false);
   const [commitmentFormOpen, setCommitmentFormOpen] = useState(false);
   const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(null);
   const [commitmentForm, setCommitmentForm] = useState<CommitmentForm>(emptyCommitment);
+  const activeFormRef = useRef<HTMLFormElement>(null);
+  const rulePagination = usePagination(rules, String(rules.length));
+  const commitmentPagination = usePagination(commitments, String(commitments.length));
+  const occurrencePagination = usePagination(occurrences, String(occurrences.length));
 
   const loadData = useCallback(async (showLoader = true) => {
     if (showLoader) setLoading(true);
@@ -203,10 +207,20 @@ export function RecurrenceWorkspace({
 
   useEffect(() => {
     if (!focusTarget || loading || focusTarget.source === "CARD_INVOICE") return;
-    const targetExists = focusTarget.source === "RECURRENCE"
-      ? occurrences.some((item) => item.id === focusTarget.id)
-      : commitments.some((item) => item.id === focusTarget.id);
-    if (!targetExists) return;
+    const targetIndex = focusTarget.source === "RECURRENCE"
+      ? occurrences.findIndex((item) => item.id === focusTarget.id)
+      : commitments.findIndex((item) => item.id === focusTarget.id);
+    if (targetIndex < 0) return;
+
+    const targetPage = Math.floor(targetIndex / PAGE_SIZE) + 1;
+    const currentPage = focusTarget.source === "RECURRENCE"
+      ? occurrencePagination.page
+      : commitmentPagination.page;
+    if (currentPage !== targetPage) {
+      if (focusTarget.source === "RECURRENCE") occurrencePagination.setPage(targetPage);
+      else commitmentPagination.setPage(targetPage);
+      return;
+    }
 
     const frame = window.requestAnimationFrame(() => {
       const row = document.getElementById(`notification-target-${focusTarget.source}-${focusTarget.id}`);
@@ -214,7 +228,28 @@ export function RecurrenceWorkspace({
       row?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [commitments, focusTarget, loading, occurrences]);
+  }, [
+    commitmentPagination.page,
+    commitmentPagination.setPage,
+    commitments,
+    focusTarget,
+    loading,
+    occurrencePagination.page,
+    occurrencePagination.setPage,
+    occurrences,
+  ]);
+
+  useEffect(() => {
+    if (!ruleFormOpen && !editingOccurrence && !commitmentFormOpen) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      activeFormRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [commitmentFormOpen, editingOccurrence, ruleFormOpen]);
 
   const activeAccounts = accounts.filter((account) => account.is_active);
   const currentCategories = categories.filter(
@@ -223,18 +258,9 @@ export function RecurrenceWorkspace({
   const currentCommitmentCategories = categories.filter(
     (category) => !category.is_archived && category.type === commitmentForm.type,
   );
-  const eligibleOccurrences = occurrences
-    .filter((item) => showHistory || !["PAID", "SKIPPED", "CANCELLED"].includes(item.status));
-  const visibleOccurrences = eligibleOccurrences.slice(0, showHistory ? 60 : 18);
-  if (focusTarget?.source === "RECURRENCE") {
-    const focusedOccurrence = eligibleOccurrences.find((item) => item.id === focusTarget.id);
-    if (focusedOccurrence && !visibleOccurrences.some((item) => item.id === focusedOccurrence.id)) {
-      visibleOccurrences.push(focusedOccurrence);
-      visibleOccurrences.sort((left, right) => left.due_date.localeCompare(right.due_date));
-    }
-  }
-
   function openNewRule() {
+    setEditingOccurrence(null);
+    setCommitmentFormOpen(false);
     setEditingRuleId(null);
     const expenseCategory = categories.find(
       (category) => !category.is_archived && category.type === "EXPENSE",
@@ -249,6 +275,8 @@ export function RecurrenceWorkspace({
   }
 
   function openNewCommitment() {
+    setRuleFormOpen(false);
+    setEditingOccurrence(null);
     const expenseCategory = categories.find((category) => !category.is_archived && category.type === "EXPENSE");
     setEditingCommitmentId(null);
     setCommitmentForm({ ...emptyCommitment(), account_id: activeAccounts[0]?.id ?? "", category_id: expenseCategory?.id ?? "" });
@@ -257,6 +285,8 @@ export function RecurrenceWorkspace({
   }
 
   function openCommitmentEdit(item: PlannedCommitment) {
+    setRuleFormOpen(false);
+    setEditingOccurrence(null);
     setEditingCommitmentId(item.id);
     setCommitmentForm({ account_id: item.account_id, category_id: item.category_id, type: item.type, description: item.description, amount: item.amount.replace(".", ","), due_date: item.due_date, notes: item.notes ?? "" });
     setCommitmentFormOpen(true);
@@ -324,6 +354,8 @@ export function RecurrenceWorkspace({
   }
 
   function openRuleEdit(rule: RecurrenceRule) {
+    setEditingOccurrence(null);
+    setCommitmentFormOpen(false);
     setEditingRuleId(rule.id);
     setRuleForm({
       account_id: rule.account_id,
@@ -429,6 +461,8 @@ export function RecurrenceWorkspace({
   }
 
   function openOccurrenceEdit(occurrence: RecurrenceOccurrence) {
+    setRuleFormOpen(false);
+    setCommitmentFormOpen(false);
     setEditingOccurrence(occurrence);
     setOccurrenceForm({
       description: occurrence.description,
@@ -489,7 +523,7 @@ export function RecurrenceWorkspace({
       )}
 
       {ruleFormOpen && (
-        <form className="editor-form recurrence-form" onSubmit={saveRule}>
+        <form className="editor-form recurrence-form" onSubmit={saveRule} ref={activeFormRef}>
           <div className="editor-heading">
             <div><p className="eyebrow">Programação financeira</p><h3>{editingRuleId ? "Editar recorrência" : "Nova recorrência"}</h3></div>
             <button aria-label="Fechar formulário" className="text-button" onClick={() => setRuleFormOpen(false)} type="button"><X size={17} /></button>
@@ -512,7 +546,7 @@ export function RecurrenceWorkspace({
       )}
 
       {editingOccurrence && (
-        <form className="editor-form recurrence-form" onSubmit={saveOccurrence}>
+        <form className="editor-form recurrence-form" onSubmit={saveOccurrence} ref={activeFormRef}>
           <div className="editor-heading"><div><p className="eyebrow">{displayDate(editingOccurrence.due_date)}</p><h3>Editar ocorrência</h3></div><button aria-label="Fechar edição" className="text-button" onClick={() => setEditingOccurrence(null)} type="button"><X size={17} /></button></div>
           <div className="form-grid recurrence-edit-grid">
             <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setOccurrenceForm({ ...occurrenceForm, description: event.target.value })} required value={occurrenceForm.description} /></label>
@@ -525,7 +559,7 @@ export function RecurrenceWorkspace({
       )}
 
       {commitmentFormOpen && (
-        <form className="editor-form recurrence-form" onSubmit={saveCommitment}>
+        <form className="editor-form recurrence-form" onSubmit={saveCommitment} ref={activeFormRef}>
           <div className="editor-heading"><div><p className="eyebrow">Previsão sem recorrência</p><h3>{editingCommitmentId ? "Editar pagamento previsto" : "Novo pagamento previsto"}</h3></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setCommitmentFormOpen(false)} type="button"><X size={17} /></button></div>
           <div className="form-grid recurrence-form-grid">
             <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setCommitmentForm({ ...commitmentForm, description: event.target.value })} required value={commitmentForm.description} /></label>
@@ -554,7 +588,7 @@ export function RecurrenceWorkspace({
               <div className="recurrence-empty"><CalendarClock aria-hidden="true" size={22} /><div><strong>Nada programado por enquanto</strong><p>Cadastre uma despesa ou receita que se repete, como aluguel, salário ou assinatura.</p></div></div>
             ) : (
               <div className="recurrence-rule-list">
-                {rules.map((rule) => {
+                {rulePagination.items.map((rule) => {
                   const account = accounts.find((item) => item.id === rule.account_id)?.name ?? "Conta arquivada";
                   const category = categories.find((item) => item.id === rule.category_id)?.name ?? "Categoria arquivada";
                   return (
@@ -568,29 +602,46 @@ export function RecurrenceWorkspace({
                 })}
               </div>
             )}
+            <PaginationControls
+              end={rulePagination.end}
+              label="Paginação das regras programadas"
+              onPageChange={rulePagination.setPage}
+              page={rulePagination.page}
+              pageCount={rulePagination.pageCount}
+              start={rulePagination.start}
+              total={rulePagination.total}
+            />
           </section>
 
           <section className="surface-card data-card recurrence-occurrences-card">
             <div className="surface-heading"><div><p className="eyebrow">Contas avulsas</p><h2>Pagamentos previstos</h2><p className="account-directory-copy">Cadastre uma conta ou entrada futura sem criar um lançamento realizado. Ao pagar ou receber, a SophIA registra o movimento uma única vez.</p></div><button className="primary-button compact-button" onClick={openNewCommitment} type="button"><Plus aria-hidden="true" size={16} /> Novo compromisso</button></div>
-            {commitments.length === 0 ? <div className="recurrence-empty"><CalendarClock aria-hidden="true" size={22} /><div><strong>Nenhum pagamento avulso cadastrado</strong><p>Use esta área para despesas pontuais com vencimento, além das faturas e recorrências.</p></div></div> : <div className="recurrence-occurrence-list">{commitments.map((item) => {
+            {commitments.length === 0 ? <div className="recurrence-empty"><CalendarClock aria-hidden="true" size={22} /><div><strong>Nenhum pagamento avulso cadastrado</strong><p>Use esta área para despesas pontuais com vencimento, além das faturas e recorrências.</p></div></div> : <div className="recurrence-occurrence-list">{commitmentPagination.items.map((item) => {
               const account = accounts.find((row) => row.id === item.account_id)?.name ?? "Conta arquivada";
               const category = categories.find((row) => row.id === item.category_id)?.name ?? "Categoria arquivada";
               const canAct = ["PLANNED", "OVERDUE"].includes(item.status);
               const isFocused = focusTarget?.source === "COMMITMENT" && focusTarget.id === item.id;
               return <article aria-label={`${item.description}, ${statusLabel(item.status).toLocaleLowerCase("pt-BR")}, vencimento ${displayDate(item.due_date)}`} className={`recurrence-occurrence-row${isFocused ? " notification-target" : ""}`} id={`notification-target-COMMITMENT-${item.id}`} key={item.id} tabIndex={-1}><time className="recurrence-date" dateTime={item.due_date}>{displayDate(item.due_date)}</time><div className="recurrence-occurrence-main"><strong>{item.description}</strong><span>{account} · {category} · {item.type === "INCOME" ? "Receita" : "Despesa"}</span></div><strong className={`recurrence-amount ${item.type === "INCOME" ? "income" : "expense"}`}>{item.type === "INCOME" ? "+" : "−"}{formatCurrency(item.amount)}</strong><span className={`recurrence-status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="recurrence-actions">{canAct && <><button aria-label={`Editar ${item.description}`} className="table-action" disabled={busy} onClick={() => openCommitmentEdit(item)} type="button"><Pencil size={15} /><span>Editar</span></button><button className="table-action" disabled={busy} onClick={() => void changeCommitment(item, "pay")} type="button"><Check size={15} /><span>{item.type === "INCOME" ? "Marcar como recebido" : "Marcar como pago"}</span></button><button aria-label={`Cancelar ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void changeCommitment(item, "cancel")} type="button">Cancelar</button></>}<button aria-label={`Excluir ${item.description}`} className="table-action danger-action" disabled={busy} onClick={() => void deleteCommitment(item)} type="button"><Trash2 aria-hidden="true" size={15} /><span>Excluir</span></button></div></article>;
             })}</div>}
+            <PaginationControls
+              end={commitmentPagination.end}
+              label="Paginação dos pagamentos previstos"
+              onPageChange={commitmentPagination.setPage}
+              page={commitmentPagination.page}
+              pageCount={commitmentPagination.pageCount}
+              start={commitmentPagination.start}
+              total={commitmentPagination.total}
+            />
           </section>
 
           <section className="surface-card data-card recurrence-occurrences-card">
             <div className="surface-heading">
-              <div><p className="eyebrow">Próximos 90 dias</p><h2>Ocorrências <HelpTip label="Ocorrências programadas">Cada ocorrência é uma data e um valor previstos pela regra acima. Ainda não afeta o saldo. Ao marcar como pago ou recebido, a SophIA cria um único lançamento com a data de hoje.</HelpTip></h2></div>
-              <label className="recurrence-history-toggle"><input checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)} type="checkbox" /> Mostrar histórico</label>
+              <div><p className="eyebrow">Histórico recente e próximos 90 dias</p><h2>Ocorrências <HelpTip label="Ocorrências programadas">Cada ocorrência é uma data e um valor previstos pela regra acima. Ainda não afeta o saldo. Ao marcar como pago ou recebido, a SophIA cria um único lançamento com a data de hoje.</HelpTip></h2></div>
             </div>
-            {visibleOccurrences.length === 0 ? (
+            {occurrences.length === 0 ? (
               <div className="recurrence-empty"><CalendarClock aria-hidden="true" size={22} /><div><strong>Nenhuma ocorrência no período</strong><p>Quando você criar uma regra, as datas previstas aparecerão aqui.</p></div></div>
             ) : (
               <div className="recurrence-occurrence-list">
-                {visibleOccurrences.map((item) => {
+                {occurrencePagination.items.map((item) => {
                   const account = accounts.find((row) => row.id === item.account_id)?.name ?? "Conta arquivada";
                   const canAct = ["PLANNED", "PENDING", "OVERDUE"].includes(item.status);
                   return (
@@ -605,7 +656,15 @@ export function RecurrenceWorkspace({
                 })}
               </div>
             )}
-            {visibleOccurrences.length >= (showHistory ? 60 : 18) && <p className="recurrence-list-limit">A lista mostra até {showHistory ? "60" : "18"} itens para manter a navegação rápida.</p>}
+            <PaginationControls
+              end={occurrencePagination.end}
+              label="Paginação das ocorrências programadas"
+              onPageChange={occurrencePagination.setPage}
+              page={occurrencePagination.page}
+              pageCount={occurrencePagination.pageCount}
+              start={occurrencePagination.start}
+              total={occurrencePagination.total}
+            />
           </section>
         </>
       )}

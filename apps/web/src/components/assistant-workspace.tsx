@@ -45,6 +45,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { ApiError, apiRequest } from "@/lib/api";
 import type { FinanceFocusTarget } from "@/lib/finance-types";
 import { formatCurrency } from "@/lib/money";
+import { PaginationControls, usePagination } from "@/components/pagination";
 
 type FinanceSection = "overview" | "transactions" | "accounts" | "categories" | "cards" | "recurrences";
 type WorkspaceView = "chat" | "finance" | "settings" | "account";
@@ -149,6 +150,7 @@ type Usage = {
 };
 
 type Memory = { id: string; content: string; created_at: string };
+type ManagedUser = { id: string; email: string; display_name: string; created_at: string };
 type AssistantPreferences = {
   responseStyle: "concise" | "balanced" | "detailed";
   defaultAccount: string;
@@ -308,6 +310,8 @@ function DueNotifications({
   ) ?? [];
   const overdueItems = alertItems.filter((item) => item.status === "OVERDUE");
   const upcomingItems = alertItems.filter((item) => item.status === "DUE_SOON");
+  const overduePagination = usePagination(overdueItems, String(overdueItems.length));
+  const upcomingPagination = usePagination(upcomingItems, String(upcomingItems.length));
   const overdueCount = overdueItems.length;
   const laterCount = dashboard?.forecast_items.filter((item) =>
     item.type === "EXPENSE" && item.status === "PLANNED",
@@ -379,8 +383,8 @@ function DueNotifications({
             <p className="notifications-empty">Carregando seus vencimentos…</p>
           ) : alertItems.length ? (
             <>
-              {overdueItems.length > 0 && <><p className="notifications-group-label urgent">Em atraso</p><div className="notifications-list">{renderItems(overdueItems)}</div></>}
-              {upcomingItems.length > 0 && <><p className="notifications-group-label">Vencem nos próximos 7 dias</p><div className="notifications-list">{renderItems(upcomingItems)}</div></>}
+              {overdueItems.length > 0 && <><p className="notifications-group-label urgent">Em atraso</p><div className="notifications-list">{renderItems(overduePagination.items)}</div><PaginationControls end={overduePagination.end} label="Paginação dos avisos em atraso" onPageChange={overduePagination.setPage} page={overduePagination.page} pageCount={overduePagination.pageCount} start={overduePagination.start} total={overduePagination.total} /></>}
+              {upcomingItems.length > 0 && <><p className="notifications-group-label">Vencem nos próximos 7 dias</p><div className="notifications-list">{renderItems(upcomingPagination.items)}</div><PaginationControls end={upcomingPagination.end} label="Paginação dos próximos avisos" onPageChange={upcomingPagination.setPage} page={upcomingPagination.page} pageCount={upcomingPagination.pageCount} start={upcomingPagination.start} total={upcomingPagination.total} /></>}
               {laterCount > 0 && <p className="notifications-later">Mais {laterCount} {laterCount === 1 ? "pagamento previsto" : "pagamentos previstos"} para depois dos próximos 7 dias.</p>}
             </>
           ) : (
@@ -511,6 +515,7 @@ export function AssistantWorkspace({
   const financeFocusRequestId = useRef(0);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const conversationPagination = usePagination(conversations, String(conversations.length));
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [status, setStatus] = useState<AIStatus | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -548,6 +553,12 @@ export function AssistantWorkspace({
   const conversationRenameRef = useRef<HTMLInputElement>(null);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const refreshSnapshotRef = useRef<WorkspaceRefreshSnapshot | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (view !== "chat" || !conversationId) return;
+    const index = conversations.findIndex((conversation) => conversation.id === conversationId);
+    if (index >= 0) conversationPagination.setPage(Math.floor(index / conversationPagination.pageSize) + 1);
+  }, [conversationId, conversationPagination.pageSize, conversationPagination.setPage, conversations, view]);
 
   useEffect(() => {
     if (!mobileMenuOpen || window.matchMedia("(min-width: 761px)").matches) return;
@@ -1185,11 +1196,14 @@ export function AssistantWorkspace({
   ));
   const contextPanelAvailable = hasUsefulContext || (showWelcome && hasHomeSummary);
   useEffect(() => {
-    if (window.matchMedia("(max-width: 760px)").matches) return;
+    if (window.matchMedia("(max-width: 1120px)").matches) {
+      setContextPanelOpen(false);
+      return;
+    }
     setContextPanelOpen(Boolean(contextPanelAvailable && (showWelcome || hasUsefulContext)));
   }, [contextPanelAvailable, showWelcome, hasUsefulContext]);
   useEffect(() => {
-    const mobile = window.matchMedia("(max-width: 760px)");
+    const mobile = window.matchMedia("(max-width: 1120px)");
     const closeContextOnMobile = (event: MediaQueryListEvent) => {
       if (event.matches) setContextPanelOpen(false);
     };
@@ -1351,7 +1365,7 @@ export function AssistantWorkspace({
           <p>Conversas recentes</p>
           {loading ? <span className="history-placeholder">Carregando…</span> : conversations.length === 0 ? (
             <span className="history-placeholder">Pergunte sobre seus gastos para começar.</span>
-          ) : conversations.map((conversation) => (
+          ) : conversationPagination.items.map((conversation) => (
             <div className={conversation.id === conversationId && view === "chat" ? "history-row current" : "history-row"} key={conversation.id}>
               {editingConversationId === conversation.id ? (
                 <form className="history-rename-form" onSubmit={(event) => { event.preventDefault(); void saveConversationTitle(conversation.id); }}>
@@ -1380,6 +1394,7 @@ export function AssistantWorkspace({
               </>}
             </div>
           ))}
+          <PaginationControls end={conversationPagination.end} label="Paginação das conversas" onPageChange={conversationPagination.setPage} page={conversationPagination.page} pageCount={conversationPagination.pageCount} start={conversationPagination.start} total={conversationPagination.total} />
         </div>
         <nav className="assistant-nav" aria-label="Navegação financeira">
           <div className="assistant-nav-group">
@@ -1482,6 +1497,7 @@ export function AssistantWorkspace({
         ) : view === "settings" ? (
           <SettingsView
             loading={loadingSettings}
+            email={email}
             memories={memories}
             accounts={contextAccounts}
             cards={contextCards}
@@ -2057,6 +2073,7 @@ function ForecastContext({ dashboard }: { dashboard: Dashboard }) {
 
 function SettingsView({
   loading,
+  email,
   status,
   usage,
   diagnostics,
@@ -2069,6 +2086,7 @@ function SettingsView({
   onDeleteMemory,
 }: {
   loading: boolean;
+  email: string;
   status: AIStatus | null;
   usage: Usage | null;
   diagnostics: AIDiagnostic[];
@@ -2083,6 +2101,8 @@ function SettingsView({
   const assistantPreferenceRecord = memories.find((memory) => memory.content.startsWith(ASSISTANT_PREFERENCES_PREFIX));
   const assistantPreferenceContent = assistantPreferenceRecord?.content;
   const visibleMemories = memories.filter((memory) => !memory.content.startsWith(ASSISTANT_PREFERENCES_PREFIX));
+  const memoryPagination = usePagination(visibleMemories, String(visibleMemories.length));
+  const diagnosticsPagination = usePagination(diagnostics, String(diagnostics.length));
   const [assistantPreferences, setAssistantPreferences] = useState(DEFAULT_ASSISTANT_PREFERENCES);
   const [savingAssistantPreferences, setSavingAssistantPreferences] = useState(false);
   const [assistantPreferencesError, setAssistantPreferencesError] = useState("");
@@ -2091,6 +2111,51 @@ function SettingsView({
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
   const [savingMemory, setSavingMemory] = useState(false);
   const [memoryError, setMemoryError] = useState("");
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [userNameDraft, setUserNameDraft] = useState("");
+  const [userEmailDraft, setUserEmailDraft] = useState("");
+  const [userPasswordDraft, setUserPasswordDraft] = useState("");
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [usersNotice, setUsersNotice] = useState("");
+  const ownerCanManageUsers = email.trim().toLocaleLowerCase("en-US") === "gamercreeper74@gmail.com";
+  const managedUsersPagination = usePagination(managedUsers, String(managedUsers.length));
+
+  useEffect(() => {
+    if (!ownerCanManageUsers) return;
+    let active = true;
+    setUsersLoading(true);
+    apiRequest<ManagedUser[]>("/api/admin/users")
+      .then((rows) => { if (active) setManagedUsers(rows); })
+      .catch((error: unknown) => {
+        if (active) setUsersError(error instanceof Error ? error.message : "Não foi possível carregar as contas.");
+      })
+      .finally(() => { if (active) setUsersLoading(false); });
+    return () => { active = false; };
+  }, [ownerCanManageUsers]);
+
+  async function createManagedUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreatingUser(true);
+    setUsersError("");
+    setUsersNotice("");
+    try {
+      const created = await apiRequest<ManagedUser>("/api/admin/users", {
+        method: "POST",
+        body: JSON.stringify({ email: userEmailDraft, display_name: userNameDraft, password: userPasswordDraft }),
+      });
+      setManagedUsers((current) => [created, ...current.filter((user) => user.id !== created.id)]);
+      setUsersNotice(`Conta de ${created.display_name} criada. A pessoa já pode entrar com o e-mail e a senha informados.`);
+      setUserNameDraft("");
+      setUserEmailDraft("");
+      setUserPasswordDraft("");
+    } catch (error) {
+      setUsersError(error instanceof Error ? error.message : "Não foi possível criar a conta.");
+    } finally {
+      setCreatingUser(false);
+    }
+  }
 
   useEffect(() => {
     const saved = parseAssistantPreferences(assistantPreferenceContent);
@@ -2165,6 +2230,23 @@ function SettingsView({
             <div className="settings-row"><span>Modelo avançado</span><strong>{status?.smart_model ?? "—"}</strong></div>
             {status && !status.configured && <p className="settings-help">{status.provider === "ollama" ? "O serviço ou o modelo local não está disponível. A conversa será retomada quando o modelo estiver pronto na VM." : "Conecte sua conta ChatGPT pelo procedimento seguro descrito no README. Sem essa autorização, a conversa fica pausada."} Contas, lançamentos, cartões e as demais áreas financeiras continuam disponíveis.</p>}
           </section>
+          {ownerCanManageUsers && <section className="assistant-settings-card settings-managed-users">
+            <h2>Contas de acesso</h2>
+            <p>Crie uma conta de acesso para outra pessoa. Esta área só aparece para gamercreeper74@gmail.com e a API também confere essa permissão. Cada pessoa terá seus próprios dados financeiros. As contas adicionais usam uma senha própria; a autenticação por código do proprietário continua protegendo a conta principal.</p>
+            <form className="settings-managed-user-form" onSubmit={(event) => void createManagedUser(event)}>
+              <label>Nome da pessoa<input autoComplete="name" maxLength={100} onChange={(event) => setUserNameDraft(event.target.value)} required value={userNameDraft} /></label>
+              <label>E-mail de acesso<input autoComplete="email" maxLength={320} onChange={(event) => setUserEmailDraft(event.target.value)} required type="email" value={userEmailDraft} /></label>
+              <label>Senha inicial<input autoComplete="new-password" minLength={12} maxLength={128} onChange={(event) => setUserPasswordDraft(event.target.value)} required type="password" value={userPasswordDraft} /><small>Use pelo menos 12 caracteres e envie à pessoa por um canal privado.</small></label>
+              <button className="settings-memory-save" disabled={creatingUser || userPasswordDraft.length < 12} type="submit">{creatingUser ? "Criando conta…" : "Criar conta"}</button>
+            </form>
+            {usersError && <p className="settings-form-error" role="alert">{usersError}</p>}
+            {usersNotice && <p aria-live="polite" className="settings-user-notice" role="status">{usersNotice}</p>}
+            <div className="settings-memory-list-heading"><strong>Contas cadastradas</strong><span>{managedUsers.length}</span></div>
+            {usersLoading ? <p className="settings-help">Carregando contas…</p> : managedUsers.length === 0 ? <p className="settings-help">Nenhuma conta adicional cadastrada.</p> : <div className="settings-managed-user-list">
+              {managedUsersPagination.items.map((managedUser) => <div className="settings-managed-user-row" key={managedUser.id}><span><strong>{managedUser.display_name}</strong><small>{managedUser.email}</small></span><small>Criada em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(managedUser.created_at))}</small></div>)}
+              <PaginationControls end={managedUsersPagination.end} label="Paginação das contas de acesso" onPageChange={managedUsersPagination.setPage} page={managedUsersPagination.page} pageCount={managedUsersPagination.pageCount} start={managedUsersPagination.start} total={managedUsersPagination.total} />
+            </div>}
+          </section>}
           <section className="assistant-settings-card">
             <h2>Uso da SophIA</h2>
             <p className="settings-period-label">Hoje</p>
@@ -2208,7 +2290,7 @@ function SettingsView({
               {memoryError && <p className="settings-memory-error" role="alert">{memoryError}</p>}
             </form>
             <div className="settings-memory-list-heading"><strong>Lembretes ativos</strong><span>{visibleMemories.length}</span></div>
-            {visibleMemories.length === 0 ? <div className="settings-memory-empty">Nenhum lembrete adicional. As escolhas estruturadas ficam em “Meu Assistente”.</div> : visibleMemories.map((memory) => <div className="settings-memory-row" key={memory.id}><span>{memory.content}</span><div><button aria-label={`Editar preferência: ${memory.content}`} onClick={() => editMemory(memory)} type="button">Editar</button><button aria-label={`Remover preferência: ${memory.content}`} onClick={() => onDeleteMemory(memory.id)} type="button">Remover</button></div></div>)}
+            {visibleMemories.length === 0 ? <div className="settings-memory-empty">Nenhum lembrete adicional. As escolhas estruturadas ficam em “Meu Assistente”.</div> : <>{memoryPagination.items.map((memory) => <div className="settings-memory-row" key={memory.id}><span>{memory.content}</span><div><button aria-label={`Editar preferência: ${memory.content}`} onClick={() => editMemory(memory)} type="button">Editar</button><button aria-label={`Remover preferência: ${memory.content}`} onClick={() => onDeleteMemory(memory.id)} type="button">Remover</button></div></div>)}<PaginationControls end={memoryPagination.end} label="Paginação das memórias da SophIA" onPageChange={memoryPagination.setPage} page={memoryPagination.page} pageCount={memoryPagination.pageCount} start={memoryPagination.start} total={memoryPagination.total} /></>}
           </section>
           <section className="assistant-settings-card settings-assistant-preferences">
             <div className="settings-card-heading"><div><p className="eyebrow">Personalização explícita</p><h2>Como a SophIA trabalha com você</h2></div></div>
@@ -2268,7 +2350,7 @@ function SettingsView({
                 <div className="settings-memory-empty">Nenhuma interação recente.</div>
               ) : (
                 <div className="settings-diagnostic-list">
-                  {diagnostics.map((item) => (
+                  {diagnosticsPagination.items.map((item) => (
                     <article className="settings-diagnostic-row" key={item.id}>
                       <div className="settings-diagnostic-heading">
                         <strong>{item.tool_name ?? "Resposta do assistente"}</strong>
@@ -2289,6 +2371,7 @@ function SettingsView({
                       {item.error_summary && <p className="settings-diagnostic-error">{item.error_summary}</p>}
                     </article>
                   ))}
+                  <PaginationControls end={diagnosticsPagination.end} label="Paginação dos diagnósticos" onPageChange={diagnosticsPagination.setPage} page={diagnosticsPagination.page} pageCount={diagnosticsPagination.pageCount} start={diagnosticsPagination.start} total={diagnosticsPagination.total} />
                 </div>
               )}
             </section>
@@ -2336,12 +2419,14 @@ function AccountView({
 }) {
   const [nameDraft, setNameDraft] = useState(displayName);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [exportingData, setExportingData] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [sessions, setSessions] = useState<AccountSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [sessionError, setSessionError] = useState("");
   const [accountError, setAccountError] = useState("");
   const [notice, setNotice] = useState("");
+  const sessionsPagination = usePagination(sessions, String(sessions.length));
   const [savingProfile, setSavingProfile] = useState(false);
   const [passwordFormOpen, setPasswordFormOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -2458,6 +2543,47 @@ function AccountView({
       setAccountError(error instanceof Error ? error.message : "Não foi possível remover a foto.");
     } finally {
       setUploadingAvatar(false);
+    }
+  }
+
+  async function downloadFinanceExport() {
+    setExportingData(true);
+    setAccountError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/export", {
+        headers: { "X-SophIA-Request": "1" },
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        let message = "Não foi possível exportar seus dados financeiros.";
+        try {
+          const body: unknown = await response.json();
+          if (typeof body === "object" && body !== null && "detail" in body && typeof body.detail === "string") {
+            message = body.detail;
+          }
+        } catch {
+          // Mantém a mensagem segura para respostas sem JSON.
+        }
+        throw new Error(message);
+      }
+
+      const filenameHeader = response.headers.get("Content-Disposition") ?? "";
+      const filenameMatch = filenameHeader.match(/filename="([a-zA-Z0-9._-]+)"/);
+      const filename = filenameMatch?.[1] ?? "sophia-financas.json";
+      const downloadUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      setNotice("Cópia dos seus dados financeiros baixada.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível exportar seus dados financeiros.");
+    } finally {
+      setExportingData(false);
     }
   }
 
@@ -2594,12 +2720,13 @@ function AccountView({
           <div className="account-section-heading"><div><h2>Sessões ativas</h2><p>A sessão atual permanece ativa quando você encerra os outros acessos.</p></div><span>{loadingSessions ? "…" : sessions.length}</span></div>
           {sessionError ? <p className="account-inline-error" role="alert">{sessionError}</p> : loadingSessions ? <p className="settings-help">Consultando sessões…</p> : sessions.length === 0 ? <p className="settings-help">Nenhuma sessão ativa encontrada.</p> : (
             <div className="account-session-list">
-              {sessions.map((session) => (
+              {sessionsPagination.items.map((session) => (
                 <div className="account-session-row" key={`${session.created_at}-${session.expires_at}`}>
                   <span><strong>{session.is_current ? "Este dispositivo" : "Outro acesso"}</strong><small>Entrou em {formatAccountDate(session.created_at)} · expira em {formatAccountDate(session.expires_at)}</small></span>
                   {session.is_current && <span className="account-current-badge">Atual</span>}
                 </div>
               ))}
+              <PaginationControls end={sessionsPagination.end} label="Paginação das sessões ativas" onPageChange={sessionsPagination.setPage} page={sessionsPagination.page} pageCount={sessionsPagination.pageCount} start={sessionsPagination.start} total={sessionsPagination.total} />
             </div>
           )}
           {otherSessionCount > 0 && !sessionFormOpen && <button className="secondary-button account-secondary-action" onClick={() => { setAccountError(""); setSessionFormOpen(true); }} type="button">Encerrar outros acessos</button>}
@@ -2618,6 +2745,16 @@ function AccountView({
               </div>
             </form>
           )}
+        </section>
+
+        <section className="assistant-settings-card account-card account-export-card">
+          <div>
+            <h2>Seus dados</h2>
+            <p className="settings-help">Baixe uma cópia JSON dos seus registros financeiros para guardar ou transportar. O arquivo contém dados pessoais; mantenha-o em local protegido.</p>
+          </div>
+          <button className="secondary-button account-secondary-action" disabled={exportingData} onClick={() => void downloadFinanceExport()} type="button">
+            {exportingData ? "Preparando cópia…" : "Baixar meus dados"}
+          </button>
         </section>
       </div>
     </section>

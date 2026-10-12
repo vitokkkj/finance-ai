@@ -50,7 +50,7 @@
 
 ## Fora do escopo da Fase 2C.1
 
-Parcelamentos, financiamentos, investimentos reais, reembolsos, previsões de longo prazo, orçamento, juros rotativos, notificações e sincronização bancária seguem fora desta fatia. A projeção mensal de obrigações descrita abaixo está implementada na Fase 2C.2. Cada fluxo futuro terá semântica própria e testes de valor, data, timezone, idempotência e reconciliação.
+Parcelamentos, cálculo de amortização de financiamentos, investimentos reais, reembolsos, previsões de longo prazo, orçamento, juros rotativos, notificações push/e-mail e sincronização bancária seguem fora desta fatia. A projeção mensal de obrigações e os avisos internos da aplicação descritos abaixo estão implementados na Fase 2C.2. Cada fluxo futuro terá semântica própria e testes de valor, data, timezone, idempotência e reconciliação.
 
 ## Fase 2C.2 — compromissos e projeção mensal
 

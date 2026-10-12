@@ -1,6 +1,6 @@
 # SophIA — sua assistente financeira
 
-Aplicação financeira pessoal, privada e inicialmente de usuário único. O Finance Engine calcula saldos, faturas e resumos no backend. A SophIA é a interface principal: conversa com você e consulta ou registra operações financeiras por ferramentas explícitas.
+Aplicação financeira pessoal e privada, administrada pelo proprietário. Não há cadastro público: somente `gamercreeper74@gmail.com` pode criar contas adicionais nas Preferências. Cada conta tem seus próprios dados financeiros, isolados pela sessão autenticada. O Finance Engine calcula saldos, faturas e resumos no backend. A SophIA é a interface principal: conversa com você e consulta ou registra operações financeiras por ferramentas explícitas.
 
 O código está publicado em [vitokkkj/finance-ai](https://github.com/vitokkkj/finance-ai) sob a licença MIT; consulte [LICENSE](LICENSE). A instância da SophIA, as credenciais e os dados financeiros do proprietário continuam privados e ficam fora deste repositório.
 
@@ -40,7 +40,7 @@ Frontend, API, worker, Caddy, cloudflared e PostgreSQL permanecem em serviços s
 
 ## Acesso externo na VM
 
-Não exponha a execução local `docker compose up` à internet. Para a VM pública, use exclusivamente o perfil de produção documentado em [docs/deployment.md](docs/deployment.md): Cloudflare Tunnel é a única entrada, sem portas de entrada publicadas na VM; Caddy aplica cabeçalhos de segurança atrás do túnel, o cookie é seguro e o login exige TOTP. API e banco não têm portas públicas; o primeiro cadastro também exige token temporário de bootstrap. Configure a rota `finance.ruralflow.com.br`, `APP_DOMAIN` e os segredos privados antes de iniciar esse perfil. Os backups da VM são gerenciados pelo Proxmox, fora do repositório.
+Não exponha a execução local `docker compose up` à internet. Para a VM pública, use exclusivamente o perfil de produção documentado em [docs/deployment.md](docs/deployment.md): Cloudflare Tunnel é a única entrada, sem portas de entrada publicadas na VM; Caddy aplica cabeçalhos de segurança atrás do túnel, o cookie é seguro e o login da conta proprietária exige TOTP. Contas adicionais provisionadas pelo proprietário usam senha própria e dados isolados. API e banco não têm portas públicas; o primeiro cadastro também exige token temporário de bootstrap. Configure a rota `finance.ruralflow.com.br`, `APP_DOMAIN` e os segredos privados antes de iniciar esse perfil. Os backups da VM são gerenciados pelo Proxmox, fora do repositório.
 
 O padrão usa OAuth do plano ChatGPT, sem chave da API e sem fallback para chamadas pagas da API. O repositório já é público sob MIT; a instância, as credenciais OAuth e os dados financeiros continuam privados. O uso feito pela SophIA entra nos limites do próprio plano autorizado e não dá acesso ao histórico ou às memórias do ChatGPT. Confira as permissões e os limites do aplicativo em ChatGPT → Configurações → Uso. Consulte a [documentação oficial de Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) e o guia para [VMs auto-hospedadas](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
 
@@ -54,11 +54,13 @@ O computador pode ser desligado após a transferência. A tela Preferências inf
 
 O Ollama continua disponível como alternativa local explicitamente iniciada com docker compose --profile local-ai up -d. Ele não é iniciado junto com o plano ChatGPT nem acionado automaticamente como fallback. PostgreSQL continua apenas na rede interna do Compose.
 
-## O que as Fases 2A, 2B, 2B.5 e 2C.1 oferecem
+## Funcionalidades atuais
 
 - Contas em BRL com saldo inicial e data-base; contas arquivadas deixam de compor o saldo total, e seu histórico permanece no banco.
 - Categorias distintas para receitas e despesas; arquivar uma categoria não apaga os lançamentos existentes.
+- As categorias são agrupadas por tipo; abrir uma categoria mostra os lançamentos correspondentes já filtrados.
 - Criação, edição, listagem, filtragem e exclusão de lançamentos manuais confirmados.
+- Listas extensas usam paginação de 15 itens, incluindo lançamentos, cartões, faturas, ocorrências e conversas.
 - Filtros por período, conta, categoria, tipo e texto.
 - Dashboard com saldo total, receitas, despesas, resultado do mês, despesas por categoria e lançamentos recentes.
 - Isolamento por `users.id` em cada consulta e gravação, com chaves compostas impedindo referências financeiras entre usuários.
@@ -75,6 +77,9 @@ O Ollama continua disponível como alternativa local explicitamente iniciada com
 - Alterações em lançamentos existentes ficam pendentes até confirmação explícita. Falhas de ferramentas não são apresentadas como operações concluídas.
 - Regras de receita/despesa recorrentes com ocorrências previstas até 90 dias à frente, incluindo frequências diária, semanal, mensal e anual.
 - Ocorrências não afetam saldos até serem registradas; registrar cria uma única transação confirmada, e ignorar ou encerrar preserva o histórico sem criar movimento.
+- A previsão “A pagar” reúne compromissos avulsos, ocorrências recorrentes e faturas abertas por vencimento. O centro de avisos leva ao item correspondente e permite registrar o pagamento após conferência.
+- Somente `gamercreeper74@gmail.com` pode provisionar outras contas em Preferências; não há cadastro público e cada pessoa acessa dados isolados pela própria sessão.
+- Minha conta permite exportar dados em JSON; Lançamentos aceita o modelo CSV descrito em [docs/importacao-csv.md](docs/importacao-csv.md), com prévia e confirmação explícita.
 - O fluxo padrão usa OAuth do ChatGPT exclusivamente no backend e o endpoint Responses API; nenhuma chave da API é configurada. AI_MODEL_FAST e AI_MODEL_SMART são configuráveis por ambiente. O Ollama só inicia com o perfil local-ai e não é fallback automático. Pedidos inequívocos de despesas e recorrências mensais podem ser interpretados por regras determinísticas; pedidos ambíguos seguem para o modelo SMART, que deve sugerir e perguntar antes de executar. Os testes automatizados usam providers e transportes simulados.
 
 Saldo de uma conta ativa é calculado como saldo inicial, mais receitas e transferências recebidas, menos despesas, transferências enviadas e pagamentos de fatura, considerando somente movimentos a partir da data-base. Compras no cartão não movimentam contas. O Finance Engine calcula esses valores no backend. PostgreSQL usa `NUMERIC(14,2)`, Python usa `Decimal` e a API transmite valores monetários em texto decimal. O navegador apenas formata esses textos; não soma valores financeiros.
@@ -140,6 +145,8 @@ Não aponte `TEST_DATABASE_URL` para o banco de desenvolvimento: os fixtures dos
 - `GET /api/ai/status`, `GET/POST /api/ai/conversations`, `GET/PATCH /api/ai/conversations/{id}`
 - `POST /api/ai/conversations/{id}/messages` (SSE), confirmação/cancelamento de ferramenta e gestão de preferências
 - `GET /api/ai/usage`, `GET/DELETE /api/ai/memories`
+- `GET /api/admin/users` e `POST /api/admin/users` somente para a conta proprietária
+- `GET /api/export` e `POST /api/imports/transactions/preview`, `POST /api/imports/transactions/confirm`
 - `GET /api/ai/diagnostics` somente em desenvolvimento; checklist real e detalhes em [docs/ai-assistant.md](docs/ai-assistant.md)
 
 Todos os endpoints financeiros exigem sessão. O usuário da sessão determina o escopo dos registros; o cliente não pode escolher `user_id`.

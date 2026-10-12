@@ -1075,6 +1075,62 @@ def test_month_forecast_tool_returns_future_month_commitments(client: TestClient
     assert '"description": "Conta do mês atual"' not in response.text
 
 
+def test_explicit_future_month_forecast_is_resolved_before_model_tool_choice(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    account_id, category_id = _create_assistant_basics(client)
+    today = _today()
+    year = today.year if today.month < 11 else today.year + 1
+    future_due = date(year, 11, 15)
+    current_due = today
+    for description, due_date, amount in (
+        ("Fatura de novembro", future_due, "654.63"),
+        ("Conta deste mês", current_due, "80.00"),
+    ):
+        created = client.post(
+            "/api/commitments",
+            json={
+                "account_id": account_id,
+                "category_id": category_id,
+                "type": "EXPENSE",
+                "description": description,
+                "amount": amount,
+                "due_date": due_date.isoformat(),
+            },
+        )
+        assert created.status_code == 201, created.text
+
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [[
+            ProviderEvent(type="text_delta", text="Aqui está a previsão para novembro."),
+            _completed(),
+        ]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Quais são meus gastos previstos para novembro?"},
+    )
+
+    assert response.status_code == 200
+    assert '"type": "monthly_forecast"' in response.text
+    assert f'"period_start": "{year}-11-01"' in response.text
+    assert '"description": "Fatura de novembro"' in response.text
+    assert '"expenses": "654.63"' in response.text
+    assert '"description": "Conta deste mês"' not in response.text
+    assert '"type": "financial_summary"' not in response.text
+    assert fake.requests[0].tool_choice == "none"
+    assert any(
+        item.get("type") == "function_call"
+        and item.get("name") == "get_month_forecast"
+        and '"month": 11' in str(item.get("arguments"))
+        for item in fake.requests[0].input_items
+    )
+
+
 def test_ai_created_amount_is_exact_decimal_and_tool_failure_cannot_claim_success(
     client: TestClient,
 ) -> None:

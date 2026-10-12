@@ -2,7 +2,7 @@
 
 ## Produto e idioma
 
-- A SophIA é inicialmente um aplicativo financeiro pessoal, privado e de usuário único.
+- A SophIA é um aplicativo financeiro pessoal e privado, administrado pelo proprietário. Não há cadastro público; somente `gamercreeper74@gmail.com` pode provisionar contas adicionais, cujos dados ficam isolados por `users.id`.
 - Escreva textos da interface e documentação em português brasileiro (`pt-BR`). Preserve nomes oficiais de ferramentas e identificadores de código.
 - Use BRL (`R$`) para valores exibidos e `America/Sao_Paulo` para datas e horários financeiros.
 - Modele registros financeiros pertencentes a um usuário por relações explícitas com `users.id`. Obtenha o usuário da sessão autenticada; nunca espalhe identificadores fixos de usuário pelo código.

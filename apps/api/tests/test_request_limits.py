@@ -1,6 +1,6 @@
 import asyncio
 
-from starlette.types import Message, Scope
+from starlette.types import Message, Receive, Scope, Send
 
 from app.request_limits import RequestBodyLimitMiddleware
 
@@ -18,7 +18,7 @@ def test_streaming_api_request_without_content_length_is_limited() -> None:
     async def send(message: Message) -> None:
         sent.append(message)
 
-    async def application(scope: Scope, receive, send) -> None:
+    async def application(scope: Scope, receive: Receive, send: Send) -> None:
         while (await receive()).get("more_body", False):
             pass
 
@@ -54,7 +54,7 @@ def test_non_api_requests_are_not_limited() -> None:
     async def send(message: Message) -> None:
         sent.append(message)
 
-    async def application(scope: Scope, receive, send) -> None:
+    async def application(scope: Scope, receive: Receive, send: Send) -> None:
         await receive()
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b"ok"})

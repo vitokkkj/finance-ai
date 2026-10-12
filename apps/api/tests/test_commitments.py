@@ -1,5 +1,6 @@
 from calendar import monthrange
 from datetime import timedelta
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -229,7 +230,7 @@ def test_upcoming_card_invoices_are_sorted_by_due_date_and_exclude_paid_invoices
             },
         )
         assert response.status_code == 201, response.text
-        return response.json()
+        return cast(dict[str, str], response.json())
 
     earlier_card = create_card("Cartão com vencimento próximo", 15)
     later_card = create_card("Cartão com vencimento posterior", 28)

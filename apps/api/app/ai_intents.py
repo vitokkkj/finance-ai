@@ -737,6 +737,79 @@ def _normalize(value: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", without_marks).split())
 
 
+def parse_month_forecast_period(content: str, today: date) -> tuple[int, int] | None:
+    """Resolve an unambiguous month-specific question about future/pending payments."""
+    normalized = _normalize(content)
+    if not any(
+        marker in f" {normalized} "
+        for marker in (
+            "previs",
+            " a pagar ",
+            "tenho que pagar",
+            "preciso pagar",
+            "devo pagar",
+            "o que pago",
+            "quanto pago",
+        )
+    ):
+        return None
+
+    month_numbers = {
+        "janeiro": 1,
+        "fevereiro": 2,
+        "marco": 3,
+        "abril": 4,
+        "maio": 5,
+        "junho": 6,
+        "julho": 7,
+        "agosto": 8,
+        "setembro": 9,
+        "outubro": 10,
+        "novembro": 11,
+        "dezembro": 12,
+    }
+    month_pattern = "|".join(month_numbers)
+    named_months = list(
+        re.finditer(rf"\b(?P<name>{month_pattern})\b(?:\s+de\s+(?P<year>20\d{{2}}))?", normalized)
+    )
+    numeric_months = list(
+        re.finditer(
+            r"(?<!\d)(?P<month>0?[1-9]|1[0-2])\s*/\s*(?P<year>20\d{2})(?!\d)",
+            content,
+        )
+    )
+
+    current_month_requested = any(
+        phrase in normalized for phrase in ("este mes", "neste mes", "mes atual", "mes corrente")
+    )
+    next_month_requested = any(
+        phrase in normalized for phrase in ("proximo mes", "mes que vem")
+    )
+    if current_month_requested and next_month_requested:
+        return None
+
+    if len(named_months) + len(numeric_months) > 1:
+        return None
+    if (named_months or numeric_months) and (current_month_requested or next_month_requested):
+        return None
+    if named_months:
+        match = named_months[0]
+        month = month_numbers[match.group("name")]
+        explicit_year = match.group("year")
+        year = int(explicit_year) if explicit_year else today.year + (month < today.month)
+        return year, month
+    if numeric_months:
+        match = numeric_months[0]
+        return int(match.group("year")), int(match.group("month"))
+
+    if current_month_requested:
+        return today.year, today.month
+    if next_month_requested:
+        next_month = today.month + 1
+        return (today.year + 1, 1) if next_month == 13 else (today.year, next_month)
+    return None
+
+
 def _contains_phrase(value: str, phrase: str) -> bool:
     return bool(phrase) and f" {phrase} " in f" {value} "
 

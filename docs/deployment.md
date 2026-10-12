@@ -44,7 +44,7 @@ No túnel dedicado `finance-sophia`, a rota publicada deve usar:
 
 Ao salvar a rota, a Cloudflare cria o DNS CNAME proxied apontando para o túnel. O conector `cloudflared` precisa estar na rede Docker `edge` deste Compose para resolver `caddy`. Não crie registros A/AAAA apontando para o IP da VM e não publique as portas 80/443 do host.
 
-O hostname público permite que qualquer visitante alcance a tela de login. O acesso aos dados exige a conta existente, senha e TOTP; a criação inicial exige o token temporário e o TOTP do proprietário. A rota pública não substitui a autenticação da aplicação.
+O hostname público permite que qualquer visitante alcance a tela de login. A criação inicial e a administração de contas são restritas a `gamercreeper74@gmail.com`; não há cadastro público. A conta do proprietário exige senha e TOTP. Contas adicionais criadas pelo proprietário têm senha própria e dados financeiros isolados pela sessão autenticada; hoje elas não usam o TOTP do proprietário. Compartilhe a senha inicial por um canal privado. A rota pública não substitui a autenticação da aplicação.
 
 ## Preparar a VM e publicar
 
@@ -55,7 +55,7 @@ O hostname público permite que qualquer visitante alcance a tela de login. O ac
 5. Inicie os serviços: `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build`. Confirme que os seis serviços estão em execução e que o Compose não publica portas no host.
 6. Só depois da validação interna, publique no túnel dedicado a rota `finance.ruralflow.com.br` → `http://caddy:80`, com fallback `http_status:404`.
 7. Confirme que o conector `cloudflared` está conectado no painel e acesse `https://finance.ruralflow.com.br`. Verifique os cabeçalhos HSTS, proteção contra framing, MIME sniffing e permissões do navegador. Cookies usam o prefixo `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict` e validade máxima de 24 horas. A conta existente exige novo login com senha e TOTP; a migration `0011_public_auth_hardening` invalida sessões antigas, mas preserva os dados financeiros.
-8. No primeiro login, informe e-mail e senha; a aplicação então solicita o MFA. Para parear o Authy, escolha **Configurar autenticador**, informe o token temporário, escaneie o QR e confirme o código atual do Authy. O QR vale por dez minutos. Depois da confirmação, remova `MFA_ENROLLMENT_TOKEN` do `.env` e recrie a API; o acesso continuará exigindo senha e TOTP.
+8. No primeiro login do proprietário, informe e-mail e senha; a aplicação então solicita o MFA. Para parear o Authy, escolha **Configurar autenticador**, informe o token temporário, escaneie o QR e confirme o código atual do Authy. O QR vale por dez minutos. Depois da confirmação, remova `MFA_ENROLLMENT_TOKEN` do `.env` e recrie a API; o acesso do proprietário continuará exigindo senha e TOTP. As contas adicionais criadas pelo proprietário usam e-mail e senha, sem herdar o MFA do proprietário.
 
 A migration `0011_public_auth_hardening` revoga sessões antigas para exigir novo login. A migration `0012_owner_mfa_enrollment` adiciona apenas o estado e o prazo temporário de pareamento. A migration `0016_totp_replay` acrescenta o contador de códigos já consumidos e impede que o mesmo código abra sessões ou autorize novamente uma ação sensível. As migrations são incrementais e não removem dados financeiros.
 
@@ -64,7 +64,7 @@ A migration `0011_public_auth_hardening` revoga sessões antigas para exigir nov
 - `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`: confira que web, API, worker, PostgreSQL, Caddy e cloudflared estão ativos.
 - Verifique que o Compose de produção não publica portas no host: `docker compose -f docker-compose.yml -f docker-compose.vm.yml port web 3000`, `port api 8000`, `port postgres 5432` e `port caddy 80` não devem retornar um endereço público.
 - Acesse `/api/health/live` e `/api/health/ready` pelo hostname HTTPS; confirme redirecionamento HTTP→HTTPS e os cabeçalhos `Strict-Transport-Security`, `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` e `Permissions-Policy`.
-- Uma chamada sem sessão a `/api/accounts` deve retornar `401`; `/api/docs` deve retornar `404` em produção. Com o proprietário já criado, `requires_setup` em `/api/auth/setup-state` deve ser `false`.
+- Uma chamada sem sessão a `/api/accounts` deve retornar `401`; `/api/admin/users` deve retornar `401` sem sessão e `403` para uma conta que não seja do proprietário; `/api/docs` deve retornar `404` em produção. Com o proprietário já criado, `requires_setup` em `/api/auth/setup-state` deve ser `false`.
 - Confirme que a rota de bootstrap está indisponível depois que a conta do proprietário existir e que um login inválido não cria sessão.
 - Confira `alembic current`, integridade dos saldos no Finance Engine e logs sem segredos. Os backups e a recuperação permanecem sob responsabilidade do Proxmox, fora deste repositório.
 
@@ -80,7 +80,7 @@ O OAuth para a VM é concluído no computador que tem o navegador. Depois, as cr
 
 ## Dados e recuperação
 
-Os backups da VM são gerenciados pelo Proxmox fora deste repositório. Os snapshots não devem ser tratados como teste de restauração: mantenha uma verificação de recuperação conforme a política privada do proprietário. Backups podem conter dados financeiros; não os envie ao GitHub, logs, tickets ou serviços sem autorização.
+Os backups da VM são gerenciados pelo Proxmox fora deste repositório. Em 12/10/2026, o proprietário confirmou que os backups são criptografados e que a restauração foi testada; a revisão registra esse controle como validado com base nessa confirmação operacional. Backups podem conter dados financeiros; não os envie ao GitHub, logs, tickets ou serviços sem autorização.
 
 Antes de uma migration ou atualização que possa afetar dados, valide a recuperação conforme o procedimento do Proxmox e confira a revisão corrente:
 
@@ -90,6 +90,14 @@ docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic u
 ```
 
 Depois da atualização, confira `/api/health/live`, `/api/health/ready`, login e o Finance Engine. Preserve a imagem anterior até confirmar a operação; não reverta migrations destrutivas automaticamente.
+
+## Publicar uma atualização do GitHub na VM
+
+1. Revise a alteração, rode as verificações do componente e confirme `git diff --check`. Não inclua `.env`, arquivos de segredo, credenciais OAuth, backups ou dados financeiros no commit.
+2. Faça commit do estado revisado e publique-o em `main` no repositório oficial. O deploy deve partir de um commit que já está no GitHub, para manter código, revisão e produção rastreáveis.
+3. Na VM, preserve `.env` e `secrets/` locais e atualize somente o checkout: `git fetch origin` e `git pull --ff-only origin main`. Confira `git status --short` antes de construir; não descarte alterações locais sem identificar sua origem.
+4. Valide e publique com `docker compose -f docker-compose.yml -f docker-compose.vm.yml config -q` e `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build --wait`.
+5. Confira a revisão com `git rev-parse --short HEAD`, os seis serviços com `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`, a migration com `docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic current` e os dois health checks públicos. Não faça reset destrutivo do banco para atualizar o código.
 
 ## Comandos de operação
 

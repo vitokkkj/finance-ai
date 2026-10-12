@@ -51,6 +51,7 @@ password_hasher = PasswordHasher()
 dummy_password_hash = password_hasher.hash(secrets.token_urlsafe(32))
 setup_lock = threading.Lock()
 SETUP_ADVISORY_LOCK_ID = 873421073914
+OWNER_EMAIL = "gamercreeper74@gmail.com"
 
 
 login_rate_limiter = LoginRateLimiter(
@@ -62,6 +63,12 @@ rate_limit_key = secrets.token_bytes(32)
 
 def _totp_is_required() -> bool:
     return bool(settings.owner_totp_secret)
+
+
+def _email_requires_mfa(email: str) -> bool:
+    if not _totp_is_required():
+        return False
+    return settings.app_env.casefold() != "production" or email.strip().casefold() == OWNER_EMAIL
 
 
 def _owner_totp_counter(code: str | None) -> int | None:
@@ -168,7 +175,7 @@ def _user_response(user: User) -> UserResponse:
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
-        mfa_required=_totp_is_required(),
+        mfa_required=_email_requires_mfa(user.email),
         mfa_enrolled=user.mfa_enrolled_at is not None,
         avatar_url=(
             f"/api/auth/me/avatar/{user.avatar_revision}" if user.avatar_revision else None
@@ -215,7 +222,7 @@ def _reauthentication_matches(db: Session, user: User, payload: Reauthentication
     password_matches = authenticated_user is not None and authenticated_user.id == user.id
     if not password_matches:
         return False
-    if not _totp_is_required():
+    if not _email_requires_mfa(user.email):
         return True
     counter = _owner_totp_counter(payload.totp_code)
     mfa_matches = (
@@ -300,11 +307,17 @@ def create_first_user(
             settings.initial_setup_token.encode("utf-8"),
         )
 
-    totp_counter = _owner_totp_counter(payload.totp_code)
+    mfa_required = _email_requires_mfa(payload.email)
+    totp_counter = _owner_totp_counter(payload.totp_code) if mfa_required else -1
     if not token_matches or totp_counter is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível validar os dados do primeiro acesso.",
+        )
+    if settings.app_env.casefold() == "production" and payload.email != OWNER_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A configuração inicial deve usar o e-mail do proprietário.",
         )
 
     login_rate_limiter.clear(setup_keys)
@@ -318,14 +331,14 @@ def create_first_user(
             email=payload.email,
             display_name=payload.display_name,
             password_hash=password_hasher.hash(payload.password),
-            mfa_enrolled_at=datetime.now(UTC) if _totp_is_required() else None,
+            mfa_enrolled_at=datetime.now(UTC) if mfa_required else None,
             last_totp_counter=totp_counter
             if totp_counter is not None and totp_counter >= 0
             else None,
         )
         db.add(user)
         db.flush()
-        if settings.app_env.casefold() != "production" and not _totp_is_required():
+        if settings.app_env.casefold() != "production" and not mfa_required:
             _create_session(db, user, response)
         db.commit()
         db.refresh(user)
@@ -350,10 +363,12 @@ def check_login_password(
             detail="Não foi possível validar o e-mail e a senha.",
         )
     return LoginCheckResponse(
-        mfa_required=_totp_is_required(),
+        mfa_required=_email_requires_mfa(user.email),
         mfa_enrolled=user.mfa_enrolled_at is not None,
         mfa_enrollment_available=bool(
-            settings.mfa_enrollment_token and user.mfa_enrolled_at is None
+            _email_requires_mfa(user.email)
+            and settings.mfa_enrollment_token
+            and user.mfa_enrolled_at is None
         ),
     )
 
@@ -373,6 +388,11 @@ def start_mfa_enrollment(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível autorizar o pareamento do autenticador.",
+        )
+    if not _email_requires_mfa(user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta conta não usa o autenticador do proprietário.",
         )
     if user.mfa_enrolled_at is not None:
         raise HTTPException(
@@ -413,6 +433,11 @@ def confirm_mfa_enrollment(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível confirmar o pareamento do autenticador.",
         )
+    if not _email_requires_mfa(user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta conta não usa o autenticador do proprietário.",
+        )
     if user.mfa_enrolled_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -452,15 +477,19 @@ def login(
         _raise_rate_limit()
 
     user = _password_authenticated_user(db, payload.email, payload.password)
-    totp_counter = _owner_totp_counter(payload.totp_code)
-    if user is None or totp_counter is None or not _consume_totp_counter(db, user, totp_counter):
+    mfa_required = user is not None and _email_requires_mfa(user.email)
+    totp_counter = _owner_totp_counter(payload.totp_code) if mfa_required else None
+    if user is None or (
+        mfa_required
+        and (totp_counter is None or not _consume_totp_counter(db, user, totp_counter))
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="E-mail, senha ou código inválidos.",
         )
 
     login_rate_limiter.clear(keys)
-    if _totp_is_required() and user.mfa_enrolled_at is None:
+    if mfa_required and user.mfa_enrolled_at is None:
         user.mfa_enrolled_at = datetime.now(UTC)
     _create_session(db, user, response)
     db.commit()
