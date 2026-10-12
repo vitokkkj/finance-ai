@@ -165,7 +165,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 2. **Proxmox:** o proprietário confirmou backup criptografado e restauração testada em 12/10/2026; falta evidência direta recente de jobs, retenção e restore drill. O dump temporário pré-deploy foi validado e removido, sem substituir o backup operacional.
 3. **Branch protection:** decidir e aplicar os checks requeridos em `main`; o estado atual sem proteção foi verificado.
 4. **Dados reais:** a revisão visual da interface não reproduz nomes, saldos ou transações do usuário no relatório. Testes permanecem com dados sintéticos.
-5. **Observação do limitador:** a regra Cloudflare está ativa, mas precisa ser acompanhada após uso real para identificar falsos positivos.
+5. **Observação e capacidade do limitador:** acompanhar eventos e falsos positivos após uso real. O painel Free mostrava `1/1` regras de rate limit ocupadas em 12/10/2026; consolide futuras rotas na regra atual ou revise o plano antes de adicionar outra.
 
 ## Registro de execução deste plano
 

@@ -69,7 +69,7 @@ A VM foi atualizada manualmente para o commit `01488a4c161fedac7444d1885b2b0b177
 
 Antes da migration foi criado um dump PostgreSQL temporário com permissão `0600`; o cabeçalho e a listagem de restauração foram validados sem ler registros. Após a aplicação e os health checks, esse arquivo temporário foi removido e a ausência confirmada. A retenção de backup continua no Proxmox, fora do repositório.
 
-Na zona `ruralflow.com.br`, a regra ativa **Autenticacao - limite por IP** corresponde ao host `finance.ruralflow.com.br`, método `POST` e às rotas `/api/auth/setup`, `/api/auth/login/check`, `/api/auth/login`, `/api/auth/mfa/enrollment/start` e `/api/auth/mfa/enrollment/confirm`. Ela conta por IP e bloqueia por 10 segundos depois de mais de 20 requisições em 10 segundos. A regra foi validada pelo Cloudflare e aparece ativa; não foi gerado tráfego de força bruta para testá-la em produção.
+Na zona `ruralflow.com.br`, a regra ativa **Autenticacao - limite por IP** corresponde ao host `finance.ruralflow.com.br`, método `POST` e às rotas `/api/auth/setup`, `/api/auth/login/check`, `/api/auth/login`, `/api/auth/mfa/enrollment/start` e `/api/auth/mfa/enrollment/confirm`. Ela conta por IP e bloqueia por 10 segundos depois de mais de 20 requisições em 10 segundos. A regra foi validada pelo Cloudflare e aparece ativa; não foi gerado tráfego de força bruta para testá-la em produção. Na inspeção de 12/10/2026, o plano Free mostrava `1/1` regras de rate limit em uso; consolide futuras rotas nesta regra ou revise o plano antes de adicionar outra.
 
 ## Verificação de segurança pós-deploy
 
