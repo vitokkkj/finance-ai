@@ -58,7 +58,7 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
   let setupCounter: number | undefined;
   if (await setupName.count()) {
     await setupName.fill("Pessoa E2E Sintética");
-    await email.fill("e2e@example.invalid");
+    await email.fill("gamercreeper74@gmail.com");
     await page
       .getByLabel("Senha", { exact: true })
       .fill("Senha-sintetica-E2E-2026!");
@@ -80,7 +80,7 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     await expect(page.getByRole("status")).toContainText("Conta criada");
   }
 
-  await email.fill("e2e@example.invalid");
+  await email.fill("gamercreeper74@gmail.com");
   await page
     .getByLabel("Senha", { exact: true })
     .fill("Senha-sintetica-E2E-2026!");
@@ -285,7 +285,21 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     );
     const payments =
       await requestJson<Array<Record<string, unknown>>>(paymentPath);
-    const adminUsersResponse = await fetch("/api/admin/users");
+    const managedUser = await postJson<Record<string, unknown>>(
+      "/api/admin/users",
+      {
+        email: "acesso-e2e@example.invalid",
+        display_name: "Acesso integrado E2E",
+        password: "Senha-sintetica-E2E-2026!",
+      },
+    );
+    const managedUserDelete = await fetch(`/api/admin/users/${managedUser.id}`, {
+      method: "DELETE",
+      headers: { "X-SophIA-Request": "1" },
+    });
+    const remainingManagedUsers = await requestJson<Array<Record<string, unknown>>>(
+      "/api/admin/users",
+    );
 
     return {
       first,
@@ -297,7 +311,9 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
       payment,
       paymentRetry,
       payments,
-      adminUsersStatus: adminUsersResponse.status,
+      managedUserCreated: Boolean(managedUser.id),
+      managedUserDeleteStatus: managedUserDelete.status,
+      remainingManagedUserCount: remainingManagedUsers.length,
       matching: transactions.filter(
         (transaction) =>
           transaction.description === "Compra sintética integrada E2E",
@@ -315,5 +331,7 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
   expect(result.cardPurchaseRetry.id).toBe(result.cardPurchase.id);
   expect(result.paymentRetry.id).toBe(result.payment.id);
   expect(result.payments).toHaveLength(1);
-  expect(result.adminUsersStatus).toBe(404);
+  expect(result.managedUserCreated).toBe(true);
+  expect(result.managedUserDeleteStatus).toBe(204);
+  expect(result.remainingManagedUserCount).toBe(1);
 });

@@ -1,7 +1,7 @@
 # Pesquisa: próximos passos de UX para finanças pessoais
 
 **Pesquisado em:** 2026-10-12
-**Escopo:** páginas oficiais de ajuda do Minhas Finanças e do Organizze, comparadas com a revisão e as decisões existentes da SophIA. Pesquisa documental; não altera o produto nem valida recursos dos concorrentes em uso. A SophIA é privada, de usuário único e administrada pelo proprietário.
+**Escopo:** páginas oficiais de ajuda do Minhas Finanças e do Organizze, comparadas com a revisão e as decisões existentes da SophIA. Pesquisa documental; não altera o produto nem valida recursos dos concorrentes em uso. A SophIA é privada e administrada pelo proprietário, que pode criar contas de login isoladas sem cadastro público.
 
 ## Recomendação inicial
 

@@ -2,7 +2,7 @@
 
 ## Produto e idioma
 
-- A SophIA é um aplicativo financeiro pessoal, privado e de usuário único, administrado pelo proprietário `gamercreeper74@gmail.com`. Não há cadastro público nem provisionamento de contas adicionais; o usuário inicial é criado pelo fluxo controlado de bootstrap. Registros financeiros pertencem ao usuário autenticado por relações explícitas com `users.id`.
+- A SophIA é um aplicativo financeiro pessoal e privado, administrado pelo proprietário `gamercreeper74@gmail.com`. Não há cadastro público; depois do bootstrap controlado, somente o proprietário pode criar contas de login pela área autenticada de administração. Cada pessoa vê somente os próprios registros financeiros, vinculados explicitamente ao `users.id` da sessão.
 - Escreva textos da interface e documentação em português brasileiro (`pt-BR`). Preserve nomes oficiais de ferramentas e identificadores de código.
 - Use BRL (`R$`) para valores exibidos e `America/Sao_Paulo` para datas e horários financeiros.
 - Modele registros financeiros pertencentes a um usuário por relações explícitas com `users.id`. Obtenha o usuário da sessão autenticada; nunca espalhe identificadores fixos de usuário pelo código.
@@ -21,7 +21,7 @@
 
 ## Privacidade, segurança e integrações
 
-- O aplicativo não oferece cadastro público. A criação inicial da conta é controlada pela aplicação.
+- O aplicativo não oferece cadastro público. A criação inicial é controlada pelo bootstrap; a criação e exclusão de contas de login adicionais são restritas ao proprietário autenticado. Nunca apague dados financeiros em cascata ao remover um acesso.
 - Nunca armazene senhas bancárias. Integrações bancárias são somente leitura.
 - Segredos, credenciais, tokens e arquivos `.env` nunca entram no Git. Mantenha `.env.example` sem valores secretos.
 - PostgreSQL não publica portas no host nem na internet; os serviços da aplicação o acessam por uma rede interna do Compose.

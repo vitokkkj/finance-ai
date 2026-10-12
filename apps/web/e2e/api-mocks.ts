@@ -211,7 +211,7 @@ function json(route: Route, body: unknown) {
 
 export async function mockFinanceApi(
   page: Page,
-  options: { largeLists?: boolean; categoryBreakdown?: boolean } = {},
+  options: { largeLists?: boolean; categoryBreakdown?: boolean; owner?: boolean } = {},
 ): Promise<E2EApiState> {
   const state: E2EApiState = {
     dashboardQueries: [],
@@ -220,6 +220,14 @@ export async function mockFinanceApi(
     importConfirmRequests: [],
   };
   let conversationCreated = false;
+  let managedUsers = options.owner
+    ? [{
+        id: "synthetic-owner",
+        email: "gamercreeper74@gmail.com",
+        display_name: "Proprietário de teste",
+        created_at: "2026-10-12T12:00:00-03:00",
+      }]
+    : [];
   const mockConversations = options.largeLists
     ? Array.from({ length: 21 }, (_, index) => ({
         id: `synthetic-conversation-${index + 1}`,
@@ -364,11 +372,46 @@ export async function mockFinanceApi(
     if (url.pathname === "/api/auth/me") {
       await json(route, {
         id: "synthetic-user",
-        email: "teste@example.invalid",
+        email: options.owner ? "gamercreeper74@gmail.com" : "teste@example.invalid",
         display_name: "Pessoa de teste",
         mfa_required: false,
         mfa_enrolled: false,
       });
+      return;
+    }
+    if (url.pathname === "/api/admin/users" && options.owner) {
+      if (route.request().method() === "GET") {
+        await json(route, managedUsers);
+        return;
+      }
+      if (route.request().method() === "POST") {
+        const payload = route.request().postDataJSON() as {
+          email: string;
+          display_name: string;
+        };
+        const created = {
+          id: "synthetic-managed-user",
+          email: payload.email.toLowerCase(),
+          display_name: payload.display_name,
+          created_at: "2026-10-12T12:00:00-03:00",
+        };
+        managedUsers = [created, ...managedUsers];
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify(created),
+        });
+        return;
+      }
+    }
+    if (
+      url.pathname.startsWith("/api/admin/users/") &&
+      route.request().method() === "DELETE" &&
+      options.owner
+    ) {
+      const managedUserId = url.pathname.split("/").at(-1);
+      managedUsers = managedUsers.filter((managedUser) => managedUser.id !== managedUserId);
+      await route.fulfill({ status: 204, body: "" });
       return;
     }
     if (url.pathname === "/api/ai/status") {

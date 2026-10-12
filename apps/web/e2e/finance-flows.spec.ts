@@ -299,14 +299,23 @@ test("regras, compromissos e ocorrências usam paginação no lugar de mostrar h
   await expect(occurrences.locator(".recurrence-occurrence-row")).toHaveCount(6);
 });
 
-test("preferências não oferecem criação ou administração de outras contas", async ({ page }) => {
-  await mockFinanceApi(page);
+test("o proprietário pode criar e excluir contas de acesso sem dados", async ({ page }) => {
+  await mockFinanceApi(page, { owner: true });
   await page.goto("/");
   await page.getByRole("button", { name: "Preferências", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: "Contas de acesso" })).toHaveCount(0);
-  await expect(page.getByLabel("E-mail de acesso")).toHaveCount(0);
-  await expect(page.getByLabel("Senha inicial")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Contas de acesso" })).toBeVisible();
+  await page.getByLabel("Nome da pessoa").fill("Richard");
+  await page.getByLabel("E-mail de acesso").fill("richard@example.com");
+  await page.getByLabel("Senha inicial").fill("senha-sintetica-segura-123");
+  await page.getByRole("button", { name: "Criar conta" }).click();
+  await expect(page.getByRole("status")).toContainText("Conta de Richard criada");
+  await expect(page.getByText("richard@example.com")).toBeVisible();
+
+  await page.getByRole("button", { name: "Excluir acesso de Richard" }).click();
+  await page.getByRole("button", { name: "Confirmar exclusão de Richard" }).click();
+  await expect(page.getByRole("status")).toContainText("O acesso de Richard foi excluído");
+  await expect(page.getByText("richard@example.com")).toHaveCount(0);
 });
 
 test("o histórico de conversas mostra 15 itens por página", async ({ page }) => {
