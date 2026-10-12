@@ -110,7 +110,7 @@ const account = {
   balance: "1500.00",
 };
 
-function dashboardForMonth(year: number, month: number, largeLists = false) {
+function dashboardForMonth(year: number, month: number, largeLists = false, categoryBreakdown = false) {
   const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
   const endDate = new Date(Date.UTC(year, month, 0));
   const periodEnd = `${year}-${String(month).padStart(2, "0")}-${String(endDate.getUTCDate()).padStart(2, "0")}`;
@@ -133,7 +133,9 @@ function dashboardForMonth(year: number, month: number, largeLists = false) {
     monthly_income: "0.00",
     monthly_expenses: "0.00",
     monthly_result: "0.00",
-    expenses_by_category: [],
+    expenses_by_category: categoryBreakdown
+      ? [{ category_id: "synthetic-category-food", category_name: "Alimentação", amount: "195.00" }]
+      : [],
     cards: cards.map((card) => ({
       id: card.id,
       name: card.name,
@@ -209,7 +211,7 @@ function json(route: Route, body: unknown) {
 
 export async function mockFinanceApi(
   page: Page,
-  options: { owner?: boolean; largeLists?: boolean } = {},
+  options: { owner?: boolean; largeLists?: boolean; categoryBreakdown?: boolean } = {},
 ): Promise<E2EApiState> {
   const state: E2EApiState = {
     dashboardQueries: [],
@@ -229,10 +231,14 @@ export async function mockFinanceApi(
   const mockAccounts = options.largeLists
     ? Array.from({ length: 21 }, (_, index) => ({ ...account, id: `synthetic-account-${index + 1}`, name: `Conta ${index + 1}` }))
     : [account];
-  const mockCategories = options.largeLists
+  const mockCategories = options.categoryBreakdown
+    ? [{ id: "synthetic-category-food", name: "Alimentação", type: "EXPENSE", is_archived: false }]
+    : options.largeLists
     ? Array.from({ length: 21 }, (_, index) => ({ id: `synthetic-category-${index + 1}`, name: `Categoria ${index + 1}`, type: index < 3 ? "INCOME" : "EXPENSE", is_archived: false }))
     : [];
-  const mockTransactions = options.largeLists
+  const mockTransactions = options.categoryBreakdown
+    ? [{ id: "synthetic-food-transaction", account_id: account.id, category_id: "synthetic-category-food", category_name: "Alimentação", source_account_id: null, destination_account_id: null, invoice_id: null, credit_card_id: null, credit_card_name: null, type: "EXPENSE", source: "MANUAL", status: "CONFIRMED", description: "Abastecimento de teste", amount: "195.00", occurred_at: "2026-10-12", notes: null }]
+    : options.largeLists
     ? Array.from({ length: 24 }, (_, index) => ({
         id: `synthetic-transaction-${index + 1}`,
         account_id: account.id,
@@ -520,7 +526,7 @@ export async function mockFinanceApi(
       state.dashboardQueries.push(url.search);
       const year = Number(url.searchParams.get("year") ?? "2026");
       const month = Number(url.searchParams.get("month") ?? "10");
-      await json(route, dashboardForMonth(year, month, options.largeLists));
+      await json(route, dashboardForMonth(year, month, options.largeLists, options.categoryBreakdown));
       return;
     }
     if (url.pathname === "/api/cards/invoices/upcoming") {

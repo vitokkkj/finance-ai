@@ -5904,24 +5904,6 @@ textarea:focus-visible {
   text-underline-offset: 3px;
 }
 
-.category-transactions-link {
-  display: block;
-  margin-top: 3px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-muted);
-  font: inherit;
-  font-size: 9px;
-  cursor: pointer;
-}
-
-.category-transactions-link:hover,
-.category-transactions-link:focus-visible {
-  color: var(--color-brand);
-  text-decoration: underline;
-}
-
 .settings-managed-users > p {
   max-width: 720px;
   color: var(--color-muted);
@@ -6029,4 +6011,144 @@ textarea:focus-visible {
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+/* At intermediate widths, let each preference card decide its own columns. */
+.assistant-settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
+}
+
+.settings-managed-users {
+  container-name: managed-users;
+  container-type: inline-size;
+}
+
+@container managed-users (max-width: 620px) {
+  .settings-managed-user-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container managed-users (max-width: 380px) {
+  .settings-managed-user-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-managed-user-form > button {
+    width: 100%;
+  }
+}
+
+.category-summary-drilldown {
+  width: 100%;
+  min-height: 49px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.category-summary-list li {
+  display: block;
+}
+
+.category-summary-drilldown:hover,
+.category-summary-drilldown:focus-visible {
+  color: var(--color-brand);
+}
+
+.category-summary-drilldown:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: -2px;
+}
+
+.category-summary-drilldown > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-summary-clickable {
+  position: relative;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.card-summary-clickable:hover {
+  border-color: var(--color-brand);
+  background: color-mix(in srgb, var(--color-surface) 88%, var(--color-brand-soft));
+}
+
+.card-summary-hit-target {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.card-summary-clickable:focus-within {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 3px;
+}
+
+.card-summary-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  color: var(--color-brand);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.transaction-import-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.transaction-import-actions > .transaction-import-file-button {
+  min-width: 108px;
+  padding-inline: 14px;
+}
+
+.category-name-drilldown {
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  touch-action: manipulation;
+}
+
+.category-drilldown-row {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.category-drilldown-row:hover {
+  background: color-mix(in srgb, var(--color-surface-soft) 72%, transparent);
+}
+
+.category-drilldown-row .category-name-drilldown:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: -3px;
 }

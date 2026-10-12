@@ -132,17 +132,19 @@ export function CreditCardWorkspace({
   accounts,
   categories,
   focusTarget,
+  focusCardId,
   onFinanceChanged,
 }: {
   accounts: Account[];
   categories: Category[];
   focusTarget?: FinanceFocusTarget | null;
+  focusCardId?: string | null;
   onFinanceChanged: () => void;
 }) {
   const [cards, setCards] = useState<CreditCard[]>([]);
   const [invoices, setInvoices] = useState<CardInvoice[]>([]);
   const [upcomingInvoices, setUpcomingInvoices] = useState<UpcomingCardInvoice[]>([]);
-  const [selectedCardId, setSelectedCardId] = useState("");
+  const [selectedCardId, setSelectedCardId] = useState(focusCardId ?? "");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [pendingInvoiceId, setPendingInvoiceId] = useState<string | null>(null);
   const [cardFormOpen, setCardFormOpen] = useState(false);
@@ -163,6 +165,8 @@ export function CreditCardWorkspace({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const invoiceDetailsRef = useRef<HTMLDivElement>(null);
+  const invoiceCyclesHeadingRef = useRef<HTMLDivElement>(null);
+  const initialCardFocusHandled = useRef(false);
   const { confirm, dialog: confirmationDialog } = useSophiaConfirmation();
 
   const activeCards = useMemo(() => cards.filter((card) => card.is_active), [cards]);
@@ -273,6 +277,18 @@ export function CreditCardWorkspace({
   useEffect(() => {
     void loadCards();
   }, [loadCards]);
+
+  useEffect(() => {
+    if (!focusCardId || initialCardFocusHandled.current || cards.length === 0) return;
+    initialCardFocusHandled.current = true;
+    if (!cards.some((card) => card.id === focusCardId)) return;
+    setSelectedCardId(focusCardId);
+    setSelectedInvoiceId("");
+    const frame = window.requestAnimationFrame(() => {
+      invoiceCyclesHeadingRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [cards, focusCardId]);
 
   useEffect(() => {
     void loadInvoices();
@@ -555,7 +571,7 @@ export function CreditCardWorkspace({
             </>
           )}
         </section>
-        <div className="editor-heading invoice-card-cycle-heading">
+        <div className="editor-heading invoice-card-cycle-heading" ref={invoiceCyclesHeadingRef}>
           <div><p className="eyebrow">Ciclos do cartão</p><h3>Faturas de {selectedCard?.name ?? "um cartão"}</h3><p className="form-note">Escolha um cartão para consultar seus ciclos, valores pagos e saldo em aberto.</p></div>
           <div className="invoice-heading-actions">
             <label className="month-picker">Cartão para visualizar<select aria-label="Cartão para visualizar" onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label>

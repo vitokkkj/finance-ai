@@ -154,7 +154,7 @@ export function TransactionImport({ onImported }: { onImported: (message: string
       <p className="transaction-import-copy">A SophIA confere o arquivo e sugere possíveis duplicidades. Nada é gravado até você revisar e confirmar.</p>
       <div className="transaction-import-actions">
         <input accept=".csv,text/csv" aria-label="Arquivo CSV" className="sr-only" onChange={(event) => void chooseFile(event)} ref={inputRef} type="file" />
-        <button className="secondary-button compact-button" disabled={busy || Boolean(preview)} onClick={() => inputRef.current?.click()} type="button">{fileName || "Escolher CSV"}</button>
+        <button aria-label={fileName || "Escolher CSV"} className="secondary-button compact-button transaction-import-file-button" disabled={busy || Boolean(preview)} onClick={() => inputRef.current?.click()} type="button">{fileName || "Escolher CSV"}</button>
         {preview ? (
           <button className="text-button transaction-import-reset" disabled={busy} onClick={reset} type="button"><RotateCcw size={13} /> Trocar arquivo</button>
         ) : (

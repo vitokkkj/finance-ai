@@ -88,6 +88,12 @@ test("a importação de CSV só grava depois da revisão de duplicidades e confi
   const state = await mockFinanceApi(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Lançamentos", exact: true }).click();
+  const chooseCsv = page.getByRole("button", { name: "Escolher CSV" });
+  const csvButtonAlignment = await chooseCsv.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { alignItems: style.alignItems, justifyContent: style.justifyContent, textAlign: style.textAlign };
+  });
+  expect(csvButtonAlignment).toEqual({ alignItems: "center", justifyContent: "center", textAlign: "center" });
   await page.getByLabel("Arquivo CSV").setInputFiles({
     name: "lancamentos.csv",
     mimeType: "text/csv",
@@ -243,6 +249,57 @@ test("categorias abrem os lançamentos correspondentes e mantêm paginação", a
   await page.getByRole("navigation", { name: "Paginação dos lançamentos" }).getByRole("button", { name: "Próxima" }).click();
   await expect(page.locator(".transaction-table tbody tr")).toHaveCount(6);
 });
+
+test("categorias no resumo e em qualquer célula da linha abrem seus lançamentos", async ({ page }) => {
+  await mockFinanceApi(page, { categoryBreakdown: true });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Visão geral", exact: true }).click();
+
+  await page.getByRole("button", { name: "Ver lançamentos da categoria Alimentação" }).click();
+  await expect(page.getByRole("heading", { name: "Lançamentos · Alimentação", exact: true })).toBeVisible();
+  await expect(page.locator(".transaction-table tbody tr")).toContainText("Abastecimento de teste");
+  await expect(page.locator(".filter-form input").nth(0)).toHaveValue("01/10/2026");
+  await expect(page.locator(".filter-form input").nth(1)).toHaveValue("31/10/2026");
+
+  await page.getByRole("button", { name: "Categorias", exact: true }).click();
+  const categoryRow = page.getByRole("region", { name: "Categorias de despesas" }).locator("tbody tr").filter({ hasText: "Alimentação" });
+  await expect(categoryRow.getByRole("button", { name: "Ver lançamentos da categoria Alimentação" })).toBeVisible();
+  await expect(categoryRow.getByRole("button", { name: "Ver lançamentos", exact: true })).toHaveCount(0);
+  await categoryRow.locator("td").nth(1).click();
+  await expect(page.getByRole("heading", { name: "Lançamentos · Alimentação", exact: true })).toBeVisible();
+});
+
+test("clicar em um cartão no resumo abre os ciclos desse cartão", async ({ page }) => {
+  await mockFinanceApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Visão geral", exact: true }).click();
+
+  await page.getByRole("button", { name: "Abrir faturas do cartão Gold" }).click();
+  await expect(page.getByLabel("Cartão para visualizar")).toHaveValue("synthetic-card-gold");
+  await expect(page.getByRole("heading", { name: "Faturas de Gold", exact: true })).toBeInViewport();
+});
+
+for (const width of [390, 820, 1440]) {
+  test(`formulário de criação de conta se alinha ao espaço disponível em ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width, height: 900 },
+      isMobile: width <= 760,
+      hasTouch: width <= 760,
+    });
+    const page = await context.newPage();
+    await mockFinanceApi(page, { owner: true });
+    await page.goto("/");
+    if (width <= 760) await page.getByRole("button", { name: "Abrir menu de navegação" }).click();
+    await page.getByRole("button", { name: "Preferências", exact: true }).click();
+
+    const form = page.locator(".settings-managed-user-form");
+    const columns = await form.evaluate((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length);
+    expect(columns).toBe(width === 390 ? 1 : 2);
+    const pageDimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
+    expect(pageDimensions.content).toBeLessThanOrEqual(pageDimensions.viewport);
+    await context.close();
+  });
+}
 
 test("regras, compromissos e ocorrências usam paginação no lugar de mostrar histórico", async ({ page }) => {
   await mockFinanceApi(page, { largeLists: true });

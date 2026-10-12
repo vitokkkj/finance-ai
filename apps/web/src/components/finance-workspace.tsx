@@ -280,6 +280,7 @@ export function FinanceWorkspace({
   focusTarget?: FinanceFocusTarget | null;
 }) {
   const [section, setSection] = useState<Section>(initialSection);
+  const [cardFocusId, setCardFocusId] = useState<string | null>(null);
   const [month, setMonth] = useState(monthInSaoPaulo);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -307,6 +308,7 @@ export function FinanceWorkspace({
   const [transferForm, setTransferForm] = useState<TransferForm>(emptyTransfer);
   const [filters, setFilters] = useState<TransactionFilters>(emptyFilters);
   const loadVersion = useRef(0);
+  const workspaceHeadingRef = useRef<HTMLDivElement>(null);
 
   const loadFinance = useCallback(async () => {
     const version = loadVersion.current + 1;
@@ -682,6 +684,29 @@ export function FinanceWorkspace({
     recurrences: "Programados",
   };
 
+  function openCategoryTransactions(categoryId: string, period?: { start_date: string; end_date: string }) {
+    const params = new URLSearchParams({ category_id: categoryId });
+    if (period) {
+      params.set("start_date", period.start_date);
+      params.set("end_date", period.end_date);
+    }
+    setFilters({ ...emptyFilters(), category_id: categoryId, ...period });
+    setAppliedFilters(params.toString());
+    setSection("transactions");
+    window.requestAnimationFrame(() => {
+      workspaceHeadingRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function openCardInvoices(cardId: string) {
+    setCardFocusId(cardId);
+    setSection("cards");
+  }
+
+  useEffect(() => {
+    if (section !== "cards") setCardFocusId(null);
+  }, [section]);
+
   return (
     <div className={embedded ? "workspace-root finance-embedded" : "workspace-root"}>
       {!embedded && <aside className="finance-sidebar">
@@ -714,7 +739,7 @@ export function FinanceWorkspace({
         </header>}
 
         <main className="finance-content">
-          <div className="workspace-heading">
+          <div className="workspace-heading" ref={workspaceHeadingRef}>
             <div>
               <p className="eyebrow">SophIA</p>
               <h1>{titleBySection[section]}</h1>
@@ -815,7 +840,7 @@ export function FinanceWorkspace({
                       ) : (
                         <ul className="category-summary-list">
                           {overviewCategoryPagination.items.map((item) => (
-                            <li key={item.category_id}><span className="category-dot" /><span>{item.category_name}</span><strong className="category-amount">{formatCurrency(item.amount)}</strong></li>
+                            <li key={item.category_id}><button aria-label={`Ver lançamentos da categoria ${item.category_name}`} className="category-summary-drilldown" onClick={() => openCategoryTransactions(item.category_id, { start_date: dashboard.period_start, end_date: dashboard.period_end })} type="button"><span className="category-dot" /><span>{item.category_name}</span><strong className="category-amount">{formatCurrency(item.amount)}</strong></button></li>
                           ))}
                         </ul>
                       )}
@@ -844,11 +869,12 @@ export function FinanceWorkspace({
                     {dashboard.cards.length === 0 ? (
                       <div className="surface-card card-summary-empty"><p className="eyebrow">Cartões</p><h2>Nenhum cartão cadastrado</h2><button className="link-button" onClick={() => setSection("cards")} type="button">Adicionar cartão ↗</button></div>
                     ) : overviewCardPagination.items.map((card) => (
-                      <article className="surface-card card-summary" key={card.id}>
+                      <article className="surface-card card-summary card-summary-clickable" key={card.id}>
+                        <button aria-label={`Abrir faturas do cartão ${card.name}`} className="card-summary-hit-target" onClick={() => openCardInvoices(card.id)} type="button" />
                         <div className="surface-heading"><div><p className="eyebrow">Cartão de crédito</p><h2>{card.name}</h2></div><span className="card-summary-mark"><CreditCard aria-hidden="true" size={18} /></span></div>
                         <div className="card-summary-values"><div><span>Em aberto</span><strong>{formatCurrency(card.used_limit)}</strong></div><div><span>Limite disponível</span><strong>{formatCurrency(card.available_limit)}</strong></div></div>
                         <p className="card-summary-due">{card.next_due_date ? `Próximo vencimento ${displayDate(card.next_due_date)}` : "Sem fatura em aberto"}</p>
-                        <button className="link-button" onClick={() => setSection("cards")} type="button">Ver faturas ↗</button>
+                        <span className="card-summary-open">Abrir faturas <span aria-hidden="true">↗</span></span>
                       </article>
                     ))}
                   </section>
@@ -906,7 +932,7 @@ export function FinanceWorkspace({
                         <section aria-label={`Categorias de ${group.label.toLowerCase()}`} className={`category-group category-group-${group.type.toLowerCase()}`} key={group.type}>
                           <div className="category-group-heading"><h3>{group.label}</h3><span>{group.pagination.total} {group.pagination.total === 1 ? "categoria" : "categorias"}</span></div>
                           <div className="table-wrap"><table className="data-table"><thead><tr><th>Categoria</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
-                            {group.pagination.items.map((category) => <tr key={category.id}><td><button aria-label={`Ver lançamentos da categoria ${category.name}`} className="category-name-drilldown" onClick={() => { const params = new URLSearchParams({ category_id: category.id }); setFilters({ ...emptyFilters(), category_id: category.id }); setAppliedFilters(params.toString()); setSection("transactions"); }} type="button"><strong className="cell-primary">{category.name}</strong></button><button className="category-transactions-link" onClick={() => { const params = new URLSearchParams({ category_id: category.id }); setFilters({ ...emptyFilters(), category_id: category.id }); setAppliedFilters(params.toString()); setSection("transactions"); }} type="button">Ver lançamentos</button></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={() => editCategory(category)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCategory(category)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCategory(category)} type="button">Excluir</button></td></tr>)}
+                            {group.pagination.items.map((category) => <tr className="category-drilldown-row" key={category.id} onClick={(event) => { if (!(event.target as HTMLElement).closest(".row-actions")) openCategoryTransactions(category.id); }}><td><button aria-label={`Ver lançamentos da categoria ${category.name}`} className="category-name-drilldown" type="button"><strong className="cell-primary">{category.name}</strong></button></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={(event) => { event.stopPropagation(); editCategory(category); }} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={(event) => { event.stopPropagation(); void archiveCategory(category); }} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={(event) => { event.stopPropagation(); void deleteCategory(category); }} type="button">Excluir</button></td></tr>)}
                           </tbody></table></div><PaginationControls end={group.pagination.end} label={`Paginação das categorias de ${group.label.toLowerCase()}`} onPageChange={group.pagination.setPage} page={group.pagination.page} pageCount={group.pagination.pageCount} start={group.pagination.start} total={group.pagination.total} />
                         </section>
                       ))}
@@ -975,6 +1001,7 @@ export function FinanceWorkspace({
                   accounts={accounts}
                   categories={categories}
                   focusTarget={focusTarget?.source === "CARD_INVOICE" ? focusTarget : null}
+                  focusCardId={cardFocusId}
                   onFinanceChanged={loadFinance}
                 />
               )}

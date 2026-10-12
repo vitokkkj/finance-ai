@@ -24,7 +24,6 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightOpen,
   Plus,
   Pencil,
   ReceiptText,
@@ -1461,7 +1460,7 @@ export function AssistantWorkspace({
                 title="Contexto financeiro"
                 type="button"
               >
-                <PanelRightOpen aria-hidden="true" size={16} />
+                <WalletCards aria-hidden="true" size={16} />
                 <span>Contexto</span>
               </button>
             )}
