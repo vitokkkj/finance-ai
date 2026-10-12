@@ -194,9 +194,9 @@ def create_transaction(
         occurred_at=_transaction_instant(payload.occurred_at),
         notes=payload.notes,
     )
-    store_idempotency(transaction, "transaction", idempotency_key, fingerprint)
     db.add(transaction)
     try:
+        store_idempotency(db, transaction, "transaction", idempotency_key, fingerprint)
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(

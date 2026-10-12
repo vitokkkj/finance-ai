@@ -1420,6 +1420,83 @@ def test_clear_expense_duplicate_is_not_created_twice_and_missing_category_is_as
     assert fake.requests == []
 
 
+def test_chat_retry_keeps_financial_idempotency_when_provider_reorders_tools(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    account_id, category_id = _create_assistant_basics(client)
+    today = _today().isoformat()
+    card = client.post(
+        "/api/cards",
+        json={
+            "name": "Inter",
+            "institution": "Banco Inter",
+            "credit_limit": "5000.00",
+            "closing_day": 15,
+            "due_day": 22,
+        },
+    ).json()
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    arguments = json.dumps(
+        {
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Compra repetida via chat",
+            "amount": "12.34",
+            "occurred_at": today,
+        }
+    )
+    purchase_call = ProviderEvent(
+        type="function_call",
+        function_call=FunctionCall("provider-call", "create_card_purchase", arguments),
+    )
+    expense_arguments = json.dumps(
+        {
+            "account_id": account_id,
+            "category_id": category_id,
+            "movement_type": "EXPENSE",
+            "description": "Compra repetida via chat",
+            "amount": "12.34",
+            "occurred_at": today,
+        }
+    )
+    expense_call = ProviderEvent(
+        type="function_call",
+        function_call=FunctionCall(
+            "provider-expense-call",
+            "create_transaction",
+            expense_arguments,
+        ),
+    )
+    duplicate_expense_call = ProviderEvent(
+        type="function_call",
+        function_call=FunctionCall(
+            "provider-duplicate-expense-call", "create_transaction", expense_arguments
+        ),
+    )
+    fake = FakeAIProvider(
+        [
+            [purchase_call, expense_call, duplicate_expense_call, _completed()],
+            [ProviderEvent(type="text_delta", text="Movimentos registrados."), _completed()],
+            [duplicate_expense_call, expense_call, purchase_call, _completed()],
+            [ProviderEvent(type="text_delta", text="Movimentos registrados."), _completed()],
+        ]
+    )
+    _set_fake_provider(client, fake)
+    headers = {"Idempotency-Key": "chat-retry-card-purchase-0001"}
+    path = f"/api/ai/conversations/{conversation['id']}/messages"
+
+    first = client.post(path, json={"content": "Registre esta compra no cartão."}, headers=headers)
+    retry = client.post(path, json={"content": "Registre esta compra no cartão."}, headers=headers)
+
+    assert first.status_code == retry.status_code == 200
+    transactions = client.get("/api/transactions").json()
+    assert len(transactions) == 3
+    assert sum(transaction["type"] == "EXPENSE" for transaction in transactions) == 2
+    assert sum(transaction["type"] == "CARD_PURCHASE" for transaction in transactions) == 1
+    assert all(transaction["amount"] == "12.34" for transaction in transactions)
+
+
 def test_category_answer_resolves_pending_expense_without_calling_model(
     client: TestClient, test_session_factory: sessionmaker[Session]
 ) -> None:

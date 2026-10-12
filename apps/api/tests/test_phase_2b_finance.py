@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from decimal import Decimal
+from threading import Barrier
 from typing import cast
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import transactions as transactions_module
 from app.auth import password_hasher
-from app.models import Account, CardInvoice, Category, CreditCard, Transaction, User
+from app.models import (
+    Account,
+    CardInvoice,
+    Category,
+    CreditCard,
+    FinancialIdempotencyRecord,
+    Transaction,
+    User,
+)
+from app.schemas import TransactionCreate
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 TODAY = datetime.now(UTC).astimezone(SAO_PAULO).date().isoformat()
@@ -616,6 +631,80 @@ def test_deleting_paid_card_purchase_cannot_make_payments_exceed_invoice_total(
     )
 
 
+def test_deleting_fully_paid_purchase_is_blocked(client: TestClient) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    card = create_card(client)
+    category_id = create_expense_category(client)
+    purchase = client.post(
+        "/api/card-purchases",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Compra quitada",
+            "amount": "100.00",
+            "occurred_at": TODAY,
+        },
+    )
+    invoice_id = purchase.json()["invoice_id"]
+    payment = client.post(
+        f"/api/invoices/{invoice_id}/payments",
+        json={"account_id": account["id"], "amount": "100.00", "occurred_at": TODAY},
+    )
+
+    deleted = client.delete(f"/api/transactions/{purchase.json()['id']}")
+
+    invoice = client.get(f"/api/invoices/{invoice_id}").json()
+    assert purchase.status_code == payment.status_code == 201
+    assert deleted.status_code == 409
+    assert invoice["total"] == invoice["paid_amount"] == "100.00"
+    assert invoice["outstanding"] == "0.00"
+
+
+def test_purchase_deletion_preserves_reconciliation_when_other_purchase_covers_payment(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    card = create_card(client)
+    category_id = create_expense_category(client)
+    first_purchase = client.post(
+        "/api/card-purchases",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Compra maior",
+            "amount": "100.00",
+            "occurred_at": TODAY,
+        },
+    )
+    second_purchase = client.post(
+        "/api/card-purchases",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Outra compra",
+            "amount": "50.00",
+            "occurred_at": TODAY,
+        },
+    )
+    invoice_id = first_purchase.json()["invoice_id"]
+    payment = client.post(
+        f"/api/invoices/{invoice_id}/payments",
+        json={"account_id": account["id"], "amount": "50.00", "occurred_at": TODAY},
+    )
+
+    deleted_larger = client.delete(f"/api/transactions/{first_purchase.json()['id']}")
+    deleted_last_coverage = client.delete(f"/api/transactions/{second_purchase.json()['id']}")
+    invoice = client.get(f"/api/invoices/{invoice_id}").json()
+
+    assert first_purchase.status_code == second_purchase.status_code == payment.status_code == 201
+    assert deleted_larger.status_code == 204
+    assert deleted_last_coverage.status_code == 409
+    assert invoice["total"] == invoice["paid_amount"] == "50.00"
+    assert invoice["outstanding"] == "0.00"
+
+
 def test_financial_idempotency_replays_transactions_transfers_and_invoice_payments(
     client: TestClient,
 ) -> None:
@@ -635,6 +724,22 @@ def test_financial_idempotency_replays_transactions_transfers_and_invoice_paymen
         },
     )
     invoice_id = purchase.json()["invoice_id"]
+    card_purchase_payload = {
+        "credit_card_id": card["id"],
+        "category_id": category_id,
+        "description": "Compra com retry",
+        "amount": "10.00",
+        "occurred_at": TODAY,
+    }
+    card_purchase_headers = {"Idempotency-Key": "card-purchase-retry-0001"}
+    first_card_purchase = client.post(
+        "/api/card-purchases", json=card_purchase_payload, headers=card_purchase_headers
+    )
+    retry_card_purchase = client.post(
+        "/api/card-purchases", json=card_purchase_payload, headers=card_purchase_headers
+    )
+    assert first_card_purchase.status_code == retry_card_purchase.status_code == 201
+    assert first_card_purchase.json()["id"] == retry_card_purchase.json()["id"]
 
     transaction_payload = {
         "account_id": account["id"],
@@ -684,6 +789,140 @@ def test_financial_idempotency_replays_transactions_transfers_and_invoice_paymen
     assert client.get(f"/api/invoices/{invoice_id}").json()["paid_amount"] == "60.00"
 
 
+def test_idempotency_key_remains_reserved_after_transaction_deletion(client: TestClient) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    category_id = create_expense_category(client)
+    payload = {
+        "account_id": account["id"],
+        "category_id": category_id,
+        "type": "EXPENSE",
+        "description": "Lançamento removido",
+        "amount": "25.00",
+        "occurred_at": TODAY,
+    }
+    headers = {"Idempotency-Key": "deleted-movement-retry-0001"}
+
+    created = client.post("/api/transactions", json=payload, headers=headers)
+    assert created.status_code == 201
+    deleted = client.delete(f"/api/transactions/{created.json()['id']}")
+    replay = client.post("/api/transactions", json=payload, headers=headers)
+    changed_payload = {**payload, "amount": "26.00"}
+    changed_replay = client.post("/api/transactions", json=changed_payload, headers=headers)
+
+    assert deleted.status_code == 204
+    assert replay.status_code == 410
+    assert changed_replay.status_code == 409
+    assert client.get("/api/transactions").json() == []
+
+
+def test_idempotency_falls_back_to_legacy_transaction_columns_during_rollback(
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    category_id = create_expense_category(client)
+    payload = {
+        "account_id": account["id"],
+        "category_id": category_id,
+        "type": "EXPENSE",
+        "description": "Retry durante rollback",
+        "amount": "25.00",
+        "occurred_at": TODAY,
+    }
+    key = "legacy-rollback-retry-0001"
+    created = client.post(
+        "/api/transactions", json=payload, headers={"Idempotency-Key": key}
+    )
+    assert created.status_code == 201
+    transaction_id = UUID(created.json()["id"])
+
+    with test_session_factory() as db:
+        transaction = db.get(Transaction, transaction_id)
+        assert transaction is not None
+        assert transaction.idempotency_operation == "transaction"
+        assert transaction.idempotency_key == key
+        assert transaction.idempotency_fingerprint is not None
+        db.execute(
+            delete(FinancialIdempotencyRecord).where(
+                FinancialIdempotencyRecord.user_id == transaction.user_id,
+                FinancialIdempotencyRecord.operation == "transaction",
+                FinancialIdempotencyRecord.idempotency_key == key,
+            )
+        )
+        db.commit()
+
+    replay = client.post("/api/transactions", json=payload, headers={"Idempotency-Key": key})
+    changed = client.post(
+        "/api/transactions",
+        json={**payload, "amount": "26.00"},
+        headers={"Idempotency-Key": key},
+    )
+
+    assert replay.status_code == 201
+    assert replay.json()["id"] == created.json()["id"]
+    assert changed.status_code == 409
+    assert len(client.get("/api/transactions").json()) == 1
+
+
+def test_concurrent_idempotency_retries_create_one_transaction(
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = test_session_factory.kw["bind"]
+    if engine.dialect.name != "postgresql":
+        pytest.skip("A corrida entre sessões independentes é verificada na CI PostgreSQL.")
+
+    setup_user(client)
+    account = create_account(client, "Sicredi", "1000.00")
+    category_id = create_expense_category(client)
+    with test_session_factory() as db:
+        user = db.scalar(select(User).where(User.email == "fase2b@example.com"))
+        assert user is not None
+        user_id = user.id
+
+    payload = TransactionCreate(
+        account_id=UUID(account["id"]),
+        category_id=UUID(category_id),
+        type="EXPENSE",
+        description="Retry concorrente",
+        amount=Decimal("25.00"),
+        occurred_at=TODAY,
+    )
+    key = "concurrent-retry-key-0001"
+    barrier = Barrier(2)
+    original_find = transactions_module.find_idempotent_transaction
+
+    def synchronized_find(*args: object, **kwargs: object) -> tuple[Transaction | None, str | None]:
+        result = original_find(*args, **kwargs)
+        barrier.wait(timeout=10)
+        return result
+
+    monkeypatch.setattr(transactions_module, "find_idempotent_transaction", synchronized_find)
+
+    def create_movement() -> str:
+        with test_session_factory() as db:
+            user = db.get(User, user_id)
+            assert user is not None
+            result = transactions_module.create_transaction(payload, user, db, key)
+            return str(result.id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        transaction_ids = list(executor.map(lambda _index: create_movement(), range(2)))
+
+    assert transaction_ids[0] == transaction_ids[1]
+    with test_session_factory() as db:
+        count = db.scalar(
+            select(func.count(Transaction.id)).where(
+                Transaction.user_id == user_id,
+                Transaction.description == "Retry concorrente",
+            )
+        )
+    assert count == 1
+
+
 def test_deleting_invoice_removes_purchases_and_payments_and_reconciles_account(
     client: TestClient,
 ) -> None:
@@ -717,6 +956,7 @@ def test_deleting_invoice_removes_purchases_and_payments_and_reconciles_account(
     assert deleted.status_code == 204
     assert client.get(f"/api/invoices/{invoice_id}").status_code == 404
     assert client.get("/api/transactions").json() == []
+    assert client.get("/api/accounts").json()[0]["balance"] == "1000.00"
     assert client.get("/api/accounts").json()[0]["balance"] == "1000.00"
     assert client.get("/api/cards").json()[0]["used_limit"] == "0.00"
     assert client.delete(f"/api/cards/{card['id']}").status_code == 204

@@ -40,6 +40,10 @@ O saldo inicial de fatura é adicionado de forma incremental por `0010_card_invo
 
 A migration `0016_totp_replay` acrescenta em `users` o contador mais recente de TOTP consumido. O login, pareamento MFA e reautenticação atualizam o contador com uma condição atômica; códigos antigos ou já usados não podem ser repetidos.
 
+A migration `0017_financial_idempotency` adiciona os campos legados de chave aos movimentos. A `0018_idempotency_tombstones` cria `financial_idempotency_records`, copia para ela as chaves já existentes e mantém a referência UUID do movimento original sem chave estrangeira para a transação, para que uma exclusão explícita não libere a chave para reutilização. O fingerprint guarda somente um hash do payload; a tabela não guarda o corpo do pedido. Os registros são removidos em cascata com o usuário. Enquanto as colunas de `0017` existirem, a aplicação grava a chave tanto nelas quanto no ledger e consulta as colunas antigas como fallback de leitura.
+
+A `0018` é forward-only: seu downgrade é bloqueado porque o schema anterior não consegue preservar as chaves de movimentos removidos. Para voltar a um schema anterior, restaure um backup validado segundo o procedimento de implantação; não remova a tabela manualmente.
+
 ## Convenções financeiras
 
 - PostgreSQL usa `NUMERIC(14,2)`; Python usa `Decimal`; valores de resposta da API são strings decimais com duas casas.

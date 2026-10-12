@@ -67,7 +67,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Resultado:** causa corrigida; API, Frontend e runtime passaram no run [38305965616](https://github.com/vitokkkj/finance-ai/actions/runs/38305965616), SHA `63eee3cb990efe0c87958d13c35effa3ac2cb77b`.
 
-**Referências:** [quality.yml](../.github/workflows/quality.yml#L45), [quality.yml — auditoria Python](../.github/workflows/quality.yml#L52), [deployment.md — deploy manual](deployment.md#L94).
+**Referências:** [quality.yml](../.github/workflows/quality.yml), [quality.yml — auditoria Python](../.github/workflows/quality.yml), [deployment.md — deploy manual](deployment.md).
 
 ### P1.2 Preservar reconciliação ao editar/excluir compras e ocorrências pagas
 
@@ -75,7 +75,9 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação:** impedir exclusão/redução de compras que já tenham pagamentos associados, ou oferecer operações explícitas e auditáveis de estorno/crédito/chargeback; impedir edição de transação de ocorrência paga ou atualizar atomicamente o vínculo e os valores da ocorrência. Definir política de cancelamento versus remoção de histórico e cobrir saldos, pagamentos parciais/totais, recorrência e reconciliação com testes.
 
-**Referências:** [finance_deletion.py](../apps/api/app/finance_deletion.py#L7), [finance_engine.py](../apps/api/app/finance_engine.py#L192), [transactions.py — edição](../apps/api/app/transactions.py#L190), [recurrences.py — baixa](../apps/api/app/recurrences.py#L598), [financial-rules.md](financial-rules.md#L46).
+**Atualização da implementação:** a compra individual continua bloqueada se sua exclusão fizer pagamentos excederem o total restante. Regressões locais agora cobrem compra parcialmente paga, totalmente paga e compra cuja exclusão é permitida porque outra mantém cobertura; também confirmam que a exclusão explícita da fatura reverte o saldo da conta e apaga compras/pagamentos conforme o aviso de confirmação. Deploy aguarda CI PostgreSQL verde.
+
+**Referências:** [finance_deletion.py](../apps/api/app/finance_deletion.py), [finance_engine.py](../apps/api/app/finance_engine.py), [transactions.py — edição](../apps/api/app/transactions.py), [recurrences.py — baixa](../apps/api/app/recurrences.py), [financial-rules.md](financial-rules.md).
 
 ### P1.3 Adicionar idempotência a operações financeiras repetíveis
 
@@ -83,7 +85,9 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação:** aceitar chave de idempotência ligada ao usuário autenticado, operação e payload; persistir resultado de forma transacional e definir prazo/retorno para replay. Cobrir timeout/retry concorrente e rejeitar reutilização da chave com payload diferente.
 
-**Referências:** [transfers.py](../apps/api/app/transfers.py#L33), [transactions.py](../apps/api/app/transactions.py#L154), [invoices.py — compra](../apps/api/app/invoices.py#L157), [invoices.py — pagamento](../apps/api/app/invoices.py#L205).
+**Atualização da implementação:** a migration `0018_idempotency_tombstones` conserva os fingerprints e IDs das operações depois da exclusão de movimentos; repetição com payload igual retorna `410`, e payload diferente retorna `409`. A política atual mantém metadados mínimos enquanto a conta existir, sem expiração, e o chat/frontend reutiliza uma chave estável durante retries. Testes locais cobrem lançamento, transferência, compra de cartão, pagamento, exclusão e retry; o teste de concorrência e a migration PostgreSQL precisam passar na CI antes do deploy.
+
+**Referências:** [transfers.py](../apps/api/app/transfers.py), [transactions.py](../apps/api/app/transactions.py), [invoices.py — compra](../apps/api/app/invoices.py), [invoices.py — pagamento](../apps/api/app/invoices.py).
 
 ### P1.4 Exercitar PostgreSQL e Alembic na CI
 
@@ -93,7 +97,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Resultado:** `alembic upgrade head`, `alembic check`, pytest PostgreSQL e `pip-audit` passaram no job API hospedado do run `38305965616`.
 
-**Referências:** [quality.yml](../.github/workflows/quality.yml#L18), [fixture de testes](../apps/api/tests/conftest.py#L12), [README — execução contra PostgreSQL](../README.md#L124), [README — migrations](../README.md#L131).
+**Referências:** [quality.yml](../.github/workflows/quality.yml), [fixture de testes](../apps/api/tests/conftest.py), [README — execução contra PostgreSQL](../README.md), [README — migrations](../README.md).
 
 ### P1.5 Integrar E2E ao CI e acrescentar alguns fluxos integrados
 
@@ -103,7 +107,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação restante:** nenhuma pendência P1 de CI/E2E. Expandir navegação real e Safari iOS permanece como P2. Os cenários integrados usam somente dados sintéticos.
 
-**Referências:** [package.json](../apps/web/package.json#L11), [quality.yml — frontend](../.github/workflows/quality.yml#L57), [spec E2E](../apps/web/e2e/finance-flows.spec.ts), [mocks E2E](../apps/web/e2e/api-mocks.ts).
+**Referências:** [package.json](../apps/web/package.json), [quality.yml — frontend](../.github/workflows/quality.yml), [spec E2E](../apps/web/e2e/finance-flows.spec.ts), [mocks E2E](../apps/web/e2e/api-mocks.ts).
 
 ### P1.6 Definir o gate de deploy e manter documentação operacional sincronizada
 
@@ -111,7 +115,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Resultado final:** o gate no SHA exato, checklist e procedimento manual foram seguidos. A VM foi atualizada no SHA de CI verde, a migration e health checks foram confirmados. `main` não tem branch protection nem rulesets; isso permanece P2.
 
-**Referências:** [deployment.md — checklist](deployment.md#L94), [deployment.md — health e rollback](deployment.md#L92), [deployment.md — rate limit](deployment.md#L32), [quality.yml](../.github/workflows/quality.yml).
+**Referências:** [deployment.md — checklist](deployment.md), [deployment.md — health e rollback](deployment.md), [deployment.md — rate limit](deployment.md), [quality.yml](../.github/workflows/quality.yml).
 
 ### P1.7 Restaurar gestão de contas pelo proprietário e concluir rate limiting
 
@@ -119,7 +123,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação restante:** acompanhar eventos e falsos positivos da regra Cloudflare após uso real. Contas gerenciadas ainda usam senha sem MFA individual; inscrição e recuperação de MFA por usuário ficam como P2.
 
-**Referências:** [managed_users.py](../apps/api/app/managed_users.py), [testes de gestão e preservação](../apps/api/tests/test_managed_users.py), [deployment.md — contas gerenciadas](deployment.md#L51), [revisão de segurança — rate limit](revisao-geral-ux-seguranca-2026-10.md#L42).
+**Referências:** [managed_users.py](../apps/api/app/managed_users.py), [testes de gestão e preservação](../apps/api/tests/test_managed_users.py), [deployment.md — contas gerenciadas](deployment.md), [revisão de segurança — rate limit](revisao-geral-ux-seguranca-2026-10.md).
 
 ### P1.8 Inspecionar VM e fechar os controles operacionais com acesso direto
 
@@ -127,28 +131,29 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Resultado final:** deploy e migration executados após CI verde; seis serviços, Alembic e endpoints públicos foram conferidos. Antes da migration, um dump temporário em modo `0600` foi validado por cabeçalho/lista e removido após os health checks. Seguem sem evidência direta o firewall/roteador anterior à VM e os jobs/retention/restore drill do Proxmox.
 
-**Referências:** [deployment.md — verificação de serviços](deployment.md#L64), [deployment.md — estado Alembic](deployment.md#L69), [revisão — firewall/SSH](revisao-geral-ux-seguranca-2026-10.md#L43), [README de infra](../infra/README.md#L7).
+**Referências:** [deployment.md — verificação de serviços](deployment.md), [deployment.md — estado Alembic](deployment.md), [revisão — firewall/SSH](revisao-geral-ux-seguranca-2026-10.md), [README de infra](../infra/README.md).
 
 ## Prioridade P2 — aberta
 
 | Item | Evidência inicial e recomendação | Referências |
 |---|---|---|
-| Contas gerenciadas e MFA individual | Contas adicionais atualmente usam senha sem MFA individual. Implementar inscrição TOTP por usuário, fluxo de recuperação com validação forte e revogação de sessões, sem reutilizar o segredo do proprietário. | [auth.py](../apps/api/app/auth.py), [deployment.md](deployment.md#L51) |
-| UX móvel, tipografia e densidade | Tabelas usam texto pequeno (há regra de 9 px) e o cabeçalho/filtros podem empurrar conteúdo; cartões exigem rolagem horizontal. Revisar hierarquia, alvos, tabela/cartão responsivo, contraste e primeira dobra em larguras reais sem perder consistência da identidade visual. | [editorial-design.css](../apps/web/src/app/editorial-design.css#L204), [finance-workspace.tsx](../apps/web/src/components/finance-workspace.tsx#L947) |
-| Landmarks e seção ativa | Verificar estrutura de `<main>`, link de salto, nome/estado da navegação e foco/teclado. A auditoria identificou landmarks semânticos redundantes e ausência de sinalização suficientemente clara da seção ativa. | [assistant-workspace.tsx](../apps/web/src/components/assistant-workspace.tsx#L1445) |
+| Contas gerenciadas e MFA individual | Contas adicionais atualmente usam senha sem MFA individual. Implementar inscrição TOTP por usuário, fluxo de recuperação com validação forte e revogação de sessões, sem reutilizar o segredo do proprietário. | [auth.py](../apps/api/app/auth.py), [deployment.md](deployment.md) |
+| UX móvel, tipografia e densidade | Tabelas usam texto pequeno (há regra de 9 px) e o cabeçalho/filtros podem empurrar conteúdo; cartões exigem rolagem horizontal. Revisar hierarquia, alvos, tabela/cartão responsivo, contraste e primeira dobra em larguras reais sem perder consistência da identidade visual. | [editorial-design.css](../apps/web/src/app/editorial-design.css), [finance-workspace.tsx](../apps/web/src/components/finance-workspace.tsx) |
+| Landmarks e seção ativa | Verificar estrutura de `<main>`, link de salto, nome/estado da navegação e foco/teclado. A auditoria identificou landmarks semânticos redundantes e ausência de sinalização suficientemente clara da seção ativa. | [assistant-workspace.tsx](../apps/web/src/components/assistant-workspace.tsx) |
 | URL, voltar/avançar e deep links | Navegação entre áreas mantém a rota `/`; permitir URL direta para seção e sincronizar histórico de navegação, sem quebrar estado de sessão. | [assistant-workspace.tsx](../apps/web/src/components/assistant-workspace.tsx) |
-| Recuperação contextual de erros | Falha em uma carga agrupada pode bloquear a tela sem recuperação por recurso. Distinguir erro de estado vazio, oferecer retry localizado e preservar o conteúdo já carregado. | [finance-workspace.tsx](../apps/web/src/components/finance-workspace.tsx#L323) |
-| Paginação e custo de consulta | API carrega o histórico sem limite; a paginação do frontend não reduz consulta. Visões de faturas carregam movimentos por fatura e produzem consultas repetidas/N+1. Implementar cursor no servidor e agregação/lote; medir antes de adicionar cache ou infraestrutura. | [transactions.py](../apps/api/app/transactions.py#L106), [finance_views.py](../apps/api/app/finance_views.py#L120), [cards.py](../apps/api/app/cards.py#L43) |
-| Política de alteração de fechamento/vencimento | Mudança da configuração do cartão pode aplicar a regra nova a compras futuras sem política de vigência/preview para ciclo. Definir data efetiva, mostrar impacto e cobrir meses curtos e fronteiras. | [cards.py](../apps/api/app/cards.py#L153), [invoices.py](../apps/api/app/invoices.py#L185), [finance_engine.py](../apps/api/app/finance_engine.py#L98) |
-| CSP | Cabeçalho observado permite `'unsafe-inline'` em `script-src` e `style-src`. Avaliar nonce/hash compatível com Next.js, primeiro em modo report-only/ambiente controlado, e remover exceção somente após validar hidratação e fluxos. Não há XSS confirmado. | [Caddyfile](../infra/Caddyfile#L13), [revisão anterior](revisao-geral-ux-seguranca-2026-10.md#L44) |
-| Estorno explícito de ocorrência paga | O P1.2 bloqueia edição/exclusão genérica de transação de ocorrência paga com `409`, preservando o histórico. Se o produto precisar corrigir esses registros, definir depois um fluxo explícito de estorno/cancelamento, com reconciliação e trilha de auditoria. | [financial-rules.md](financial-rules.md#L46), [transactions.py](../apps/api/app/transactions.py#L235), [test_recurrences.py](../apps/api/tests/test_recurrences.py#L230) |
+| Recuperação contextual de erros | Falha em uma carga agrupada pode bloquear a tela sem recuperação por recurso. Distinguir erro de estado vazio, oferecer retry localizado e preservar o conteúdo já carregado. | [finance-workspace.tsx](../apps/web/src/components/finance-workspace.tsx) |
+| Paginação e custo de consulta | API carrega o histórico sem limite; a paginação do frontend não reduz consulta. Visões de faturas carregam movimentos por fatura e produzem consultas repetidas/N+1. Implementar cursor no servidor e agregação/lote; medir antes de adicionar cache ou infraestrutura. | [transactions.py](../apps/api/app/transactions.py), [finance_views.py](../apps/api/app/finance_views.py), [cards.py](../apps/api/app/cards.py) |
+| Crescimento do ledger de idempotência | O ledger mantém chaves e fingerprints mínimos até a exclusão da conta, sem prazo de expiração, para impedir duplicidade após exclusão de movimento. Monitorar volume; qualquer retenção/expurgo futuro precisa preservar a garantia de replay e não incluir corpo de pedido. | [financial-rules.md](financial-rules.md), [database.md](database.md) |
+| Política de alteração de fechamento/vencimento | Mudança da configuração do cartão pode aplicar a regra nova a compras futuras sem política de vigência/preview para ciclo. Definir data efetiva, mostrar impacto e cobrir meses curtos e fronteiras. | [cards.py](../apps/api/app/cards.py), [invoices.py](../apps/api/app/invoices.py), [finance_engine.py](../apps/api/app/finance_engine.py) |
+| CSP | Cabeçalho observado permite `'unsafe-inline'` em `script-src` e `style-src`. Avaliar nonce/hash compatível com Next.js, primeiro em modo report-only/ambiente controlado, e remover exceção somente após validar hidratação e fluxos. Não há XSS confirmado. | [Caddyfile](../infra/Caddyfile), [revisão anterior](revisao-geral-ux-seguranca-2026-10.md) |
+| Estorno explícito de ocorrência paga | O P1.2 bloqueia edição/exclusão genérica de transação de ocorrência paga com `409`, preservando o histórico. Se o produto precisar corrigir esses registros, definir depois um fluxo explícito de estorno/cancelamento, com reconciliação e trilha de auditoria. | [financial-rules.md](financial-rules.md), [transactions.py](../apps/api/app/transactions.py), [test_recurrences.py](../apps/api/tests/test_recurrences.py) |
 | Actions Node 20 | Execuções do GitHub reportaram avisos de actions em Node 20; a revisão anterior apontou atualização necessária para releases compatíveis com Node 24 mantendo pin por SHA. Validar cada action e compatibilidade no runner antes de atualizar. | [quality.yml](../.github/workflows/quality.yml), [guia de actions do GitHub](https://github.blog/changelog/2026-09-23-node-20-is-no-longer-available-in-github-actions/) |
-| Backups, recuperação e RPO/RTO | Há declarações documentais diferentes: confirmação de backup/restauração em deployment e pedido de validação no README de infraestrutura. Registrar evidência, escopo, data do último restore drill, RPO/RTO, criptografia e responsável, confirmando no Proxmox diretamente. | [deployment.md](deployment.md#L83), [infra README](../infra/README.md#L7) |
-| E-mail proprietário no código | A política de MFA ainda identifica o único proprietário por endereço fixo no código público. Avaliar configuração não secreta de identidade (sem enfraquecer MFA) e reduzir exposição de dado pessoal no repositório. | [auth.py](../apps/api/app/auth.py#L52), [deployment.md](deployment.md#L47) |
-| GitHub settings | Consulta autenticada em 12/10/2026 confirmou que `main` não tem branch protection e que o repositório não possui rulesets (`[]`). A documentação exige CI verde no SHA como gate manual, mas isso não impede push direto. Definir proteção que exija `API`, `Frontend` e `Imagens e perfil público` após conferir os nomes no novo run; environments e revisão obrigatória seguem sem avaliação. | [quality.yml](../.github/workflows/quality.yml#L9), [dependabot.yml](../.github/dependabot.yml), [deployment.md — gate manual](deployment.md#L98) |
-| Cobertura de navegador e dispositivos | Ampliar além dos mocks para login/MFA, baixa de compromisso, pagamento parcial/total, upload de imagem, tema, gestos e Safari iOS; validar iPhone real (safe area, teclado, PWA e gestos), pois Chromium em 390/820 px não comprova isso. | [revisão anterior](revisao-geral-ux-seguranca-2026-10.md#L46), [revisão — telas reais](revisao-geral-ux-seguranca-2026-10.md#L47) |
-| Histórico de recorrências | Lista cobre horizonte móvel materializado de 90 dias; ocorrências fora do horizonte não são pesquisáveis como histórico integral. Definir busca/histórico conforme necessidade de produto, sem materialização ilimitada. | [revisão anterior](revisao-geral-ux-seguranca-2026-10.md#L48), [recurrences.py](../apps/api/app/recurrences.py#L180) |
-| Alertas externos | Centro de avisos só funciona com app aberto; push/e-mail não implementados. Decidir depois de confiabilidade: push opt-in iniciado pelo usuário, links diretos e política de privacidade. | [README](../README.md#L183), [revisão anterior](revisao-geral-ux-seguranca-2026-10.md#L45) |
+| Backups, recuperação e RPO/RTO | Há declarações documentais diferentes: confirmação de backup/restauração em deployment e pedido de validação no README de infraestrutura. Registrar evidência, escopo, data do último restore drill, RPO/RTO, criptografia e responsável, confirmando no Proxmox diretamente. | [deployment.md](deployment.md), [infra README](../infra/README.md) |
+| E-mail proprietário no código | A política de MFA ainda identifica o único proprietário por endereço fixo no código público. Avaliar configuração não secreta de identidade (sem enfraquecer MFA) e reduzir exposição de dado pessoal no repositório. | [auth.py](../apps/api/app/auth.py), [deployment.md](deployment.md) |
+| GitHub settings | Consulta autenticada em 12/10/2026 confirmou que `main` não tem branch protection e que o repositório não possui rulesets (`[]`). A documentação exige CI verde no SHA como gate manual, mas isso não impede push direto. Definir proteção que exija `API`, `Frontend` e `Imagens e perfil público` após conferir os nomes no novo run; environments e revisão obrigatória seguem sem avaliação. | [quality.yml](../.github/workflows/quality.yml), [dependabot.yml](../.github/dependabot.yml), [deployment.md — gate manual](deployment.md) |
+| Cobertura de navegador e dispositivos | Ampliar além dos mocks para login/MFA, baixa de compromisso, pagamento parcial/total, upload de imagem, tema, gestos e Safari iOS; validar iPhone real (safe area, teclado, PWA e gestos), pois Chromium em 390/820 px não comprova isso. | [revisão anterior](revisao-geral-ux-seguranca-2026-10.md), [revisão — telas reais](revisao-geral-ux-seguranca-2026-10.md) |
+| Histórico de recorrências | Lista cobre horizonte móvel materializado de 90 dias; ocorrências fora do horizonte não são pesquisáveis como histórico integral. Definir busca/histórico conforme necessidade de produto, sem materialização ilimitada. | [revisão anterior](revisao-geral-ux-seguranca-2026-10.md), [recurrences.py](../apps/api/app/recurrences.py) |
+| Alertas externos | Centro de avisos só funciona com app aberto; push/e-mail não implementados. Decidir depois de confiabilidade: push opt-in iniciado pelo usuário, links diretos e política de privacidade. | [README](../README.md), [revisão anterior](revisao-geral-ux-seguranca-2026-10.md) |
 
 ## Prioridade P3 — aberta
 
@@ -156,8 +161,8 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 |---|---|---|
 | Relatórios financeiros | Relatórios mensais por categoria, período e conta, com tendências e navegação até os lançamentos de origem. Todos os agregados devem vir do Finance Engine/PostgreSQL e manter semântica de transferências, pagamentos e reembolsos. | Aplicar depois de reconciliação, PostgreSQL CI e paginação. Padrão de relatórios documentado pelo [YNAB](https://www.ynab.com/blog/ynab-reports-and-data). |
 | Metas | Metas opcionais com progresso visível, ligadas a contas/categorias quando houver demanda, sem criar cálculos financeiros no frontend nem tabelas antecipadas sem modelo concreto. | Considerar depois de relatórios e feedback do uso. Exemplo de acompanhamento de metas: [YNAB Goal Tracking](https://www.ynab.com/features/goal-tracking). |
-| Importação bancária/OFX e Open Finance | Primeiro melhorar importação manual com arquivo de exemplo, mapeamento de colunas, revisão de duplicidade e desfazer. Decidir OFX antes de ampliar formato. Pluggy exige documentação oficial atual, escopos somente leitura, consentimento/expiração, IDs externos, sincronização idempotente, deduplicação e reconciliação. Nunca armazenar senha bancária. | Não há integração bancária implementada. [integrações.md](integrations.md#L19), [README — capacidades futuras](../README.md#L183). A conciliação com revisão antes de confirmar é um padrão de produto possível, não evidência de requisito já implementado: [Organizze](https://ajuda.organizze.com.br/hc/pt-br/articles/5994220061203-Web-Lan%C3%A7amentos-Concilia%C3%A7%C3%A3o-banc%C3%A1ria). |
-| Investimentos, parcelamentos e financiamentos | Documentar domínio futuro e regras necessárias; só implementar na fase apropriada, com valores decimais, calendário e reconciliação. | README registra esses domínios como não implementados: [README](../README.md#L183). |
+| Importação bancária/OFX e Open Finance | Primeiro melhorar importação manual com arquivo de exemplo, mapeamento de colunas, revisão de duplicidade e desfazer. Decidir OFX antes de ampliar formato. Pluggy exige documentação oficial atual, escopos somente leitura, consentimento/expiração, IDs externos, sincronização idempotente, deduplicação e reconciliação. Nunca armazenar senha bancária. | Não há integração bancária implementada. [integrações.md](integrations.md), [README — capacidades futuras](../README.md). A conciliação com revisão antes de confirmar é um padrão de produto possível, não evidência de requisito já implementado: [Organizze](https://ajuda.organizze.com.br/hc/pt-br/articles/5994220061203-Web-Lan%C3%A7amentos-Concilia%C3%A7%C3%A3o-banc%C3%A1ria). |
+| Investimentos, parcelamentos e financiamentos | Documentar domínio futuro e regras necessárias; só implementar na fase apropriada, com valores decimais, calendário e reconciliação. | README registra esses domínios como não implementados: [README](../README.md). |
 
 ## Limites e pendências que seguem abertos
 

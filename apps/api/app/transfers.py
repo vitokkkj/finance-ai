@@ -99,9 +99,9 @@ def create_transfer(
         occurred_at=financial_day_start(payload.occurred_at),
         notes=payload.notes,
     )
-    store_idempotency(transfer, "transfer", idempotency_key, fingerprint)
     db.add(transfer)
     try:
+        store_idempotency(db, transfer, "transfer", idempotency_key, fingerprint)
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(

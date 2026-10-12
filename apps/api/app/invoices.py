@@ -240,9 +240,9 @@ def create_card_purchase(
         occurred_at=financial_day_start(payload.occurred_at),
         notes=payload.notes,
     )
-    store_idempotency(purchase, "card_purchase", idempotency_key, fingerprint)
     db.add(purchase)
     try:
+        store_idempotency(db, purchase, "card_purchase", idempotency_key, fingerprint)
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(
@@ -427,9 +427,9 @@ def pay_invoice(
         occurred_at=financial_day_start(payload.occurred_at),
         notes=payload.notes,
     )
-    store_idempotency(payment, "invoice_payment", idempotency_key, fingerprint)
     db.add(payment)
     try:
+        store_idempotency(db, payment, "invoice_payment", idempotency_key, fingerprint)
         db.commit()
     except IntegrityError:
         existing = recover_concurrent_idempotency(

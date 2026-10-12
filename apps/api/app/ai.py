@@ -7,10 +7,10 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -53,6 +53,7 @@ from app.chatgpt_plan import ChatGPTCredentialStore
 from app.config import settings
 from app.database import get_db
 from app.finance_engine import financial_day_start
+from app.idempotency import validate_idempotency_key
 from app.models import AIConversation, AIMemory, AIMessage, AIToolCall, User
 
 router = APIRouter(prefix="/api/ai", tags=["assistente"])
@@ -301,6 +302,7 @@ async def send_message(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     provider: Annotated[AIProvider, Depends(get_ai_provider)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> StreamingResponse:
     if not ai_message_rate_limiter.allow_attempt((str(user.id),), time.monotonic()):
         raise HTTPException(
@@ -310,6 +312,8 @@ async def send_message(
             ),
             headers={"Retry-After": str(AI_MESSAGE_RATE_WINDOW_SECONDS)},
         )
+
+    request_idempotency_key = validate_idempotency_key(idempotency_key) or uuid4().hex
 
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -405,7 +409,13 @@ async def send_message(
     async def events() -> AsyncIterator[str]:
         try:
             async for item in stream_assistant_reply(
-                db, user, conversation, message, provider, image_data_urls=image_data_urls
+                db,
+                user,
+                conversation,
+                message,
+                provider,
+                image_data_urls=image_data_urls,
+                request_idempotency_key=request_idempotency_key,
             ):
                 yield item
             if not generate_title:

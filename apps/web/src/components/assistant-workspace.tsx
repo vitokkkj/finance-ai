@@ -114,6 +114,17 @@ function createOptimisticMessageId() {
   return `optimistic-${Date.now()}-${optimisticMessageSequence}`;
 }
 
+async function chatRequestIdempotencyKey(conversationId: string, requestBody: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(requestBody));
+  const fingerprint = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const storageKey = `sophia:chat-idempotency:${conversationId}:${fingerprint}`;
+  const key = window.sessionStorage.getItem(storageKey) ?? crypto.randomUUID();
+  window.sessionStorage.setItem(storageKey, key);
+  return { key, storageKey };
+}
+
 type AIStatus = {
   configured: boolean;
   provider: "ollama" | "chatgpt_plan";
@@ -812,6 +823,8 @@ export function AssistantWorkspace({
     let activeConversationId = conversationId;
     let optimisticMessageIds: [string, string] | null = null;
     let responseAccepted = false;
+    let chatRequestKey: { key: string; storageKey: string } | null = null;
+    let responseCompleted = false;
     try {
       if (!activeConversationId) {
         const created = await apiRequest<Conversation & { messages: AssistantMessage[] }>(
@@ -822,6 +835,7 @@ export function AssistantWorkspace({
         activeConversationId = created.id;
         setConversationId(created.id);
       }
+      chatRequestKey = await chatRequestIdempotencyKey(activeConversationId, requestBody);
 
       const userMessage: AssistantMessage = {
         id: createOptimisticMessageId(),
@@ -845,6 +859,7 @@ export function AssistantWorkspace({
         headers: {
           "Content-Type": "application/json",
           "X-SophIA-Request": "1",
+          "Idempotency-Key": chatRequestKey.key,
           Accept: "text/event-stream",
         },
         body: requestBody,
@@ -924,11 +939,15 @@ export function AssistantWorkspace({
             );
           } else if (eventName === "done") {
             setActiveTool("");
+            responseCompleted = payload.status === "ok" || payload.status === "confirmation_required";
           }
         }
       }
 
       await Promise.all([loadConversation(activeConversationId), loadConversations(), loadDashboard()]);
+      if (responseCompleted && chatRequestKey) {
+        window.sessionStorage.removeItem(chatRequestKey.storageKey);
+      }
     } catch (sendError) {
       if (isAbortError(sendError)) {
         const assistantId = optimisticMessageIds?.[1];

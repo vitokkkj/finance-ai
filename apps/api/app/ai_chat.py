@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -31,6 +32,7 @@ from app.ai_tools import (
     ToolResult,
     audit_summary,
     execute_finance_tool,
+    financial_tool_call_fingerprint,
     sanitize_for_provider,
     tool_schemas,
 )
@@ -893,6 +895,7 @@ async def stream_assistant_reply(
     provider: AIProvider,
     *,
     image_data_urls: list[str] | None = None,
+    request_idempotency_key: str,
 ) -> AsyncIterator[str]:
     image_data_urls = image_data_urls or []
     turn_started = time.monotonic()
@@ -1063,6 +1066,7 @@ async def stream_assistant_reply(
                 ]
                 break
     tool_round = 0
+    financial_tool_occurrences: dict[str, int] = {}
 
     yield sse_event("start", {"message_id": str(user_message.id), "model": model})
 
@@ -1480,7 +1484,21 @@ async def stream_assistant_reply(
                         ),
                     )
                 else:
-                    result = execute_finance_tool(call.name, arguments, user, db)
+                    tool_fingerprint = financial_tool_call_fingerprint(call.name, arguments)
+                    tool_idempotency_key = None
+                    if tool_fingerprint is not None:
+                        occurrence = financial_tool_occurrences.get(tool_fingerprint, 0)
+                        financial_tool_occurrences[tool_fingerprint] = occurrence + 1
+                        tool_idempotency_key = hashlib.sha256(
+                            f"{request_idempotency_key}:{tool_fingerprint}:{occurrence}".encode()
+                        ).hexdigest()
+                    result = execute_finance_tool(
+                        call.name,
+                        arguments,
+                        user,
+                        db,
+                        idempotency_key=tool_idempotency_key,
+                    )
             except ValueError as error:
                 result = ToolResult(
                     status="FAILED",

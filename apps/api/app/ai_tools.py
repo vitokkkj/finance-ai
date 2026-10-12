@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from calendar import monthrange
 from collections.abc import Callable
@@ -337,6 +339,27 @@ class ToolDefinition:
 
 def _model_args(model: BaseModel) -> dict[str, object]:
     return cast(dict[str, object], model.model_dump(mode="json"))
+
+
+def financial_tool_call_fingerprint(name: str, arguments: object) -> str | None:
+    """Return a stable signature for a validated financial creation tool call."""
+    if name not in {"create_transaction", "create_transfer", "create_card_purchase"}:
+        return None
+    if not isinstance(arguments, dict):
+        return None
+    definition = next((item for item in TOOL_DEFINITIONS if item.name == name), None)
+    if definition is None:
+        return None
+    try:
+        payload = definition.input_model.model_validate(arguments)
+    except ValidationError:
+        return None
+    canonical = json.dumps(
+        {"tool": name, "arguments": _model_args(payload)},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _serialize(value: object) -> object:
@@ -712,7 +735,13 @@ def _create_credit_card_with_invoices(
     return credit_card_response(db, card), "card_summary"
 
 
-def _create_card_purchase(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+def _create_card_purchase(
+    db: Session,
+    user: User,
+    args: BaseModel,
+    *,
+    idempotency_key: str | None = None,
+) -> tuple[object, str]:
     payload = cast(CreateCardPurchaseInput, args)
     request = CardPurchaseCreate(
         credit_card_id=payload.credit_card_id,
@@ -721,7 +750,10 @@ def _create_card_purchase(db: Session, user: User, args: BaseModel) -> tuple[obj
         amount=Decimal(payload.amount),
         occurred_at=payload.occurred_at,
     )
-    return create_card_purchase(request, user, db), "transaction_card"
+    return (
+        create_card_purchase(request, user, db, idempotency_key=idempotency_key),
+        "transaction_card",
+    )
 
 
 def _card_invoice_opening_balance_preview(
@@ -1265,7 +1297,7 @@ def execute_finance_tool(
                         previous_account_ids.add(previous_account_id)
         handler = definition.confirmed_handler if confirmed else None
         selected_handler = handler or definition.handler
-        if name in {"create_transaction", "create_transfer"}:
+        if name in {"create_transaction", "create_transfer", "create_card_purchase"}:
             idempotent_handler = cast(Callable[..., tuple[object, str | None]], selected_handler)
             result, card_type = idempotent_handler(
                 db, user, payload, idempotency_key=idempotency_key

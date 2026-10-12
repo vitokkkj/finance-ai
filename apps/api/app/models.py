@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     LargeBinary,
     Numeric,
+    PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
@@ -475,6 +476,37 @@ class Transaction(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FinancialIdempotencyRecord(Base):
+    """Keep retry keys after an explicitly deleted financial movement."""
+
+    __tablename__ = "financial_idempotency_records"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "user_id", "operation", "idempotency_key", name="pk_financial_idempotency_records"
+        ),
+        CheckConstraint(
+            "length(idempotency_key) BETWEEN 16 AND 255",
+            name="ck_financial_idempotency_key_length",
+        ),
+        CheckConstraint(
+            "length(request_fingerprint) = 64",
+            name="ck_financial_idempotency_fingerprint_length",
+        ),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+    )
+    operation: Mapped[str] = mapped_column(String(40), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_transaction_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
