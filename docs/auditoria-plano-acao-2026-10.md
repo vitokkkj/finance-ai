@@ -89,15 +89,17 @@ Os itens P1 abaixo permanecem **em andamento**, exceto pelo alinhamento de conta
 
 **Evidência/resultado:** antes desta rodada, `test:e2e` não rodava na CI e a suíte usava mocks. O workflow agora inicia API e PostgreSQL descartáveis, aplica migrations e roda Playwright. O cenário integrado passa pelo navegador, proxy Next.js e API, cobrindo setup com MFA fictício de CI, login, conta/categoria, despesa e retry, transferência e retry, compra no cartão e retry, pagamento de fatura e retry; confirma ainda que `/api/admin/users` responde `404`, conforme o produto de conta única. A verificação local integrada inicial passou com SQLite temporário; a tentativa local da suíte completa sem a API falhou somente no cenário integrado, pois a API não estava iniciada. O cenário agora é ativado por `E2E_INTEGRATED=1`, que a CI define.
 
-**Ação restante:** executar o workflow no SHA publicado e confirmar PostgreSQL 17, Alembic e Playwright integrados. A validação de ownership entre múltiplos usuários foi retirada porque o produto é privado de conta única; os testes de API verificam escopo do usuário autenticado, e o cenário integrado confirma que a rota de administração de usuários está desativada. Dados exclusivamente sintéticos.
+**Resultado da validação:** o workflow passou nos três jobs no SHA final `85815c8a4f2ba29912f5dfdadef0dd4b74dcb2a3`, run `38307311479`; PostgreSQL 17, Alembic e Playwright integrado foram confirmados nesse SHA. A validação de ownership entre múltiplos usuários foi retirada porque o produto é privado de conta única; os testes de API verificam escopo do usuário autenticado, e o cenário integrado confirma que a rota de administração de usuários está desativada. Dados exclusivamente sintéticos.
+
+**Ação restante:** nenhuma pendência de CI/E2E para este item. A aplicação desta versão na VM está registrada no P1.8. Os cenários integrados usam somente dados sintéticos.
 
 **Referências:** [package.json](../apps/web/package.json#L11), [quality.yml — frontend](../.github/workflows/quality.yml#L57), [spec E2E](../apps/web/e2e/finance-flows.spec.ts), [mocks E2E](../apps/web/e2e/api-mocks.ts).
 
 ### P1.6 Definir o gate de deploy e manter documentação operacional sincronizada
 
-**Evidência:** deploy é descrito como manual; não há workflow de release/deploy automatizado. O guia solicita partir de commit publicado e checar serviços/health, enquanto a execução de CI do SHA atual está falha. A documentação de Cloudflare contém requisito de rate limit; a revisão anterior relatou ausência de regra no painel.
+**Evidência:** na auditoria inicial, a execução do SHA antigo `542f69e` falhava na API; a causa foi reproduzida e corrigida. Os três jobs passaram no SHA de implementação `a150afe` (run `38306602486`), no SHA documental `e45e949` (run `38306907130`) e no SHA atual do relatório `85815c8` (run `38307311479`). O deploy segue manual, sem workflow de release/deploy automatizado. A documentação Cloudflare contém requisito de rate limit; a revisão anterior relatou ausência de regra no painel, que não foi inspecionado nesta rodada.
 
-**Ação:** documentar gate obrigatório de CI verde no mesmo SHA, checklist de deploy, confirmação de versão/health e procedimento de rollback. Não automatizar publicação sem incorporar confirmação de migrations, readiness, recuperação e proteção de segredos. Atualizar a documentação quando o processo for alterado.
+**Ação restante:** o gate de CI verde no mesmo SHA, o checklist, a confirmação de versão/health e o procedimento de rollback estão documentados em `deployment.md`. Manter a publicação manual até confirmar migrations, readiness, recuperação e proteção de segredos; deploy/migration na VM aguardam as condições descritas no P1.8. `main` não tem branch protection nem rulesets, registrado no backlog P2.
 
 **Referências:** [deployment.md — checklist](deployment.md#L94), [deployment.md — health e rollback](deployment.md#L92), [deployment.md — rate limit](deployment.md#L32), [quality.yml](../.github/workflows/quality.yml).
 
@@ -113,7 +115,7 @@ Os itens P1 abaixo permanecem **em andamento**, exceto pelo alinhamento de conta
 
 **Estado atual:** inspeção por SSH concluída com host key validada e sem ler segredos/dados financeiros. VM Debian 13 no SHA `542f69e`, Alembic `0016_totp_replay`, serviços e recursos registrados acima. Por decisão do proprietário, TCP/22 segue liberado no host e `sophia` é a única conta permitida por SSH; autenticação por senha está habilitada (a chave pública já configurada para `sophia` também continua habilitada). Login SSH direto de `root` está bloqueado. O proprietário acessa `su -` depois de entrar como `sophia`. `sshd -t`, serviço ativo e nova conexão como `sophia` por chave foram verificados; autenticação interativa por senha e elevação com `su -` não foram testadas, pois isso exigiria digitar a senha do proprietário. A camada de rede anterior à VM e sua exposição pública não foram verificadas. Proxmox/backups seguem sem consulta direta nesta rodada.
 
-**Ação restante:** verificar a entrada Cloudflare e a camada de rede anterior à VM, além de obter no Proxmox evidência recente de backup e restauração. Não aplicar código/migration até a CI no SHA candidato passar e a recuperação estar confirmada.
+**Ação restante:** verificar a entrada Cloudflare e a camada de rede anterior à VM, além de obter no Proxmox evidência recente de backup e restauração. A CI do SHA candidato `85815c8` passou; deploy e migration continuam pendentes até confirmar recuperação no Proxmox e executar a etapa privilegiada na sessão do proprietário como `sophia` seguida de `su -`.
 
 **Referências:** [deployment.md — verificação de serviços](deployment.md#L64), [deployment.md — estado Alembic](deployment.md#L69), [revisão — firewall/SSH](revisao-geral-ux-seguranca-2026-10.md#L43), [README de infra](../infra/README.md#L7).
 
