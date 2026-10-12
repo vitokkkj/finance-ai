@@ -732,6 +732,10 @@ textarea:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.assistant-month-forecast-values {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .assistant-transaction-row,
 .assistant-category-list > div {
   min-height: 48px;

@@ -1570,6 +1570,7 @@ export function AssistantWorkspace({
 function toolLabel(name: string): string {
   const labels: Record<string, string> = {
     get_month_summary: "o resumo do mês",
+    get_month_forecast: "as contas previstas do mês",
     get_category_breakdown: "as categorias",
     get_transactions: "os lançamentos",
     search_transactions: "seus lançamentos",
@@ -1658,6 +1659,40 @@ function StructuredCard({
           <div><span>Despesas</span><strong>{formatCurrency(stringValue(data.expenses) ?? "0.00")}</strong></div>
           <div><span>Resultado</span><strong>{formatCurrency(stringValue(data.result) ?? "0.00")}</strong></div>
         </div>
+      </section>
+    );
+  }
+  if (item.type === "monthly_forecast" && data && Array.isArray(data.items)) {
+    const items = data.items.map((entry, index) => {
+      const forecast = record(entry);
+      if (!forecast) return null;
+      const source = stringValue(forecast.source);
+      const isIncome = stringValue(forecast.type) === "INCOME";
+      const accountOrCard = stringValue(forecast.card_name) ?? stringValue(forecast.account_name);
+      const description = stringValue(forecast.description) ?? "Compromisso";
+      const dueDate = stringValue(forecast.due_date);
+      const amount = stringValue(forecast.amount);
+      const sourceLabel = source === "CARD_INVOICE" ? "Fatura" : isIncome ? "Receita prevista" : "Despesa prevista";
+      return (
+        <div className="assistant-transaction-row" key={stringValue(forecast.id) ?? index}>
+          <span><strong>{description}</strong><small>{dueDate ? displayDate(dueDate) : ""} · {sourceLabel}{accountOrCard ? ` · ${accountOrCard}` : ""}</small></span>
+          {amount && <b>{formatCurrency(amount)}</b>}
+        </div>
+      );
+    });
+    const periodStart = stringValue(data.period_start);
+    const periodEnd = stringValue(data.period_end);
+    return (
+      <section className="assistant-data-card">
+        <div className="assistant-data-card-heading"><span>Previsão do mês</span>{periodStart && periodEnd && <small>{displayDate(periodStart)} – {displayDate(periodEnd)}</small>}</div>
+        <div className="assistant-summary-values assistant-month-forecast-values">
+          <div><span>Despesas previstas</span><strong>{formatCurrency(stringValue(data.expenses) ?? "0.00")}</strong></div>
+          <div><span>Receitas previstas</span><strong>{formatCurrency(stringValue(data.income) ?? "0.00")}</strong></div>
+        </div>
+        <div className="assistant-transaction-list">
+          {items.length ? items : <p>Nenhuma conta ou fatura prevista para este mês.</p>}
+        </div>
+        {stringValue(data.unassigned_invoice_total) && stringValue(data.unassigned_invoice_total) !== "0.00" && <p className="forecast-unassigned-note">Faturas sem conta pagadora definida: {formatCurrency(stringValue(data.unassigned_invoice_total) ?? "0.00")}. Elas não reduzem o saldo projetado de uma conta.</p>}
       </section>
     );
   }

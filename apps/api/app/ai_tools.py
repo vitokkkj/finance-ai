@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from calendar import monthrange
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -37,6 +38,7 @@ from app.schemas import (
     TransferCreate,
 )
 from app.transactions import (
+    _calculate_dashboard_summary,
     create_transaction,
     dashboard_summary,
     list_transactions,
@@ -489,6 +491,36 @@ def _month_summary(db: Session, user: User, args: BaseModel) -> tuple[object, st
         "expenses": summary.monthly_expenses,
         "result": summary.monthly_result,
     }, "financial_summary"
+
+
+def _month_forecast(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
+    payload = cast(MonthInput, args)
+    year, month = _period(payload)
+    period_start = date(year, month, 1)
+    period_end = date(year, month, monthrange(year, month)[1])
+    summary = _calculate_dashboard_summary(
+        user,
+        db,
+        year,
+        month,
+        forecast_period=(period_start, period_end),
+    )
+    expenses = sum(
+        (item.amount for item in summary.forecast_items if item.type == "EXPENSE"),
+        start=Decimal("0.00"),
+    )
+    income = sum(
+        (item.amount for item in summary.forecast_items if item.type == "INCOME"),
+        start=Decimal("0.00"),
+    )
+    return {
+        "period_start": period_start,
+        "period_end": period_end,
+        "expenses": expenses,
+        "income": income,
+        "items": summary.forecast_items,
+        "unassigned_invoice_total": summary.forecast_unassigned_invoice_total,
+    }, "monthly_forecast"
 
 
 def _category_breakdown(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
@@ -956,9 +988,20 @@ TOOL_DEFINITIONS = (
     ),
     ToolDefinition(
         "get_month_summary",
-        "Consulta resumo mensal calculado pelo Finance Engine.",
+        "Consulta somente receitas e despesas já realizadas no mês informado.",
         MonthInput,
         _month_summary,
+    ),
+    ToolDefinition(
+        "get_month_forecast",
+        (
+            "Consulta a previsão de compromissos do mês informado: recorrências não pagas, "
+            "compromissos avulsos e faturas de cartão em aberto com vencimento nesse mês. "
+            "Use para perguntas sobre gastos ou contas previstos de um mês específico; os valores "
+            "são previstos, não realizados."
+        ),
+        MonthInput,
+        _month_forecast,
     ),
     ToolDefinition(
         "get_category_breakdown",
@@ -1061,7 +1104,9 @@ TOOL_DEFINITIONS = (
         "get_dashboard_summary",
         (
             "Consulta saldos por tipo, incluindo somente contas correntes no saldo principal, "
-            "além dos saldos projetados e da previsão mensal de contas a pagar."
+            "além dos saldos projetados e da previsão de contas a pagar até o fim do mês atual. "
+            "Use para saldo disponível e obrigações do mês atual; para previsão de outro mês, "
+            "use get_month_forecast."
         ),
         MonthInput,
         _dashboard,

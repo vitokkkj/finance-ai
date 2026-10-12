@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from asyncio import run
+from calendar import monthrange
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -995,6 +996,83 @@ def test_month_summary_uses_finance_engine_and_returns_structured_card(client: T
     assert '"type": "financial_summary"' in response.text
     assert '"expenses": "87.50"' in response.text
     assert fake.requests[1].input_items[-1]["type"] == "function_call_output"
+
+
+def test_month_forecast_tool_returns_future_month_commitments(client: TestClient) -> None:
+    _sign_up(client)
+    account_id, category_id = _create_assistant_basics(client)
+    today = _today()
+    month = 1 if today.month == 12 else today.month + 1
+    year = today.year + 1 if month == 1 else today.year
+    due_date = date(year, month, min(15, monthrange(year, month)[1]))
+    commitment = client.post(
+        "/api/commitments",
+        json={
+            "account_id": account_id,
+            "category_id": category_id,
+            "type": "EXPENSE",
+            "description": "Aluguel futuro",
+            "amount": "1250.00",
+            "due_date": due_date.isoformat(),
+        },
+    )
+    assert commitment.status_code == 201
+    current_commitment = client.post(
+        "/api/commitments",
+        json={
+            "account_id": account_id,
+            "category_id": category_id,
+            "type": "EXPENSE",
+            "description": "Conta do mês atual",
+            "amount": "55.00",
+            "due_date": today.isoformat(),
+        },
+    )
+    assert current_commitment.status_code == 201
+    recurrence = client.post(
+        "/api/recurrences",
+        json={
+            "account_id": account_id,
+            "category_id": category_id,
+            "type": "EXPENSE",
+            "description": "Internet futura",
+            "amount": "100.00",
+            "frequency": "MONTHLY",
+            "interval": 1,
+            "starts_on": date(year, month, min(20, monthrange(year, month)[1])).isoformat(),
+        },
+    )
+    assert recurrence.status_code == 201, recurrence.text
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    arguments = json.dumps({"year": year, "month": month})
+    fake = FakeAIProvider(
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_month_forecast", "get_month_forecast", arguments
+                    ),
+                ),
+                _completed(),
+            ],
+            [ProviderEvent(type="text_delta", text="Consultei a previsão."), _completed()],
+        ]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Quais são meus gastos previstos para o próximo mês?"},
+    )
+
+    assert response.status_code == 200
+    assert '"type": "monthly_forecast"' in response.text
+    assert '"period_start": "' + date(year, month, 1).isoformat() + '"' in response.text
+    assert '"description": "Aluguel futuro"' in response.text
+    assert '"expenses": "1350.00"' in response.text
+    assert '"description": "Internet futura"' in response.text
+    assert '"description": "Conta do mês atual"' not in response.text
 
 
 def test_ai_created_amount_is_exact_decimal_and_tool_failure_cannot_claim_success(

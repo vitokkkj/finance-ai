@@ -298,6 +298,17 @@ def dashboard_summary(
     year: int | None = Query(default=None, ge=2000, le=2200),
     month: int | None = Query(default=None, ge=1, le=12),
 ) -> DashboardSummary:
+    return _calculate_dashboard_summary(user, db, year, month)
+
+
+def _calculate_dashboard_summary(
+    user: User,
+    db: Session,
+    year: int | None,
+    month: int | None,
+    *,
+    forecast_period: tuple[date, date] | None = None,
+) -> DashboardSummary:
     today = current_financial_date()
     selected_year = year or today.year
     selected_month = month or today.month
@@ -403,6 +414,9 @@ def dashboard_summary(
             if today.month == 12
             else date(today.year, today.month + 1, 1) - timedelta(days=1)
         )
+    forecast_start = forecast_period[0] if forecast_period is not None else None
+    if forecast_period is not None:
+        forecast_end = forecast_period[1]
     account_by_id = {
         account.id: account
         for account in db.scalars(select(Account).where(Account.user_id == user.id)).all()
@@ -446,12 +460,15 @@ def dashboard_summary(
         )
         forecast_accounts_by_id[item_id] = account
 
+    occurrence_filters = [
+        RecurrenceOccurrence.user_id == user.id,
+        RecurrenceOccurrence.status == "PLANNED",
+        RecurrenceOccurrence.due_date <= forecast_end,
+    ]
+    if forecast_start is not None:
+        occurrence_filters.append(RecurrenceOccurrence.due_date >= forecast_start)
     planned_occurrences = db.scalars(
-        select(RecurrenceOccurrence).where(
-            RecurrenceOccurrence.user_id == user.id,
-            RecurrenceOccurrence.status == "PLANNED",
-            RecurrenceOccurrence.due_date <= forecast_end,
-        )
+        select(RecurrenceOccurrence).where(*occurrence_filters)
     ).all()
     for occurrence in planned_occurrences:
         add_forecast_item(
@@ -464,12 +481,15 @@ def dashboard_summary(
             account=account_by_id.get(occurrence.account_id),
         )
 
+    commitment_filters = [
+        PlannedCommitment.user_id == user.id,
+        PlannedCommitment.status == "PLANNED",
+        PlannedCommitment.due_date <= forecast_end,
+    ]
+    if forecast_start is not None:
+        commitment_filters.append(PlannedCommitment.due_date >= forecast_start)
     commitments = db.scalars(
-        select(PlannedCommitment).where(
-            PlannedCommitment.user_id == user.id,
-            PlannedCommitment.status == "PLANNED",
-            PlannedCommitment.due_date <= forecast_end,
-        )
+        select(PlannedCommitment).where(*commitment_filters)
     ).all()
     for commitment in commitments:
         add_forecast_item(
@@ -484,11 +504,13 @@ def dashboard_summary(
 
     all_cards = db.scalars(select(CreditCard).where(CreditCard.user_id == user.id)).all()
     card_by_id = {card.id: card for card in all_cards}
-    invoices = db.scalars(
-        select(CardInvoice).where(
-            CardInvoice.user_id == user.id, CardInvoice.due_date <= forecast_end
-        )
-    ).all()
+    invoice_filters = [
+        CardInvoice.user_id == user.id,
+        CardInvoice.due_date <= forecast_end,
+    ]
+    if forecast_start is not None:
+        invoice_filters.append(CardInvoice.due_date >= forecast_start)
+    invoices = db.scalars(select(CardInvoice).where(*invoice_filters)).all()
     unassigned_invoice_total = ZERO
     for invoice in invoices:
         invoice_summary = card_invoice_response(db, invoice, today)
@@ -602,7 +624,7 @@ def dashboard_summary(
         expenses_by_category=category_summaries,
         cards=card_summaries,
         recent_transactions=recent_transactions,
-        forecast_start=today,
+        forecast_start=forecast_start or today,
         forecast_end=forecast_end,
         forecast_payables_total=forecast_payables_total,
         forecast_overdue_total=overdue_total,
