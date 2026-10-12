@@ -62,7 +62,7 @@ As referências consultadas mostram padrões úteis: [Organizze — alertas de c
 | Build Next.js | Passou; rotas estáticas geradas. |
 | Caddyfile 2.11.6 | Configuração validada no ambiente da VM. |
 | Compose da VM | Configuração validada sem imprimir valores interpolados. |
-| Deploy e migration | A revisão `16110c9` foi publicada; API e web saudáveis; Alembic em `0016_totp_replay`; PostgreSQL sem porta publicada no host. O novo Caddyfile foi validado e recarregado. O ajuste complementar para telas baixas ainda aguarda publicação. |
+| Deploy e migration | A revisão `c0b7bf1` foi publicada; API e web saudáveis; Alembic em `0016_totp_replay`; PostgreSQL sem porta publicada no host. O novo Caddyfile foi validado e recarregado. |
 | HTTP público | `/api/health/live` e `/api/health/ready` retornam 200; `/api/accounts` sem sessão retorna 401; `/api/docs` retorna 404; HTTP redireciona para HTTPS. HSTS, CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy e Permissions-Policy foram observados. |
 | Painel Cloudflare | Conferido: Full TLS com modo automático; Browser Integrity Check ligado; regras customizadas e rate limiting ausentes; tunnel DNS do subdomínio está proxied. |
 
