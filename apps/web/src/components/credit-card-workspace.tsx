@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
+import { useSophiaConfirmation } from "@/components/sophia-confirmation-dialog";
 import type { FinanceFocusTarget } from "@/lib/finance-types";
 
 type Account = { id: string; name: string; is_active: boolean };
@@ -139,6 +140,7 @@ export function CreditCardWorkspace({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const invoiceDetailsRef = useRef<HTMLDivElement>(null);
+  const { confirm, dialog: confirmationDialog } = useSophiaConfirmation();
 
   const activeCards = useMemo(() => cards.filter((card) => card.is_active), [cards]);
   const activeAccounts = useMemo(() => accounts.filter((account) => account.is_active), [accounts]);
@@ -315,7 +317,12 @@ export function CreditCardWorkspace({
   }
 
   async function deleteCard(card: CreditCard) {
-    if (!window.confirm(`Excluir o cartão “${card.name}”? Primeiro é necessário excluir as faturas dele. Esta ação é permanente.`)) return;
+    if (!(await confirm({
+      title: "Excluir este cartão?",
+      description: `O cartão ${card.name} será removido permanentemente.`,
+      impact: "Antes, exclua as faturas vinculadas. As compras e os pagamentos registrados nelas também serão removidos e os saldos recalculados.",
+      confirmLabel: "Excluir cartão",
+    }))) return;
     setBusy(true);
     try {
       await apiRequest<void>(`/api/cards/${card.id}`, { method: "DELETE" });
@@ -329,10 +336,21 @@ export function CreditCardWorkspace({
   }
 
   async function deleteInvoice(invoice: CardInvoice | UpcomingCardInvoice) {
-    const detailedImpact = "purchases" in invoice
-      ? `\n\nSerão removidas ${invoice.purchases.length} compras e ${invoice.payments.length} pagamentos. Pagamentos excluídos serão estornados do saldo das contas.`
-      : "\n\nAs compras e os pagamentos vinculados serão apagados, e os saldos serão recalculados.";
-    if (!window.confirm(`Excluir a fatura ${invoice.credit_card_name}, vencimento ${displayDate(invoice.due_date)}, total ${formatCurrency(invoice.total)}? Esta ação é permanente.${detailedImpact}`)) return;
+    const hasDetails = "purchases" in invoice;
+    const purchaseCount = hasDetails ? invoice.purchases.length : null;
+    const paymentCount = hasDetails ? invoice.payments.length : null;
+    const purchaseText = purchaseCount === null
+      ? "As compras vinculadas serão removidas"
+      : `${purchaseCount} ${purchaseCount === 1 ? "compra vinculada será removida" : "compras vinculadas serão removidas"}`;
+    const paymentText = paymentCount === null
+      ? "os pagamentos registrados serão estornados do saldo das contas"
+      : `${paymentCount} ${paymentCount === 1 ? "pagamento será estornado do saldo da conta" : "pagamentos serão estornados dos saldos das contas"}`;
+    if (!(await confirm({
+      title: "Excluir esta fatura?",
+      description: `${invoice.credit_card_name}, vencimento ${displayDate(invoice.due_date)}, total ${formatCurrency(invoice.total)}.`,
+      impact: `${purchaseText}, ${paymentText}. Os saldos e o limite do cartão serão recalculados.`,
+      confirmLabel: "Excluir fatura",
+    }))) return;
     setBusy(true);
     try {
       await apiRequest<void>(`/api/invoices/${invoice.id}`, { method: "DELETE" });
@@ -561,6 +579,7 @@ export function CreditCardWorkspace({
           </section>
         )}
       </section>
+      {confirmationDialog}
     </div>
   );
 }

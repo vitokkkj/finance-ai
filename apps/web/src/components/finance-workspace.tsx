@@ -24,6 +24,7 @@ import { CalendarMonthInput } from "@/components/calendar-month-input";
 import { CreditCardWorkspace } from "@/components/credit-card-workspace";
 import { RecurrenceWorkspace } from "@/components/recurrence-workspace";
 import { BrandMark } from "@/components/brand-mark";
+import { useSophiaConfirmation } from "@/components/sophia-confirmation-dialog";
 
 type Section = "overview" | "transactions" | "accounts" | "categories" | "cards" | "recurrences";
 type AccountType = "CHECKING" | "SAVINGS" | "CASH" | "OTHER";
@@ -286,6 +287,7 @@ export function FinanceWorkspace({
   const [busy, setBusy] = useState(false);
   const [appliedFilters, setAppliedFilters] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
+  const { confirm, dialog: confirmationDialog } = useSophiaConfirmation();
 
   const [accountFormOpen, setAccountFormOpen] = useState(false);
   const [accountEditingId, setAccountEditingId] = useState<string | null>(null);
@@ -412,7 +414,12 @@ export function FinanceWorkspace({
   }
 
   async function deleteAccount(account: Account) {
-    if (!window.confirm(`Excluir a conta “${account.name}”? A exclusão é permanente e só funciona quando não há lançamentos, previsões, recorrências ou cartões vinculados.`)) return;
+    if (!(await confirm({
+      title: "Excluir esta conta?",
+      description: `A conta ${account.name} será removida permanentemente.`,
+      impact: "A exclusão só é permitida quando não há lançamentos, previsões, recorrências ou cartões vinculados à conta.",
+      confirmLabel: "Excluir conta",
+    }))) return;
     setBusy(true);
     try {
       await apiRequest<void>(`/api/accounts/${account.id}`, { method: "DELETE" });
@@ -480,7 +487,12 @@ export function FinanceWorkspace({
   }
 
   async function deleteCategory(category: Category) {
-    if (!window.confirm(`Excluir a categoria “${category.name}”? A exclusão é permanente e só funciona quando não há lançamentos, previsões ou recorrências vinculados.`)) return;
+    if (!(await confirm({
+      title: "Excluir esta categoria?",
+      description: `A categoria ${category.name} será removida permanentemente.`,
+      impact: "A exclusão só é permitida quando não há lançamentos, previsões ou recorrências vinculados à categoria.",
+      confirmLabel: "Excluir categoria",
+    }))) return;
     setBusy(true);
     try {
       await apiRequest<void>(`/api/categories/${category.id}`, { method: "DELETE" });
@@ -556,7 +568,12 @@ export function FinanceWorkspace({
   }
 
   async function deleteTransaction(transaction: Transaction) {
-    if (!window.confirm(`Excluir “${transaction.description}” (${formatCurrency(transaction.amount)})? Esta ação recalcula os saldos e os valores de faturas e previsões vinculadas.`)) return;
+    if (!(await confirm({
+      title: "Excluir este lançamento?",
+      description: `${transaction.description}, no valor de ${formatCurrency(transaction.amount)}.`,
+      impact: "Os saldos das contas e os valores de faturas ou previsões vinculadas serão recalculados.",
+      confirmLabel: "Excluir lançamento",
+    }))) return;
     setBusy(true);
     try {
       await apiRequest<void>(`/api/transactions/${transaction.id}`, { method: "DELETE" });
@@ -947,6 +964,7 @@ export function FinanceWorkspace({
             </>
           )}
           <footer className="finance-footer"><span>SophIA</span><span>BRL · America/Sao_Paulo · dados privados</span></footer>
+          {confirmationDialog}
         </main>
       </div>
     </div>

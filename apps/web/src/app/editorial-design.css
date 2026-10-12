@@ -4079,7 +4079,177 @@ textarea:focus-visible {
   flex-wrap: wrap;
 }
 
+.sophia-confirmation-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(88dvh, 620px);
+  overflow: auto;
+  padding: clamp(22px, 5vw, 32px);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 18px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 34%);
+}
+
+.sophia-confirmation-dialog::backdrop {
+  background: rgb(12 19 15 / 62%);
+  backdrop-filter: blur(3px);
+}
+
+.sophia-confirmation-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 24px;
+}
+
+.sophia-confirmation-brand-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-brand-soft);
+}
+
+.sophia-confirmation-brand-mark .assistant-brand-mark {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.sophia-confirmation-brand > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.sophia-confirmation-brand strong {
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.sophia-confirmation-brand small {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.sophia-confirmation-dialog h2 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: clamp(21px, 5vw, 25px);
+  font-weight: 720;
+  letter-spacing: -0.7px;
+  line-height: 1.2;
+}
+
+.sophia-confirmation-description {
+  margin: 10px 0 20px;
+  color: var(--color-ink-soft);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.sophia-confirmation-impact {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, var(--color-border));
+  border-radius: 12px;
+  background: var(--color-danger-soft);
+}
+
+.sophia-confirmation-impact-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface));
+  color: var(--color-danger);
+}
+
+.sophia-confirmation-impact > div {
+  display: grid;
+  gap: 5px;
+}
+
+.sophia-confirmation-impact strong {
+  color: var(--color-danger);
+  font-size: 12px;
+}
+
+.sophia-confirmation-impact p {
+  margin: 0;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sophia-confirmation-footnote {
+  margin: 14px 0 0;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.sophia-confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.sophia-confirmation-actions button {
+  min-height: 42px;
+  padding: 0 15px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sophia-confirmation-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger);
+  color: #fff;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.sophia-confirmation-delete:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--color-danger) 84%, #000);
+}
+
+.sophia-confirmation-delete:focus-visible,
+.sophia-confirmation-actions .secondary-button:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
 @media (max-width: 760px) {
+  .sophia-confirmation-dialog {
+    width: min(calc(100vw - 24px), 480px);
+    max-height: calc(100dvh - 32px);
+    padding: 22px 20px;
+    border-radius: 16px;
+  }
+
+  .sophia-confirmation-actions {
+    flex-direction: column-reverse;
+  }
+
+  .sophia-confirmation-actions button {
+    width: 100%;
+  }
+
   .upcoming-invoice-row {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px 12px;

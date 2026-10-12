@@ -9,6 +9,7 @@ import { CurrencyInput } from "@/components/currency-input";
 import { HelpTip } from "@/components/help-tip";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { BrandMark } from "@/components/brand-mark";
+import { useSophiaConfirmation } from "@/components/sophia-confirmation-dialog";
 import type { FinanceFocusTarget } from "@/lib/finance-types";
 
 type MovementType = "INCOME" | "EXPENSE";
@@ -146,6 +147,7 @@ export function RecurrenceWorkspace({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const { confirm, dialog: confirmationDialog } = useSophiaConfirmation();
   const [ruleFormOpen, setRuleFormOpen] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleForm, setRuleForm] = useState<RuleForm>(emptyRule);
@@ -299,7 +301,14 @@ export function RecurrenceWorkspace({
   }
 
   async function deleteCommitment(item: PlannedCommitment) {
-    if (!window.confirm(`Excluir o compromisso “${item.description}” de ${formatCurrency(item.amount)}? Se já estiver pago, o lançamento será removido e o saldo recalculado.`)) return;
+    if (!(await confirm({
+      title: "Excluir este compromisso?",
+      description: `${item.description}, no valor de ${formatCurrency(item.amount)}.`,
+      impact: item.transaction_id
+        ? "O lançamento registrado será removido e o saldo da conta será recalculado."
+        : "O compromisso será removido da previsão de pagamentos.",
+      confirmLabel: "Excluir compromisso",
+    }))) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -378,7 +387,12 @@ export function RecurrenceWorkspace({
   }
 
   async function deleteRule(rule: RecurrenceRule) {
-    if (!window.confirm(`Excluir a recorrência “${rule.description}”? Todas as ocorrências e lançamentos pagos gerados por ela também serão apagados.`)) return;
+    if (!(await confirm({
+      title: "Excluir esta recorrência?",
+      description: `A recorrência ${rule.description} será removida permanentemente.`,
+      impact: "Todas as ocorrências previstas e os lançamentos já pagos gerados por ela também serão excluídos. Os saldos serão recalculados.",
+      confirmLabel: "Excluir recorrência",
+    }))) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -595,6 +609,7 @@ export function RecurrenceWorkspace({
           </section>
         </>
       )}
+      {confirmationDialog}
     </div>
   );
 }
