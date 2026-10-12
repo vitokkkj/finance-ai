@@ -4080,6 +4080,9 @@ textarea:focus-visible {
 }
 
 .sophia-confirmation-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(480px, calc(100vw - 32px));
   max-width: none;
   max-height: min(88dvh, 620px);

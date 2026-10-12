@@ -348,7 +348,7 @@ export function CreditCardWorkspace({
     if (!(await confirm({
       title: "Excluir esta fatura?",
       description: `${invoice.credit_card_name}, vencimento ${displayDate(invoice.due_date)}, total ${formatCurrency(invoice.total)}.`,
-      impact: `${purchaseText}, ${paymentText}. Os saldos e o limite do cartão serão recalculados.`,
+      impact: `${purchaseText}; ${paymentText}. Os saldos e o limite do cartão serão recalculados.`,
       confirmLabel: "Excluir fatura",
     }))) return;
     setBusy(true);
