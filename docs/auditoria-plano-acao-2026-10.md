@@ -29,7 +29,7 @@
 |---|---|
 | 1.1 — CI | Corrigida; três jobs verdes no SHA aplicado `41368d9` (run `38317703475`). O run intermediário `38317180381` revelou e permitiu corrigir a recuperação da sessão após conflito concorrente. |
 | 1.2 — reconciliação financeira | Regras para compra paga e ocorrência paga protegidas, com regressões cobertas; código implantado. |
-| 1.3 — idempotência | Lançamentos, transferências, compras e pagamentos persistem chave e tombstone por usuário/operação; retries repetem o resultado, payload distinto retorna `409` e apagar um movimento não libera sua chave. Migration `0018` aplicada na VM. |
+| 1.3 — idempotência | Lançamentos, transferências, compras e pagamentos persistem chave e tombstone por usuário/operação; enquanto o movimento existe, retries repetem o resultado. Após exclusão, a mesma operação retorna `410` sem recriá-lo; payload distinto retorna `409`. Migration `0018` aplicada na VM. |
 | 1.4 — PostgreSQL na CI | PostgreSQL 17, `alembic upgrade head`, `alembic check`, suíte de API e auditoria de dependências passaram no CI `38317703475`. |
 | 1.5 — E2E | Os testes E2E Playwright, auditoria JavaScript, lint/tipos e build passaram no job Frontend do CI `38317703475`. |
 | 1.6 — gate e documentação de deploy | CI verde exigida no SHA exato; deploy manual documentado e executado no SHA verificado. Branch protection continua P2. |
@@ -65,7 +65,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação:** obter logs autenticados, identificar e corrigir a causa, separar etapas para diagnóstico útil e exigir uma execução verde para o SHA candidato a deploy. Documentar o SHA validado e a relação entre aprovação de CI e deploy manual.
 
-**Resultado:** causa corrigida; API, Frontend e runtime passaram no run [38305965616](https://github.com/vitokkkj/finance-ai/actions/runs/38305965616), SHA `63eee3cb990efe0c87958d13c35effa3ac2cb77b`.
+**Resultado:** as etapas de lint/tipos, migrations PostgreSQL, suíte de API, auditoria de dependências, E2E e imagens/runtime estão separadas para diagnóstico. O SHA implantado `41368d93bd96c4e1814890d29110323fbec5e864` passou nos três jobs do [run 38317703475](https://github.com/vitokkkj/finance-ai/actions/runs/38317703475); a revisão documental também passou nos três jobs do run `38318642073`.
 
 **Referências:** [quality.yml](../.github/workflows/quality.yml), [quality.yml — auditoria Python](../.github/workflows/quality.yml), [deployment.md — deploy manual](deployment.md).
 
@@ -75,7 +75,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação:** impedir exclusão/redução de compras que já tenham pagamentos associados, ou oferecer operações explícitas e auditáveis de estorno/crédito/chargeback; impedir edição de transação de ocorrência paga ou atualizar atomicamente o vínculo e os valores da ocorrência. Definir política de cancelamento versus remoção de histórico e cobrir saldos, pagamentos parciais/totais, recorrência e reconciliação com testes.
 
-**Atualização da implementação:** a compra individual continua bloqueada se sua exclusão fizer pagamentos excederem o total restante. Regressões locais agora cobrem compra parcialmente paga, totalmente paga e compra cuja exclusão é permitida porque outra mantém cobertura; também confirmam que a exclusão explícita da fatura reverte o saldo da conta e apaga compras/pagamentos conforme o aviso de confirmação. Deploy aguarda CI PostgreSQL verde.
+**Atualização da implementação:** a compra individual continua bloqueada se sua exclusão fizer pagamentos excederem o total restante. Regressões cobrem compra parcialmente paga, totalmente paga e compra cuja exclusão é permitida porque outra mantém cobertura; também confirmam que a exclusão explícita da fatura reverte o saldo da conta e apaga compras/pagamentos conforme o aviso de confirmação. A suíte PostgreSQL passou no run `38317703475`; a correção está implantada no SHA `41368d93bd96c4e1814890d29110323fbec5e864`.
 
 **Referências:** [finance_deletion.py](../apps/api/app/finance_deletion.py), [finance_engine.py](../apps/api/app/finance_engine.py), [transactions.py — edição](../apps/api/app/transactions.py), [recurrences.py — baixa](../apps/api/app/recurrences.py), [financial-rules.md](financial-rules.md).
 
@@ -85,7 +85,7 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação:** aceitar chave de idempotência ligada ao usuário autenticado, operação e payload; persistir resultado de forma transacional e definir prazo/retorno para replay. Cobrir timeout/retry concorrente e rejeitar reutilização da chave com payload diferente.
 
-**Atualização da implementação:** a migration `0018_idempotency_tombstones` conserva os fingerprints e IDs das operações depois da exclusão de movimentos; repetição com payload igual retorna `410`, e payload diferente retorna `409`. A política atual mantém metadados mínimos enquanto a conta existir, sem expiração, e o chat/frontend reutiliza uma chave estável durante retries. Testes locais cobrem lançamento, transferência, compra de cartão, pagamento, exclusão e retry; o teste de concorrência e a migration PostgreSQL precisam passar na CI antes do deploy.
+**Atualização da implementação:** a migration `0018_idempotency_tombstones` conserva fingerprints e IDs depois da exclusão de movimentos. Enquanto o movimento original existe, o mesmo payload retorna o resultado original. Depois de sua exclusão explícita, o mesmo payload retorna `410` sem recriar o movimento; payload diferente retorna `409`. Os metadados mínimos permanecem enquanto a conta existir, sem expiração; o chat/frontend reutiliza uma chave estável durante retries. Testes locais cobrem lançamento, transferência, compra de cartão, pagamento, exclusão e retry; a concorrência real e a migration PostgreSQL passaram no run `38317703475`. A migration está aplicada na VM e é o head `0018_idempotency_tombstones`.
 
 **Referências:** [transfers.py](../apps/api/app/transfers.py), [transactions.py](../apps/api/app/transactions.py), [invoices.py — compra](../apps/api/app/invoices.py), [invoices.py — pagamento](../apps/api/app/invoices.py).
 
@@ -95,15 +95,15 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Ação:** adicionar serviço PostgreSQL compatível com produção, executar `alembic upgrade head` em banco descartável e a suíte com `TEST_DATABASE_URL`; acrescentar cobertura para isolamento de usuário, constraints, reconciliação e operações concorrentes. Manter SQLite apenas se continuar útil para testes rápidos.
 
-**Resultado:** `alembic upgrade head`, `alembic check`, pytest PostgreSQL e `pip-audit` passaram no job API hospedado do run `38305965616`.
+**Resultado:** `alembic upgrade head`, `alembic check`, pytest PostgreSQL e `pip-audit` passaram no job API do run `38317703475`, SHA implantado `41368d93bd96c4e1814890d29110323fbec5e864`.
 
 **Referências:** [quality.yml](../.github/workflows/quality.yml), [fixture de testes](../apps/api/tests/conftest.py), [README — execução contra PostgreSQL](../README.md), [README — migrations](../README.md).
 
 ### P1.5 Integrar E2E ao CI e acrescentar alguns fluxos integrados
 
-**Evidência/resultado:** antes desta rodada, `test:e2e` não rodava na CI e a suíte usava mocks. O workflow inicia API e PostgreSQL descartáveis, aplica migrations e roda Playwright. O cenário integrado cobre setup com MFA fictício de CI, login, conta/categoria, despesa e retry, transferência e retry, compra no cartão e retry, pagamento de fatura e retry. A correção acrescentou criação e exclusão de usuário sintético autenticada pelo proprietário; a suíte mockada também cobre criação e exclusão pela interface. O CI final passou com 20 testes Playwright no SHA implantado `01488a4c161fedac7444d1885b2b0b177a2bd546` (run `38312160754`).
+**Evidência/resultado:** antes desta rodada, `test:e2e` não rodava na CI e a suíte usava mocks. O workflow inicia API e PostgreSQL descartáveis, aplica migrations e roda Playwright. O cenário integrado cobre setup com MFA fictício de CI, login, conta/categoria, despesa e retry, transferência e retry, compra no cartão e retry, pagamento de fatura e retry. A correção acrescentou criação e exclusão de usuário sintético autenticada pelo proprietário; a suíte mockada também cobre criação e exclusão pela interface. O workflow integrado e as regressões passaram no job Frontend do run `38317703475`, associado ao SHA implantado `41368d93bd96c4e1814890d29110323fbec5e864`.
 
-**Resultado da validação:** o workflow passou nos três jobs no SHA implantado `01488a4c161fedac7444d1885b2b0b177a2bd546`, run `38312160754`; PostgreSQL 17, Alembic e Playwright integrado foram confirmados nesse SHA. O fluxo novo usa conta e dados exclusivamente sintéticos e testa autorização do proprietário, bloqueio de não proprietário e preservação de dados.
+**Resultado da validação:** o workflow passou nos três jobs no SHA implantado `41368d93bd96c4e1814890d29110323fbec5e864`, run `38317703475`; PostgreSQL 17, Alembic e Playwright integrado foram confirmados nesse SHA. O fluxo usa conta e dados exclusivamente sintéticos e testa autorização do proprietário, bloqueio de não proprietário e preservação de dados.
 
 **Ação restante:** nenhuma pendência P1 de CI/E2E. Expandir navegação real e Safari iOS permanece como P2. Os cenários integrados usam somente dados sintéticos.
 
@@ -111,9 +111,9 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 ### P1.6 Definir o gate de deploy e manter documentação operacional sincronizada
 
-**Evidência:** na auditoria inicial, o SHA antigo `542f69e` falhava na API. A causa foi reproduzida e corrigida. A CI também encontrou uma asserção dependente da ordenação/precisão temporal no SHA `c81f95b`; após a correção, os três jobs passaram no SHA implantado `01488a4` (run `38312160754`). O deploy segue manual, sem workflow de release/deploy automatizado. A regra Cloudflare recomendada foi criada e validada no painel em 12/10/2026.
+**Evidência:** na auditoria inicial, o SHA antigo `542f69e` falhava na API. A causa foi reproduzida e corrigida. A CI identificou também uma asserção dependente da precisão temporal e, depois, uma falha real de recuperação de sessão em operação concorrente; ambas foram corrigidas antes da publicação. Os três jobs passaram no SHA implantado `41368d93bd96c4e1814890d29110323fbec5e864` (run `38317703475`). O deploy segue manual, sem workflow de release/deploy automatizado. A regra Cloudflare recomendada foi criada e validada no painel em 12/10/2026.
 
-**Resultado final:** o gate no SHA exato, checklist e procedimento manual foram seguidos. A VM foi atualizada no SHA de CI verde, a migration e health checks foram confirmados. `main` não tem branch protection nem rulesets; isso permanece P2.
+**Resultado final:** o gate no SHA exato, checklist e procedimento manual foram seguidos. A VM foi atualizada no SHA verde, a migration `0018` e health checks foram confirmados. `main` não tem branch protection nem rulesets; isso permanece P2.
 
 **Referências:** [deployment.md — checklist](deployment.md), [deployment.md — health e rollback](deployment.md), [deployment.md — rate limit](deployment.md), [quality.yml](../.github/workflows/quality.yml).
 
@@ -121,13 +121,13 @@ Os itens P1 abaixo são acompanhados por evidência e estado de código/VM. Uma 
 
 **Estado final:** o proprietário esclareceu que contas de login adicionais devem ser permitidas somente quando criadas por ele. A regressão foi corrigida e implantada: somente o proprietário administra; o próprio proprietário não pode ser excluído, e qualquer registro pessoal/financeiro bloqueia a exclusão com `409`. A exclusão permitida remove somente sessões e o usuário vazio. A conta mencionada e dados de produção não foram consultados nem alterados. O limitador local recebe o IP encaminhado pelo cabeçalho dedicado que Caddy substitui e a API valida o endereço. Na Cloudflare, uma regra ativa agrega por IP os POSTs de login, bootstrap e pareamento MFA no host financeiro e bloqueia por 10 s após 20 requisições/10 s.
 
-**Ação restante:** acompanhar eventos e falsos positivos da regra Cloudflare após uso real. Contas gerenciadas ainda usam senha sem MFA individual; inscrição e recuperação de MFA por usuário ficam como P2.
+**Resultado final:** a administração de contas e o rate limit estão implantados e a regra Cloudflare está ativa. Acompanhar eventos/falsos positivos após uso real fica como rotina operacional P2; contas gerenciadas continuam sem MFA individual, também P2.
 
 **Referências:** [managed_users.py](../apps/api/app/managed_users.py), [testes de gestão e preservação](../apps/api/tests/test_managed_users.py), [deployment.md — contas gerenciadas](deployment.md), [revisão de segurança — rate limit](revisao-geral-ux-seguranca-2026-10.md).
 
 ### P1.8 Inspecionar VM e fechar os controles operacionais com acesso direto
 
-**Estado atual:** inspeção por SSH concluída com host key validada e sem abrir registros financeiros. Na inspeção original, a VM Debian 13 estava no SHA `542f69e` e Alembic `0016_totp_replay`. Por autorização expressa, foi instalada uma chave Ed25519 dedicada em `/root/.ssh/authorized_keys`; `PermitRootLogin prohibit-password` e `AllowUsers sophia root` foram conferidos por `sshd -T`, o serviço `ssh` está ativo e a conexão como `root` foi validada. `sophia` mantém autenticação por senha e chave; TCP/22 permanece aberto e o proprietário pode continuar usando `su -`. A senha não foi lida nem enviada pelo chat. A VM está agora no SHA `01488a4`, Alembic `0017_financial_idempotency (head)`, seis serviços ativos e health checks públicos verdes. A camada de rede anterior à VM e a instalação Proxmox não foram acessadas diretamente.
+**Estado atual:** inspeção por SSH concluída com host key validada e sem abrir registros financeiros. Na inspeção original, a VM Debian 13 estava no SHA `542f69e` e Alembic `0016_totp_replay`. Por autorização expressa, foi instalada uma chave Ed25519 dedicada em `/root/.ssh/authorized_keys`; `PermitRootLogin without-password`, `PasswordAuthentication yes`, `PubkeyAuthentication yes`, `KbdInteractiveAuthentication no` e `AllowUsers sophia`/`root` foram conferidos por `sshd -T`; o serviço `ssh` permanece ativo. `sophia` mantém autenticação por senha e o proprietário pode usar `su -`; TCP/22 permanece aberto. A senha não foi lida nem enviada pelo chat. A VM está no SHA `41368d93bd96c4e1814890d29110323fbec5e864`, Alembic `0018_idempotency_tombstones (head)`, seis serviços ativos e health checks públicos verdes. A camada de rede anterior à VM e a instalação Proxmox não foram acessadas diretamente.
 
 **Resultado final:** deploy e migration executados após CI verde; seis serviços, Alembic e endpoints públicos foram conferidos. Antes da migration, um dump temporário em modo `0600` foi validado por cabeçalho/lista e removido após os health checks. Seguem sem evidência direta o firewall/roteador anterior à VM e os jobs/retention/restore drill do Proxmox.
 
