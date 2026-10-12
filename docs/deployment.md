@@ -121,7 +121,7 @@ Depois da atualização, confira `/api/health/live`, `/api/health/ready`, login 
 ## Publicar uma atualização do GitHub na VM
 
 1. Revise a alteração, rode as verificações do componente e confirme `git diff --check`. Não inclua `.env`, arquivos de segredo, credenciais OAuth, backups ou dados financeiros no commit.
-2. Publique o commit em branch/PR e aguarde sucesso do workflow `Qualidade e dependências` no SHA exato que será implantado, incluindo API, Frontend e runtime. Em 12/10/2026, uma consulta autenticada confirmou que `main` não tinha branch protection e o repositório não tinha rulesets; portanto, este gate é operacional e manual, não imposto pelo GitHub. Não implante SHA com CI pendente ou falha.
+2. Publique o commit em branch/PR e aguarde sucesso do workflow `Qualidade e dependências` no SHA exato que será implantado, incluindo `API`, `Frontend` e `Imagens e perfil público`. Desde 12/10/2026, o ruleset ativo `24959980` exige PR e esses três checks para `main`, com política estrita, sem aprovação humana, bypass, exclusão ou force-push. Não implante SHA com CI pendente ou falha.
 3. Faça merge/publicação do mesmo SHA validado em `main`. O deploy continua manual; nenhum workflow do repositório publica automaticamente na VM.
 4. Na VM, preserve `.env` e `secrets/` locais e atualize somente o checkout: `git fetch origin` e `git pull --ff-only origin main`. Confira `git status --short` antes de construir; não descarte alterações locais sem identificar sua origem.
 5. Valide e publique com `docker compose -f docker-compose.yml -f docker-compose.vm.yml config -q` e `docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build --wait`.
