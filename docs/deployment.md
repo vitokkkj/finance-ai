@@ -144,6 +144,12 @@ O PR [#9](https://github.com/vitokkkj/finance-ai/pull/9) foi mesclado como `14e9
 
 Antes da migration, um dump PostgreSQL custom de 147.964 bytes foi criado como `root`, modo `0600`, e sua listagem foi validada por `pg_restore --list` dentro do container. O dump temporário foi removido após as verificações. No hostname HTTPS, `/api/health/live` e `/api/health/ready` retornaram `200`; `/api/accounts` e `/api/admin/users`, sem sessão, retornaram `401`; `/api/docs` retornou `404`. Foram conferidos HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`, Referrer-Policy e Permissions-Policy. O deploy não alterou o TOTP ativo do proprietário; para gerar o QR, ele precisa iniciar a troca na própria conta.
 
+### Navegação dos editores e alinhamento das categorias — publicados em 13/10/2026
+
+O PR [#11](https://github.com/vitokkkj/finance-ai/pull/11) foi mesclado como `0841b9742950f8e70617aee63de801486f575902` após os três jobs passarem no CI do PR (`38389132032`) e no CI de `main` (`38389505295`). A VM em `/opt/sophia-test` avançou por fast-forward de `14e9937` para `0841b97`, sem alterações locais. A configuração do Compose passou e `up -d --build --wait` concluiu; os seis serviços ficaram ativos.
+
+Não houve migration nem alteração de dados financeiros; Alembic permaneceu em `0021_mfa_pending_secret (head)`, por isso não foi criado dump temporário nesta atualização. No domínio HTTPS, `/api/health/live` e `/api/health/ready` retornaram `200`, `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`. A resposta de readiness incluiu CSP, HSTS, Permissions-Policy, Referrer-Policy, `X-Content-Type-Options` e `X-Frame-Options`. A validação não abriu registros financeiros, `.env` ou segredos.
+
 ## Verificação de segurança pós-deploy
 
 - `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`: confira que web, API, worker, PostgreSQL, Caddy e cloudflared estão ativos.
