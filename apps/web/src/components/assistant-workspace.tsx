@@ -593,6 +593,7 @@ export function AssistantWorkspace({
   const [conversationTitleDraft, setConversationTitleDraft] = useState("");
   const [busyConversationId, setBusyConversationId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const layoutNodeRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const sidebarTouchStartRef = useRef<{ x: number; y: number; insideSidebar: boolean } | null>(null);
@@ -601,6 +602,17 @@ export function AssistantWorkspace({
   const conversationRenameRef = useRef<HTMLInputElement>(null);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const refreshSnapshotRef = useRef<WorkspaceRefreshSnapshot | null | undefined>(undefined);
+
+  const preventNativeBackGesture = useCallback((event: TouchEvent) => {
+    if (!window.matchMedia("(max-width: 760px)").matches || event.touches.length !== 1) return;
+    if (event.touches[0]?.clientX <= 24) event.preventDefault();
+  }, []);
+  const layoutRef = useCallback((layout: HTMLDivElement | null) => {
+    layoutNodeRef.current?.removeEventListener("touchstart", preventNativeBackGesture, true);
+    layoutNodeRef.current = layout;
+    // Safari treats a left-edge swipe as browser Back unless the app claims touchstart.
+    layout?.addEventListener("touchstart", preventNativeBackGesture, { capture: true, passive: false });
+  }, [preventNativeBackGesture]);
 
   useEffect(() => {
     if (view !== "chat" || !conversationId) return;
@@ -1391,7 +1403,7 @@ export function AssistantWorkspace({
   }
 
   return (
-    <div className={sidebarCollapsed ? "assistant-layout sidebar-collapsed" : "assistant-layout"} data-theme={theme} onTouchEnd={handleSidebarTouchEnd} onTouchStart={handleSidebarTouchStart}>
+    <div className={sidebarCollapsed ? "assistant-layout sidebar-collapsed" : "assistant-layout"} data-theme={theme} onTouchEnd={handleSidebarTouchEnd} onTouchStart={handleSidebarTouchStart} ref={layoutRef}>
       <a className="skip-link" href="#assistant-main-content">Pular para o conteúdo principal</a>
       {mobileMenuOpen && <button aria-label="Fechar menu" className="assistant-backdrop" onClick={() => setMobileMenuOpen(false)} tabIndex={-1} type="button" />}
       {contextPanelOpen && contextPanelAvailable && <button aria-label="Fechar contexto" className="assistant-context-backdrop" onClick={() => setContextPanelOpen(false)} type="button" />}

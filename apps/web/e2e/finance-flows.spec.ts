@@ -42,6 +42,56 @@ test("uma seção financeira pode ser aberta por URL direta", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Receitas, despesas e movimentos", exact: true })).toBeVisible();
 });
 
+test("o gesto de borda no celular abre o menu sem voltar ao chat anterior", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    reducedMotion: "reduce",
+    timezoneId: "America/Sao_Paulo",
+  });
+  const page = await context.newPage();
+  await page.clock.install({ time: new Date("2026-10-12T12:00:00-03:00") });
+  await mockFinanceApi(page);
+  await page.goto("/?view=finance&section=transactions");
+  await expect(page.getByRole("heading", { name: "Receitas, despesas e movimentos", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Abrir menu de navegação" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Abrir menu de navegação" })).toBeVisible();
+
+  const edgeTouchPrevented = await page.evaluate(() => {
+    const layout = document.querySelector(".assistant-layout");
+    if (!(layout instanceof HTMLElement)) throw new Error("A área de trabalho não foi encontrada.");
+    const touch = new Touch({ identifier: 1, target: layout, clientX: 1, clientY: 160 });
+    const event = new TouchEvent("touchstart", {
+      bubbles: true,
+      cancelable: true,
+      touches: [touch],
+      targetTouches: [touch],
+      changedTouches: [touch],
+    });
+    layout.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(edgeTouchPrevented).toBe(true);
+
+  await page.evaluate(() => {
+    const layout = document.querySelector(".assistant-layout");
+    if (!(layout instanceof HTMLElement)) throw new Error("A área de trabalho não foi encontrada.");
+    const touch = new Touch({ identifier: 1, target: layout, clientX: 140, clientY: 164 });
+    layout.dispatchEvent(new TouchEvent("touchend", {
+      bubbles: true,
+      cancelable: true,
+      touches: [],
+      targetTouches: [],
+      changedTouches: [touch],
+    }));
+  });
+  await expect(page.getByRole("button", { name: "Fechar menu" })).toBeVisible();
+  await expect(page).toHaveURL(/view=finance&section=transactions/);
+  await context.close();
+});
+
 test("a consulta financeira oferece retry quando o carregamento falha", async ({ page }) => {
   // Next's development Strict Mode starts the mount effect twice.
   await mockFinanceApi(page, { largeLists: true, failTransactionsRequests: 2 });

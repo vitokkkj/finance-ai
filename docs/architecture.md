@@ -36,6 +36,10 @@ Worker Python (processo independente; rede data; estende ocorrências previstas)
 
 O Compose usa dependências `service_healthy` para aguardar PostgreSQL e API. Em desenvolvimento, a web publica apenas `127.0.0.1:3000`; no perfil público, nenhuma porta é publicada no host. Requisitos e operação estão em [deployment.md](deployment.md).
 
+### Navegação móvel
+
+Em telas de até 760 px, a navegação lateral funciona como drawer e pode ser aberta com um gesto da borda esquerda para a direita, ou pelo botão do menu. O app cancela o comportamento nativo do `touchstart` nessa faixa de borda para que o Safari não interprete a abertura do drawer como navegação de volta ao histórico. O gesto não altera a rota atual; os controles de voltar e avançar do navegador continuam navegando pelo histórico da aplicação.
+
 ## Núcleo financeiro manual — Fase 2A
 
 O frontend chama os endpoints same-origin da API. A sessão determina `users.id`; cada consulta e gravação financeira filtra por esse proprietário. As referências de lançamentos também usam chaves estrangeiras compostas com `user_id`, protegendo o isolamento no banco.
