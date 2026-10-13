@@ -79,6 +79,31 @@
   --shadow-float: 0 12px 30px rgb(0 0 0 / 28%);
 }
 
+.skip-link {
+  position: fixed;
+  z-index: 10000;
+  top: 12px;
+  left: 12px;
+  padding: 10px 14px;
+  transform: translateY(-160%);
+  border: 2px solid var(--color-focus);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+#assistant-main-content {
+  scroll-margin-top: 16px;
+}
+
 html,
 body {
   min-height: 100%;
@@ -924,6 +949,25 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+.finance-content .workspace-notice:has(.workspace-notice-retry) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-notice-retry {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 .assistant-error {
   margin: 12px 28px 0;
 }
@@ -1369,7 +1413,7 @@ textarea:focus-visible {
 .recent-meta,
 .cell-secondary {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .movement-icon {
@@ -1466,7 +1510,7 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--color-border-strong);
   color: var(--color-muted);
   font-family: var(--font-numeric);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1482,7 +1526,7 @@ textarea:focus-visible {
 
 .data-table td {
   color: var(--color-ink-soft);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .data-table td .cell-primary {
@@ -1493,7 +1537,7 @@ textarea:focus-visible {
 .data-table .table-money {
   color: var(--color-ink);
   font-family: var(--font-numeric);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1879,6 +1923,11 @@ textarea:focus-visible {
 }
 
 @media (max-width: 760px) {
+  .finance-content .workspace-notice:has(.workspace-notice-retry) {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .assistant-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2705,6 +2754,54 @@ textarea:focus-visible {
 .settings-managed-user-actions > span {
   max-width: 220px;
   color: var(--color-danger);
+}
+
+.settings-managed-user-reset {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-soft);
+}
+
+.settings-managed-user-actions.settings-reset-open {
+  grid-auto-flow: row;
+  grid-auto-columns: auto;
+  justify-content: stretch;
+  width: min(100%, 420px);
+}
+
+.settings-managed-user-reset p,
+.settings-managed-user-reset label {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-managed-user-reset label {
+  display: grid;
+  gap: 5px;
+  color: var(--color-ink-soft);
+}
+
+.settings-managed-user-reset input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+}
+
+.settings-managed-user-reset input:focus-visible {
+  outline: 3px solid rgb(49 94 73 / 18%);
+  outline-offset: 2px;
 }
 
 .settings-managed-user-actions button {

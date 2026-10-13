@@ -4,7 +4,7 @@ import json
 import threading
 from asyncio import run
 from calendar import monthrange
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
@@ -222,7 +222,7 @@ def test_image_turn_is_ephemeral_and_cannot_create_transactions(
 
     assert response.status_code == 200
     assert "só pode consultar dados ou preparar cartão e faturas" in response.text
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
     assert image_data_url not in response.text
     assert image_data_url not in json.dumps(detail)
@@ -431,7 +431,7 @@ def test_chat_can_confirm_new_card_and_invoice_totals_together(client: TestClien
     )
     assert response.status_code == 200
     assert client.get("/api/cards").json() == []
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
     detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
     confirmation = next(
@@ -458,7 +458,7 @@ def test_chat_can_confirm_new_card_and_invoice_totals_together(client: TestClien
         ("2026-11-05", "357.40"),
         ("2026-12-05", "136.09"),
     ]
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_custom_conversation_title_is_preserved_after_messages(client: TestClient) -> None:
@@ -484,7 +484,9 @@ def test_custom_conversation_title_is_preserved_after_messages(client: TestClien
 
 
 def test_conversation_cannot_be_read_by_a_different_user(
-    client: TestClient, test_session_factory: sessionmaker[Session]
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+    authenticate_as_user: Callable[[str], None],
 ) -> None:
     _sign_up(client)
     created = client.post("/api/ai/conversations", json={})
@@ -500,12 +502,7 @@ def test_conversation_cannot_be_read_by_a_different_user(
         )
         db.commit()
 
-    client.cookies.clear()
-    login = client.post(
-        "/api/auth/login",
-        json={"email": "other@example.com", "password": "outra-senha-local-segura"},
-    )
-    assert login.status_code == 200
+    authenticate_as_user("other@example.com")
 
     assert client.get(f"/api/ai/conversations/{conversation_id}").status_code == 404
     assert (
@@ -665,7 +662,9 @@ def test_explicit_preferences_can_be_created_updated_and_removed(client: TestCli
 
 
 def test_explicit_preference_endpoints_validate_and_enforce_ownership(
-    client: TestClient, test_session_factory: sessionmaker[Session]
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+    authenticate_as_user: Callable[[str], None],
 ) -> None:
     _sign_up(client)
     preference = client.post("/api/ai/memories", json={"content": "Conta Sicredi"}).json()
@@ -683,12 +682,7 @@ def test_explicit_preference_endpoints_validate_and_enforce_ownership(
         )
         db.commit()
 
-    client.cookies.clear()
-    login = client.post(
-        "/api/auth/login",
-        json={"email": "other-preference@example.com", "password": "outra-senha-local-segura"},
-    )
-    assert login.status_code == 200
+    authenticate_as_user("other-preference@example.com")
     assert (
         client.patch(
             f"/api/ai/memories/{preference['id']}", json={"content": "Alteração indevida"}
@@ -1189,7 +1183,7 @@ def test_ai_created_amount_is_exact_decimal_and_tool_failure_cannot_claim_succes
         f"/api/ai/conversations/{conversation['id']}/messages",
         json={"content": "Registre um café de R$ 87,50"},
     )
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     failure = client.post(
         f"/api/ai/conversations/{conversation['id']}/messages",
         json={"content": "Registre um lançamento"},
@@ -1376,7 +1370,7 @@ def test_clear_expense_is_registered_from_chat_without_model_or_form(
         json={"content": content},
     )
 
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     messages = client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"]
     assert response.status_code == 200
     assert fake.requests == []
@@ -1416,7 +1410,7 @@ def test_clear_expense_duplicate_is_not_created_twice_and_missing_category_is_as
     assert "Pronto, registrei" in first.text
     assert "não criei outro" in duplicate.text
     assert "categoria" in missing_category.text.casefold()
-    assert len(client.get("/api/transactions").json()) == 1
+    assert len(client.get("/api/transactions").json()["items"]) == 1
     assert fake.requests == []
 
 
@@ -1490,7 +1484,7 @@ def test_chat_retry_keeps_financial_idempotency_when_provider_reorders_tools(
     retry = client.post(path, json={"content": "Registre esta compra no cartão."}, headers=headers)
 
     assert first.status_code == retry.status_code == 200
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     assert len(transactions) == 3
     assert sum(transaction["type"] == "EXPENSE" for transaction in transactions) == 2
     assert sum(transaction["type"] == "CARD_PURCHASE" for transaction in transactions) == 1
@@ -1532,7 +1526,7 @@ def test_category_answer_resolves_pending_expense_without_calling_model(
         json={"content": "Combustível"},
     )
 
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     messages = client.get(f"/api/ai/conversations/{conversation['id']}").json()["messages"]
     assert first.status_code == answer.status_code == 200
     assert "categoria" in first.text.casefold()
@@ -1582,7 +1576,7 @@ def test_unregistered_category_answer_does_not_call_model_or_create_transaction(
     assert "posso criar" in first.text.casefold()
     assert "posso criar" in answer.text.casefold()
     assert fake.requests == []
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     assert [message["role"] for message in messages] == [
         "USER",
         "ASSISTANT",
@@ -1629,7 +1623,7 @@ def test_explicit_category_creation_resumes_pending_expense_in_chat(
     )
 
     categories = client.get("/api/categories").json()
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     assert first.status_code == follow_up.status_code == 200
     assert "categoria" in first.text.casefold()
     assert "criei a categoria combustível" in follow_up.text.casefold()
@@ -1665,14 +1659,14 @@ def test_suggested_category_requires_chat_confirmation_before_creation(
         f"/api/ai/conversations/{conversation['id']}/messages",
         json={"content": "Gastei 97 reais de combustível no Carro"},
     )
-    before_confirmation = client.get("/api/transactions").json()
+    before_confirmation = client.get("/api/transactions").json()["items"]
     confirmed = client.post(
         f"/api/ai/conversations/{conversation['id']}/messages",
         json={"content": "Sim"},
     )
 
     categories = client.get("/api/categories").json()
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     assert suggested.status_code == confirmed.status_code == 200
     assert "sugiro criar “combustível”" in suggested.text.casefold()
     assert "posso criar" in suggested.text.casefold()
@@ -1711,7 +1705,7 @@ def test_croissant_suggests_food_category_without_recording_before_confirmation(
     assert response.status_code == 200
     assert "sugiro criar “alimentação”" in response.text.casefold()
     assert "posso criar" in response.text.casefold()
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     assert [category["name"] for category in client.get("/api/categories").json()] == [
         "Combustível"
     ]
@@ -1751,7 +1745,7 @@ def test_category_confirmation_clause_uses_requested_food_category_once(
     )
 
     categories = client.get("/api/categories").json()
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     food = next((category for category in categories if category["name"] == "Alimentação"), None)
     assert first.status_code == named_category.status_code == confirmed.status_code == 200
     assert food is not None
@@ -1791,7 +1785,7 @@ def test_chat_detects_legacy_description_with_category_suffix_as_duplicate(
         json={"content": "Gastei R$ 7,70 com croissant."},
     )
 
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     assert repeated.status_code == 200
     assert "já existe um lançamento igual" in repeated.text.casefold()
     assert len(transactions) == 1
@@ -1831,7 +1825,7 @@ def test_unrelated_sentence_is_not_treated_as_pending_category_name(
     assert "teste de conexão recebido" in unrelated.text.casefold()
     assert "sugiro criar “responda apenas" not in unrelated.text.casefold()
     assert fake.requests
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     assert client.get("/api/categories").json() == []
 
 
@@ -1865,7 +1859,7 @@ def test_chat_category_creation_reuses_existing_category_without_duplicate(
     )
 
     categories = client.get("/api/categories").json()
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     assert completed.status_code == 200
     assert "registrei r$ 22,00" in completed.text.casefold()
     assert len(categories) == len(transactions) == 1
@@ -1887,7 +1881,7 @@ def test_correcting_recent_expense_updates_same_transaction_after_confirmation(
         f"/api/ai/conversations/{conversation['id']}/messages",
         json={"content": "Gastei R$ 100 em alimentação no mercado."},
     )
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     assert created.status_code == 200
     assert len(transactions) == 1
     transaction_id = transactions[0]["id"]
@@ -1910,8 +1904,8 @@ def test_correcting_recent_expense_updates_same_transaction_after_confirmation(
         json={"content": "Na verdade foram R$ 120."},
     )
     assert corrected.status_code == 200
-    assert len(client.get("/api/transactions").json()) == 1
-    assert client.get("/api/transactions").json()[0]["amount"] == "100.00"
+    assert len(client.get("/api/transactions").json()["items"]) == 1
+    assert client.get("/api/transactions").json()["items"][0]["amount"] == "100.00"
 
     confirmation_id = next(
         json.loads(line.removeprefix("data: "))["items"][0]["tool_call_id"]
@@ -1922,7 +1916,7 @@ def test_correcting_recent_expense_updates_same_transaction_after_confirmation(
         f"/api/ai/conversations/{conversation['id']}/tool-calls/{confirmation_id}/confirm"
     )
 
-    final_transactions = client.get("/api/transactions").json()
+    final_transactions = client.get("/api/transactions").json()["items"]
     assert confirmed.status_code == 200
     assert len(final_transactions) == 1
     assert final_transactions[0]["amount"] == "120.00"
@@ -1967,7 +1961,7 @@ def test_update_tool_waits_for_explicit_confirmation(client: TestClient) -> None
         f"/api/ai/conversations/{conversation['id']}/messages",
         json={"content": "Corrija a descrição"},
     )
-    transaction_before = client.get("/api/transactions").json()[0]
+    transaction_before = client.get("/api/transactions").json()["items"][0]
     structured = next(
         json.loads(line.removeprefix("data: "))["items"]
         for line in response.text.splitlines()
@@ -1981,7 +1975,7 @@ def test_update_tool_waits_for_explicit_confirmation(client: TestClient) -> None
     assert transaction_before["description"] == "Original"
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "SUCCEEDED", confirmed.json()
-    assert client.get("/api/transactions").json()[0]["description"] == "Corrigido"
+    assert client.get("/api/transactions").json()["items"][0]["description"] == "Corrigido"
 
 
 def test_chat_schedules_future_recurrence_only_after_confirmation(client: TestClient) -> None:
@@ -2046,7 +2040,7 @@ def test_chat_schedules_future_recurrence_only_after_confirmation(client: TestCl
     assert ends_on.strftime("%d/%m/%Y") in prepared.text
     assert "Pago via Pix" in prepared.text
     assert client.get("/api/recurrences").json() == []
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
     structured = next(
         json.loads(line.removeprefix("data: "))["items"]
@@ -2065,7 +2059,7 @@ def test_chat_schedules_future_recurrence_only_after_confirmation(client: TestCl
     assert rules[0]["amount"] == "282.00"
     assert rules[0]["starts_on"] == starts_on.isoformat()
     assert rules[0]["ends_on"] == ends_on.isoformat()
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     occurrences = client.get(
         "/api/recurrences/occurrences",
         params={"start_date": starts_on.isoformat(), "end_date": ends_on.isoformat()},
@@ -2131,7 +2125,7 @@ def test_chat_understands_complete_fixed_expense_without_model_tool_choice(
     assert ends_on.strftime("%d/%m/%Y") in prepared.text
     assert "Pago via Pix" in prepared.text
     assert client.get("/api/recurrences").json() == []
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     categories = client.get("/api/categories").json()
     assert any(category["name"] == "Educação" for category in categories)
 
@@ -2153,7 +2147,7 @@ def test_chat_understands_complete_fixed_expense_without_model_tool_choice(
     assert rules[0]["starts_on"] == starts_on.isoformat()
     assert rules[0]["ends_on"] == ends_on.isoformat()
     assert rules[0]["notes"] == "Pago via Pix; Vencimento dia 08"
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_chat_imports_multiple_invoice_totals_with_confirmation_without_duplicate_purchases(
@@ -2263,7 +2257,7 @@ def test_chat_imports_multiple_invoice_totals_with_confirmation_without_duplicat
     assert next_invoice["opening_balance"] == "519.63"
     assert next_invoice["total"] == "519.63"
     assert next_invoice["purchases"] == []
-    assert len(client.get("/api/transactions").json()) == 1
+    assert len(client.get("/api/transactions").json()["items"]) == 1
     summary = client.get(f"/api/dashboard/summary?year={today.year}&month={today.month}").json()
     assert summary["monthly_expenses"] == "100.00"
 

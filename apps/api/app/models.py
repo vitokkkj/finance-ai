@@ -34,6 +34,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     last_totp_counter: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    mfa_secret_encrypted: Mapped[str | None] = mapped_column(String(256), nullable=True)
     avatar_revision: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -377,6 +378,13 @@ class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
         Index("ix_transactions_user_occurred_at", "user_id", "occurred_at"),
+        Index(
+            "ix_transactions_user_cursor",
+            "user_id",
+            "occurred_at",
+            "created_at",
+            "id",
+        ),
         Index("ix_transactions_account_occurred_at", "account_id", "occurred_at"),
         Index("ix_transactions_category_id", "category_id"),
         Index("ix_transactions_source_account_occurred_at", "source_account_id", "occurred_at"),

@@ -1,5 +1,6 @@
 from typing import Literal
 
+from cryptography.fernet import Fernet
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     initial_setup_token: str | None = None
     mfa_enrollment_token: str | None = None
     owner_totp_secret: str | None = None
+    mfa_encryption_key: str | None = None
     ai_provider: Literal["ollama", "chatgpt_plan"] = "chatgpt_plan"
     chatgpt_auth_dir: str = "/home/app/.config/sophia"
     ai_model_fast: str = "qwen3:1.7b"
@@ -53,6 +55,15 @@ class Settings(BaseSettings):
                     raise ValueError(
                         "MFA_ENROLLMENT_TOKEN precisa ter ao menos 32 caracteres."
                     )
+                encryption_key = (self.mfa_encryption_key or "").strip()
+                if not encryption_key:
+                    raise ValueError("MFA_ENCRYPTION_KEY precisa estar configurada em produção.")
+                try:
+                    Fernet(encryption_key.encode("ascii"))
+                except (ValueError, UnicodeEncodeError) as error:
+                    raise ValueError(
+                        "MFA_ENCRYPTION_KEY precisa ser uma chave Fernet válida."
+                    ) from error
         return self
 
 

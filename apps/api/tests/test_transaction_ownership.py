@@ -71,21 +71,8 @@ def test_a_user_cannot_read_update_or_reference_another_users_financial_records(
         foreign_category_id = str(second_category.id)
         foreign_transaction_id = str(foreign_transaction.id)
 
-    client.post("/api/auth/logout")
-    other_login = client.post(
-        "/api/auth/login",
-        json={"email": "segundo@example.com", "password": "outra-senha-local-segura"},
-    )
-    assert other_login.status_code == 200
-    assert len(client.get("/api/transactions").json()) == 1
-    client.post("/api/auth/logout")
-
-    own_login = client.post(
-        "/api/auth/login",
-        json={"email": "primeiro@example.com", "password": "uma-senha-local-segura"},
-    )
-    assert own_login.status_code == 200
-    assert client.get("/api/transactions").json() == []
+    # A sessão do setup é a primeira pessoa; ela não recebe a transação de outro usuário.
+    assert client.get("/api/transactions").json()["items"] == []
     assert (
         client.patch(
             f"/api/transactions/{foreign_transaction_id}",

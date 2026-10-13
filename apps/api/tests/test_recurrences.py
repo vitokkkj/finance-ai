@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import cast
@@ -114,7 +115,7 @@ def test_create_generates_a_rolling_occurrence_horizon_idempotently(
     assert len(rows) == 91
     assert rows[0]["status"] == "PENDING"
     assert rows[1]["status"] == "PLANNED"
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
     assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "0.00"
 
     with test_session_factory() as db:
@@ -223,7 +224,7 @@ def test_paying_an_occurrence_creates_one_confirmed_transaction(
     assert second.status_code == 200
     assert first.json()["status"] == "PAID"
     assert first.json()["transaction_id"] == second.json()["transaction_id"]
-    transactions = client.get("/api/transactions").json()
+    transactions = client.get("/api/transactions").json()["items"]
     assert len(transactions) == 1
     assert transactions[0]["amount"] == "120.00"
     assert client.get("/api/dashboard/summary").json()["monthly_expenses"] == "120.00"
@@ -233,7 +234,7 @@ def test_paying_an_occurrence_creates_one_confirmed_transaction(
     deleted = client.delete(f"/api/transactions/{transactions[0]['id']}")
     assert updated.status_code == 409
     assert deleted.status_code == 409
-    assert len(client.get("/api/transactions").json()) == 1
+    assert len(client.get("/api/transactions").json()["items"]) == 1
     occurrence_after_delete = client.get(
         "/api/recurrences/occurrences",
         params={"start_date": today.isoformat(), "end_date": today.isoformat()},
@@ -264,7 +265,7 @@ def test_deleting_recurrence_removes_generated_transactions_and_occurrences(
     assert deleted.status_code == 204
     assert client.get("/api/recurrences").json() == []
     assert client.get("/api/recurrences/occurrences").json() == []
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_occurrence_scope_updates_only_the_requested_series_range(client: TestClient) -> None:
@@ -321,7 +322,7 @@ def test_skipping_an_occurrence_does_not_create_a_transaction(client: TestClient
     skipped = client.post(f"/api/recurrences/{rule['id']}/occurrences/{occurrence['id']}/skip")
     assert skipped.status_code == 200
     assert skipped.json()["status"] == "SKIPPED"
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_shortening_rule_end_cancels_occurrences_after_new_end(client: TestClient) -> None:
@@ -360,6 +361,7 @@ def test_shortening_rule_end_cancels_occurrences_after_new_end(client: TestClien
 def test_recurrences_are_private_to_the_authenticated_user(
     client: TestClient,
     test_session_factory: sessionmaker[Session],
+    authenticate_as_user: Callable[[str], None],
 ) -> None:
     setup_user(client)
     today = current_financial_date()
@@ -379,12 +381,7 @@ def test_recurrences_are_private_to_the_authenticated_user(
         db.add(second_user)
         db.commit()
 
-    client.post("/api/auth/logout")
-    login = client.post(
-        "/api/auth/login",
-        json={"email": "outra-recorrencia@example.com", "password": "outra-senha-local-segura"},
-    )
-    assert login.status_code == 200
+    authenticate_as_user("outra-recorrencia@example.com")
     assert client.get("/api/recurrences").json() == []
     inaccessible = client.patch(f"/api/recurrences/{rule['id']}", json={"amount": "1.00"})
     assert inaccessible.status_code == 404

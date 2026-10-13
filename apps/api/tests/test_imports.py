@@ -63,7 +63,7 @@ def test_preview_is_read_only_and_parses_brazilian_decimal(client: TestClient) -
     assert result["rows"][0]["amount"] == "1234.56"
     assert result["rows"][0]["type"] == "EXPENSE"
     assert result["rows"][0]["matches"] == []
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_confirmation_requires_review_of_matches_and_repeat_is_rejected(
@@ -107,7 +107,7 @@ def test_confirmation_requires_review_of_matches_and_repeat_is_rejected(
     }
     missing_decision = client.post("/api/imports/transactions/confirm", json=base_confirmation)
     assert missing_decision.status_code == 422
-    assert len(client.get("/api/transactions").json()) == 1
+    assert len(client.get("/api/transactions").json()["items"]) == 1
 
     confirmation = client.post(
         "/api/imports/transactions/confirm",
@@ -117,14 +117,14 @@ def test_confirmation_requires_review_of_matches_and_repeat_is_rejected(
     assert confirmation.json()["imported_count"] == 1
     assert confirmation.json()["skipped_count"] == 1
     assert confirmation.json()["imported"][0]["amount"] == "50.00"
-    assert len(client.get("/api/transactions").json()) == 2
+    assert len(client.get("/api/transactions").json()["items"]) == 2
 
     repeated = client.post(
         "/api/imports/transactions/confirm",
         json={**base_confirmation, "decisions": [{"row_number": 2, "action": "SKIP"}]},
     )
     assert repeated.status_code == 409
-    assert len(client.get("/api/transactions").json()) == 2
+    assert len(client.get("/api/transactions").json()["items"]) == 2
 
 
 def test_possible_match_can_be_imported_after_an_explicit_choice(client: TestClient) -> None:
@@ -160,7 +160,7 @@ def test_possible_match_can_be_imported_after_an_explicit_choice(client: TestCli
     assert result.status_code == 200
     assert result.json()["imported_count"] == 1
     assert result.json()["skipped_count"] == 0
-    assert len(client.get("/api/transactions").json()) == 2
+    assert len(client.get("/api/transactions").json()["items"]) == 2
 
 
 def test_duplicate_rows_inside_csv_are_flagged_before_commit(client: TestClient) -> None:
@@ -206,7 +206,7 @@ def test_confirmation_requires_explicit_confirmation_and_unchanged_csv(
         },
     )
     assert not_confirmed.status_code == 409
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
     changed_file = client.post(
         "/api/imports/transactions/confirm",
@@ -217,7 +217,7 @@ def test_confirmation_requires_explicit_confirmation_and_unchanged_csv(
         },
     )
     assert changed_file.status_code == 409
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_csv_rejects_unsupported_movement_and_invalid_money_without_writes(
@@ -235,7 +235,7 @@ def test_csv_rejects_unsupported_movement_and_invalid_money_without_writes(
         json={"csv_content": CSV_HEADER + _csv_row(amount="12.34")},
     )
     assert invalid_money.status_code == 422
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_import_matching_is_limited_to_the_authenticated_user(
@@ -287,7 +287,7 @@ def test_import_matching_is_limited_to_the_authenticated_user(
 
     assert preview.status_code == 200
     assert preview.json()["rows"][0]["matches"] == []
-    assert client.get("/api/transactions").json() == []
+    assert client.get("/api/transactions").json()["items"] == []
 
 
 def test_import_endpoints_require_authenticated_session(client: TestClient) -> None:

@@ -174,4 +174,4 @@ def test_transaction_filters_and_month_boundary_use_local_calendar_dates(
         },
     )
     assert october_expenses.status_code == 200
-    assert [row["id"] for row in october_expenses.json()] == [created_ids["Outubro"]]
+    assert [row["id"] for row in october_expenses.json()["items"]] == [created_ids["Outubro"]]

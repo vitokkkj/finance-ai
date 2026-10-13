@@ -21,13 +21,13 @@ def test_first_account_setup_creates_a_development_session(client: TestClient) -
     response = client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
     )
     assert response.status_code == 201
-    assert response.json()["email"] == "usuario@example.com"
+    assert response.json()["email"] == "gamercreeper74@gmail.com"
     assert response.json()["mfa_required"] is False
     assert response.json()["mfa_enrolled"] is False
     assert response.cookies.get("finance_ai_session")
@@ -36,7 +36,7 @@ def test_first_account_setup_creates_a_development_session(client: TestClient) -
     client.cookies.clear()
     login = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
     )
     assert login.status_code == 200
     assert client.get("/api/auth/me").json()["display_name"] == "Pessoa"
@@ -56,7 +56,7 @@ def test_login_uses_generic_failure_and_logout_revokes_session(client: TestClien
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -65,14 +65,14 @@ def test_login_uses_generic_failure_and_logout_revokes_session(client: TestClien
 
     invalid = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+        json={"email": "gamercreeper74@gmail.com", "password": "senha-incorreta-123"},
     )
     assert invalid.status_code == 401
     assert invalid.json()["detail"] == "E-mail, senha ou código inválidos."
 
     valid = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
     )
     assert valid.status_code == 200
     assert client.get("/api/auth/me").status_code == 200
@@ -85,7 +85,7 @@ def test_login_checks_password_before_mfa_step(client: TestClient) -> None:
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -94,19 +94,20 @@ def test_login_checks_password_before_mfa_step(client: TestClient) -> None:
 
     invalid = client.post(
         "/api/auth/login/check",
-        json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+        json={"email": "gamercreeper74@gmail.com", "password": "senha-incorreta-123"},
     )
     assert invalid.status_code == 401
 
     valid = client.post(
         "/api/auth/login/check",
-        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
     )
     assert valid.status_code == 200
     assert valid.json() == {
         "mfa_required": False,
         "mfa_enrolled": False,
         "mfa_enrollment_available": False,
+        "mfa_enrollment_token_required": True,
     }
     assert client.get("/api/auth/me").status_code == 401
 
@@ -119,7 +120,7 @@ def test_owner_can_pair_authenticator_with_one_time_enrollment_token(
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -133,19 +134,20 @@ def test_owner_can_pair_authenticator_with_one_time_enrollment_token(
 
     checked = client.post(
         "/api/auth/login/check",
-        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
     )
     assert checked.json() == {
         "mfa_required": True,
         "mfa_enrolled": False,
         "mfa_enrollment_available": True,
+        "mfa_enrollment_token_required": True,
     }
     assert client.get("/api/auth/me").status_code == 401
 
     start = client.post(
         "/api/auth/mfa/enrollment/start",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "password": "uma-senha-local-segura",
             "enrollment_token": "m" * 64,
         },
@@ -159,7 +161,7 @@ def test_owner_can_pair_authenticator_with_one_time_enrollment_token(
     confirm = client.post(
         "/api/auth/mfa/enrollment/confirm",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "password": "uma-senha-local-segura",
             "enrollment_token": "m" * 64,
             "totp_code": "123456",
@@ -167,12 +169,12 @@ def test_owner_can_pair_authenticator_with_one_time_enrollment_token(
     )
     assert confirm.status_code == 200
     assert confirm.cookies.get("finance_ai_session")
-    assert client.get("/api/auth/me").json()["email"] == "usuario@example.com"
+    assert client.get("/api/auth/me").json()["email"] == "gamercreeper74@gmail.com"
 
     repeated = client.post(
         "/api/auth/mfa/enrollment/start",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "password": "uma-senha-local-segura",
             "enrollment_token": "m" * 64,
         },
@@ -188,7 +190,7 @@ def test_mfa_enrollment_requires_the_server_token(
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -201,7 +203,7 @@ def test_mfa_enrollment_requires_the_server_token(
     response = client.post(
         "/api/auth/mfa/enrollment/start",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "password": "uma-senha-local-segura",
             "enrollment_token": "wrong" * 8,
         },
@@ -218,7 +220,7 @@ def test_totp_code_cannot_create_two_sessions(
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -229,7 +231,7 @@ def test_totp_code_cannot_create_two_sessions(
         auth, "_owner_totp_counter", lambda code: 123456 if code == "123456" else None
     )
     login_payload = {
-        "email": "usuario@example.com",
+        "email": "gamercreeper74@gmail.com",
         "password": "uma-senha-local-segura",
         "totp_code": "123456",
     }
@@ -248,7 +250,7 @@ def test_login_rate_limit_blocks_repeated_failures(client: TestClient) -> None:
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -258,20 +260,20 @@ def test_login_rate_limit_blocks_repeated_failures(client: TestClient) -> None:
     for _ in range(5):
         response = client.post(
             "/api/auth/login",
-            json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+            json={"email": "gamercreeper74@gmail.com", "password": "senha-incorreta-123"},
         )
         assert response.status_code == 401
 
     limited = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+        json={"email": "gamercreeper74@gmail.com", "password": "senha-incorreta-123"},
     )
     assert limited.status_code == 429
     assert "Retry-After" in limited.headers
 
     valid = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
     )
     assert valid.status_code == 429
 
@@ -282,7 +284,7 @@ def test_login_rate_limit_blocks_repeated_failures(client: TestClient) -> None:
     ) as other_client:
         valid_from_another_ip = other_client.post(
             "/api/auth/login",
-            json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+            json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
         )
     assert valid_from_another_ip.status_code == 429
 
@@ -291,7 +293,7 @@ def test_login_password_check_and_mfa_share_one_rate_limit(client: TestClient) -
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -301,13 +303,13 @@ def test_login_password_check_and_mfa_share_one_rate_limit(client: TestClient) -
     for _ in range(5):
         response = client.post(
             "/api/auth/login/check",
-            json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+            json={"email": "gamercreeper74@gmail.com", "password": "senha-incorreta-123"},
         )
         assert response.status_code == 401
 
     blocked_second_stage = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
     )
     assert blocked_second_stage.status_code == 429
 
@@ -318,7 +320,7 @@ def test_login_rate_limit_blocks_attempts_across_multiple_ips(client: TestClient
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -333,7 +335,7 @@ def test_login_rate_limit_blocks_attempts_across_multiple_ips(client: TestClient
         ) as remote_client:
             response = remote_client.post(
                 "/api/auth/login",
-                json={"email": "usuario@example.com", "password": "senha-incorreta-123"},
+                json={"email": "gamercreeper74@gmail.com", "password": "senha-incorreta-123"},
             )
         assert response.status_code == 401
 
@@ -344,7 +346,7 @@ def test_login_rate_limit_blocks_attempts_across_multiple_ips(client: TestClient
     ) as remote_client:
         blocked = remote_client.post(
             "/api/auth/login",
-            json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+            json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
         )
     assert blocked.status_code == 429
 
@@ -384,7 +386,7 @@ def test_account_profile_and_active_sessions_can_be_managed(client: TestClient) 
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -396,7 +398,7 @@ def test_account_profile_and_active_sessions_can_be_managed(client: TestClient) 
     ) as other_client:
         signed_in = other_client.post(
             "/api/auth/login",
-            json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+            json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
         )
         assert signed_in.status_code == 200
 
@@ -424,7 +426,7 @@ def test_profile_avatar_is_private_normalized_and_removable(client: TestClient) 
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -471,7 +473,7 @@ def test_password_change_requires_reauthentication_and_revokes_all_sessions(
     client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
         },
@@ -483,7 +485,7 @@ def test_password_change_requires_reauthentication_and_revokes_all_sessions(
     ) as other_client:
         other_client.post(
             "/api/auth/login",
-            json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+            json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
         )
 
         rejected = client.post(
@@ -509,12 +511,12 @@ def test_password_change_requires_reauthentication_and_revokes_all_sessions(
 
     old_password = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "uma-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "uma-senha-local-segura"},
     )
     assert old_password.status_code == 401
     new_password = client.post(
         "/api/auth/login",
-        json={"email": "usuario@example.com", "password": "outra-senha-local-segura"},
+        json={"email": "gamercreeper74@gmail.com", "password": "outra-senha-local-segura"},
     )
     assert new_password.status_code == 200
 
@@ -572,7 +574,7 @@ def test_production_bootstrap_needs_owner_token_and_totp(
     invalid = client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "gamercreeper74@gmail.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
             "bootstrap_token": "b" * 64,
@@ -598,7 +600,7 @@ def test_production_bootstrap_needs_owner_token_and_totp(
     wrong_owner = client.post(
         "/api/auth/setup",
         json={
-            "email": "usuario@example.com",
+            "email": "nao-proprietario@example.com",
             "display_name": "Pessoa",
             "password": "uma-senha-local-segura",
             "bootstrap_token": "a" * 64,

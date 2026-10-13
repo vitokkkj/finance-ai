@@ -6,6 +6,54 @@ test.beforeEach(async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-12T12:00:00-03:00") });
 });
 
+test("deeplink e histórico do navegador acompanham a seção financeira", async ({ page }) => {
+  await mockFinanceApi(page, { largeLists: true });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Lançamentos", exact: true }).click();
+  await expect(page).toHaveURL(/view=finance&section=transactions/);
+  await page.getByRole("button", { name: "Categorias", exact: true }).click();
+  await expect(page).toHaveURL(/view=finance&section=categories/);
+  await page.getByRole("button", { name: "Ver lançamentos da categoria Categoria 4" }).click();
+  await expect(page).toHaveURL(/view=finance&section=transactions/);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/view=finance&section=categories/);
+  await expect(page.getByRole("heading", { name: "Categorias", exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/view=finance&section=transactions/);
+  await page.goBack();
+  await expect(page).toHaveURL("http://127.0.0.1:4173/");
+  await expect(page.getByRole("textbox", { name: "Mensagem para o assistente" })).toBeVisible();
+
+  await page.goForward();
+  await expect(page).toHaveURL(/view=finance&section=transactions/);
+  await page.goForward();
+  await expect(page).toHaveURL(/view=finance&section=categories/);
+  await page.goForward();
+  await expect(page).toHaveURL(/view=finance&section=transactions/);
+});
+
+test("uma seção financeira pode ser aberta por URL direta", async ({ page }) => {
+  await mockFinanceApi(page);
+  await page.goto("/?view=finance&section=transactions");
+
+  await expect(page).toHaveURL(/view=finance&section=transactions/);
+  await expect(page.getByRole("heading", { name: "Receitas, despesas e movimentos", exact: true })).toBeVisible();
+});
+
+test("a consulta financeira oferece retry quando o carregamento falha", async ({ page }) => {
+  // Next's development Strict Mode starts the mount effect twice.
+  await mockFinanceApi(page, { largeLists: true, failTransactionsRequests: 2 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Lançamentos", exact: true }).click();
+
+  const financeLoadError = page.locator(".workspace-notice[role='alert']");
+  await expect(financeLoadError).toContainText("A consulta de lançamentos falhou.");
+  await financeLoadError.getByRole("button", { name: "Tentar carregar novamente" }).click();
+  await expect(page.locator(".transaction-table tbody tr")).toHaveCount(15);
+});
+
 test("a previsão do overview consulta e apresenta o mês futuro escolhido", async ({
   page,
 }) => {
@@ -237,8 +285,8 @@ test("listas longas de finanças e cartões mostram 15 itens e avançam por pág
   await expect(page.locator(".card-workspace > section.surface-card").first().locator(".data-table tbody tr")).toHaveCount(6);
 });
 
-test("categorias abrem os lançamentos correspondentes e mantêm paginação", async ({ page }) => {
-  await mockFinanceApi(page, { largeLists: true });
+test("categorias abrem os lançamentos e preservam o filtro ao avançar e voltar por cursor", async ({ page }) => {
+  const state = await mockFinanceApi(page, { largeLists: true });
   await page.goto("/");
   await page.getByRole("button", { name: "Categorias", exact: true }).click();
 
@@ -248,6 +296,16 @@ test("categorias abrem os lançamentos correspondentes e mantêm paginação", a
   await expect(page.locator(".transaction-table tbody tr")).toHaveCount(15);
   await page.getByRole("navigation", { name: "Paginação dos lançamentos" }).getByRole("button", { name: "Próxima" }).click();
   await expect(page.locator(".transaction-table tbody tr")).toHaveCount(6);
+  await page.getByRole("navigation", { name: "Paginação dos lançamentos" }).getByRole("button", { name: "Anterior" }).click();
+  await expect(page.locator(".transaction-table tbody tr")).toHaveCount(15);
+
+  const categoryQueries = state.transactionQueries
+    .map((query) => new URLSearchParams(query))
+    .filter((query) => query.get("category_id") === "synthetic-category-4");
+  expect(categoryQueries).toHaveLength(3);
+  expect(categoryQueries[0].get("cursor")).toBeNull();
+  expect(categoryQueries[1].get("cursor")).toBe("15");
+  expect(categoryQueries[2].get("cursor")).toBeNull();
 });
 
 test("categorias no resumo e em qualquer célula da linha abrem seus lançamentos", async ({ page }) => {
@@ -300,7 +358,7 @@ test("regras, compromissos e ocorrências usam paginação no lugar de mostrar h
 });
 
 test("o proprietário pode criar e excluir contas de acesso sem dados", async ({ page }) => {
-  await mockFinanceApi(page, { owner: true });
+  await mockFinanceApi(page, { owner: true, managedUserEnrolled: true });
   await page.goto("/");
   await page.getByRole("button", { name: "Preferências", exact: true }).click();
 
@@ -311,6 +369,14 @@ test("o proprietário pode criar e excluir contas de acesso sem dados", async ({
   await page.getByRole("button", { name: "Criar conta" }).click();
   await expect(page.getByRole("status")).toContainText("Conta de Richard criada");
   await expect(page.getByText("richard@example.com")).toBeVisible();
+  await expect(page.getByText("Autenticador pendente").first()).toBeVisible();
+
+  const enrolledUser = page.locator(".settings-managed-user-row").filter({ hasText: "mfa@example.com" });
+  await enrolledUser.getByRole("button", { name: "Redefinir MFA" }).click();
+  await enrolledUser.getByLabel("Sua senha").fill("senha-sintetica-segura-123");
+  await enrolledUser.getByLabel("Seu código MFA").fill("123456");
+  await enrolledUser.getByRole("button", { name: "Confirmar redefinição" }).click();
+  await expect(page.getByRole("status")).toContainText("O autenticador de Conta com MFA foi redefinido");
 
   await page.getByRole("button", { name: "Excluir acesso de Richard" }).click();
   await page.getByRole("button", { name: "Confirmar exclusão de Richard" }).click();

@@ -1,10 +1,13 @@
-from datetime import date, datetime, timedelta
+import base64
+import binascii
+import json
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,8 +24,8 @@ from app.finance_engine import (
     financial_day_start,
 )
 from app.finance_views import (
-    card_invoice_response,
-    credit_card_response,
+    card_invoice_responses,
+    credit_card_responses,
     invoice_amounts,
     transaction_movement,
     transaction_response,
@@ -49,6 +52,7 @@ from app.schemas import (
     DashboardSummary,
     ForecastItem,
     TransactionCreate,
+    TransactionPageResponse,
     TransactionResponse,
     TransactionUpdate,
 )
@@ -56,6 +60,8 @@ from app.schemas import (
 router = APIRouter(tags=["lançamentos"])
 ZERO = Decimal("0.00")
 FinancialTransactionType = Literal["INCOME", "EXPENSE", "TRANSFER", "CARD_PURCHASE", "CARD_PAYMENT"]
+TRANSACTION_PAGE_SIZE = 15
+MAX_TRANSACTION_PAGE_SIZE = 100
 
 
 class AccountTypeAggregate(TypedDict):
@@ -109,7 +115,46 @@ def _transaction_instant(occurred_on: date) -> datetime:
     return financial_day_start(occurred_on)
 
 
-@router.get("/api/transactions", response_model=list[TransactionResponse])
+def _encode_transaction_cursor(transaction: Transaction) -> str:
+    payload = {
+        "occurred_at": transaction.occurred_at.isoformat(),
+        "created_at": transaction.created_at.isoformat(),
+        "id": str(transaction.id),
+    }
+    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
+
+
+def _decode_transaction_cursor(cursor: str) -> tuple[datetime, datetime, UUID]:
+    try:
+        padded_cursor = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.b64decode(padded_cursor, altchars=b"-_", validate=True))
+        if not isinstance(payload, dict) or set(payload) != {"occurred_at", "created_at", "id"}:
+            raise ValueError
+        occurred_at = datetime.fromisoformat(payload["occurred_at"])
+        created_at = datetime.fromisoformat(payload["created_at"])
+        transaction_id = UUID(payload["id"])
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=UTC)
+        else:
+            occurred_at = occurred_at.astimezone(UTC)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        else:
+            created_at = created_at.astimezone(UTC)
+        return occurred_at, created_at, transaction_id
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        UnicodeDecodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        raise HTTPException(status_code=422, detail="O cursor de lançamentos é inválido.") from None
+
+
+@router.get("/api/transactions", response_model=TransactionPageResponse)
 def list_transactions(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
@@ -119,7 +164,9 @@ def list_transactions(
     category_id: UUID | None = None,
     type: FinancialTransactionType | None = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
-) -> list[TransactionResponse]:
+    cursor: Annotated[str | None, Query(max_length=512)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_TRANSACTION_PAGE_SIZE)] = TRANSACTION_PAGE_SIZE,
+) -> TransactionPageResponse:
     if start_date is not None and end_date is not None and end_date < start_date:
         raise HTTPException(status_code=422, detail="O período informado é inválido.")
     statement = transaction_rows(user.id)
@@ -149,10 +196,37 @@ def list_transactions(
                 CreditCard.name.ilike(term),
             )
         )
+    if cursor is not None:
+        occurred_at, created_at, transaction_id = _decode_transaction_cursor(cursor)
+        statement = statement.where(
+            or_(
+                Transaction.occurred_at < occurred_at,
+                and_(
+                    Transaction.occurred_at == occurred_at,
+                    Transaction.created_at < created_at,
+                ),
+                and_(
+                    Transaction.occurred_at == occurred_at,
+                    Transaction.created_at == created_at,
+                    Transaction.id < transaction_id,
+                ),
+            )
+        )
     rows = db.execute(
-        statement.order_by(Transaction.occurred_at.desc(), Transaction.created_at.desc())
+        statement.order_by(
+            Transaction.occurred_at.desc(),
+            Transaction.created_at.desc(),
+            Transaction.id.desc(),
+        ).limit(limit + 1)
     ).all()
-    return [transaction_response(*row) for row in rows]
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    next_cursor = _encode_transaction_cursor(page_rows[-1][0]) if has_more else None
+    return TransactionPageResponse(
+        items=[transaction_response(*row) for row in page_rows],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 @router.post(
@@ -562,9 +636,9 @@ def _calculate_dashboard_summary(
     if forecast_start is not None:
         invoice_filters.append(CardInvoice.due_date >= forecast_start)
     invoices = db.scalars(select(CardInvoice).where(*invoice_filters)).all()
+    invoice_summaries = card_invoice_responses(db, invoices, today)
     unassigned_invoice_total = ZERO
-    for invoice in invoices:
-        invoice_summary = card_invoice_response(db, invoice, today)
+    for invoice, invoice_summary in zip(invoices, invoice_summaries, strict=True):
         if invoice_summary.outstanding <= ZERO:
             continue
         card = card_by_id.get(invoice.credit_card_id)
@@ -652,7 +726,9 @@ def _calculate_dashboard_summary(
         checking_balance = checking_group["balance"]
 
     cards = db.scalars(select(CreditCard).where(CreditCard.user_id == user.id)).all()
-    card_summaries = [credit_card_response(db, card, today) for card in cards if card.is_active]
+    card_summaries = credit_card_responses(
+        db, [card for card in cards if card.is_active], today
+    )
 
     recent_rows = db.execute(
         transaction_rows(user.id)

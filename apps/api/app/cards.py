@@ -13,7 +13,7 @@ from app.finance_engine import (
     billing_cycle_for_purchase,
     current_financial_date,
 )
-from app.finance_views import card_invoice_response, credit_card_response
+from app.finance_views import card_invoice_responses, credit_card_response, credit_card_responses
 from app.models import Account, CardInvoice, CreditCard, User
 from app.schemas import (
     BillingCyclePreviewResponse,
@@ -51,8 +51,7 @@ def list_upcoming_invoices(
         .order_by(CardInvoice.due_date, CreditCard.name, CardInvoice.closing_date)
     ).all()
     upcoming: list[UpcomingCardInvoiceResponse] = []
-    for invoice in invoices:
-        details = card_invoice_response(db, invoice)
+    for details in card_invoice_responses(db, invoices):
         if details.outstanding <= Decimal("0.00"):
             continue
         upcoming.append(
@@ -116,7 +115,7 @@ def list_cards(
     if not include_archived:
         statement = statement.where(CreditCard.is_active.is_(True))
     cards = db.scalars(statement.order_by(CreditCard.name, CreditCard.id)).all()
-    return [credit_card_response(db, card) for card in cards]
+    return credit_card_responses(db, cards)
 
 
 @router.post("", response_model=CreditCardResponse, status_code=status.HTTP_201_CREATED)
@@ -227,4 +226,4 @@ def list_card_invoices(
         .where(CardInvoice.credit_card_id == card.id, CardInvoice.user_id == user.id)
         .order_by(CardInvoice.due_date, CardInvoice.closing_date)
     ).all()
-    return [card_invoice_response(db, invoice) for invoice in invoices]
+    return card_invoice_responses(db, invoices)

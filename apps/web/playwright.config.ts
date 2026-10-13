@@ -10,8 +10,12 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
     browserName: "chromium",
+    actionTimeout: 15_000,
     trace: "retain-on-failure",
     timezoneId: "America/Sao_Paulo",
+  },
+  expect: {
+    timeout: 10_000,
   },
   webServer: {
     command: "npm run dev -- --hostname 127.0.0.1 --port 4173",

@@ -98,10 +98,16 @@ class LoginCheckResponse(BaseModel):
     mfa_required: bool
     mfa_enrolled: bool
     mfa_enrollment_available: bool
+    mfa_enrollment_token_required: bool
 
 
 class MFAEnrollmentRequest(Credentials):
-    enrollment_token: str = Field(min_length=32, max_length=256)
+    enrollment_token: str | None = Field(default=None, min_length=32, max_length=256)
+
+    @field_validator("enrollment_token", mode="before")
+    @classmethod
+    def normalize_enrollment_token(cls, value: object) -> object:
+        return None if value == "" else value
 
 
 class MFAEnrollmentConfirmRequest(MFAEnrollmentRequest):
@@ -463,6 +469,12 @@ class TransactionResponse(BaseModel):
     @field_serializer("amount")
     def serialize_money(self, value: Decimal) -> str:
         return format(value, ".2f")
+
+
+class TransactionPageResponse(BaseModel):
+    items: list[TransactionResponse]
+    next_cursor: str | None
+    has_more: bool
 
 
 class CategoryExpenseSummary(BaseModel):
