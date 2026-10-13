@@ -5468,6 +5468,41 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.editor-form[data-scroll-editor="true"] {
+  scroll-margin-block-start: 16px;
+}
+
+[data-scroll-editor="true"] [data-editor-heading]:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
+.category-table {
+  table-layout: fixed;
+}
+
+.category-table .category-name-column {
+  width: 35%;
+}
+
+.category-table .category-status-column {
+  width: 18%;
+}
+
+.category-table .category-actions-column {
+  width: 47%;
+}
+
+.category-table th:last-child,
+.category-table td.row-actions {
+  white-space: nowrap;
+}
+
+.category-table td:first-child {
+  overflow-wrap: anywhere;
+}
+
 .category-group-expense {
   --category-group-accent: var(--color-danger);
 }

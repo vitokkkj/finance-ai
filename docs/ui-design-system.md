@@ -10,6 +10,8 @@ Categorias aparecem em grupos separados, com **Receitas antes de Despesas**, con
 
 Listas extensas usam a paginação padrão da SophIA, com 15 itens por página e indicação de intervalo/total. Os controles mantêm o estilo visual do sistema, funcionam por teclado e preservam a navegação para o item aberto a partir de um aviso.
 
+Quando uma ação de uma lista abre um formulário de edição fora da área visível, a tela rola até o formulário e move o foco para seu título. O movimento respeita a preferência do sistema por movimento reduzido; manter o foco no título evita abrir o teclado virtual automaticamente. Receitas e Despesas usam a mesma grade de colunas nas tabelas de categorias, deixando a situação alinhada entre os grupos.
+
 - cartão: limite, fechamento, vencimento e fatura mais recente;
 - conta: saldo e movimentações associadas;
 - gastos: total, categorias e comparação com o mês anterior; quando a conversa pede outro período, o painel segue esse período;

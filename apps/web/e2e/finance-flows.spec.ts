@@ -347,6 +347,52 @@ test("categorias no resumo e em qualquer célula da linha abrem seus lançamento
   await expect(page.getByRole("heading", { name: "Lançamentos · Alimentação", exact: true })).toBeVisible();
 });
 
+test("editar leva ao formulário e as situações das categorias ficam alinhadas", async ({ page }) => {
+  await mockFinanceApi(page, { largeLists: true });
+  await page.goto("/");
+
+  const expectEditorVisible = async (name: string) => {
+    const heading = page.getByRole("heading", { name, exact: true });
+    await expect(heading).toBeInViewport();
+    await expect(heading).toBeFocused();
+    await expect.poll(async () => (await heading.boundingBox())?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(160);
+  };
+
+  await page.getByRole("button", { name: "Categorias", exact: true }).click();
+  const incomeTable = page.locator(".category-group-income .category-table");
+  const expenseTable = page.locator(".category-group-expense .category-table");
+  const incomeStatusX = await incomeTable.locator("tbody tr").first().locator("td").nth(1).evaluate((cell) => cell.getBoundingClientRect().x);
+  const expenseStatusX = await expenseTable.locator("tbody tr").first().locator("td").nth(1).evaluate((cell) => cell.getBoundingClientRect().x);
+  expect(Math.abs(incomeStatusX - expenseStatusX)).toBeLessThan(1);
+
+  await expenseTable.locator("tbody tr").filter({ hasText: "Categoria 18" }).getByRole("button", { name: "Editar" }).click();
+  await expectEditorVisible("Editar categoria");
+
+  await page.getByRole("button", { name: "Contas", exact: true }).click();
+  await page.locator(".data-table tbody tr").filter({ hasText: "Conta 15" }).getByRole("button", { name: "Editar" }).click();
+  await expectEditorVisible("Editar conta");
+
+  await page.getByRole("button", { name: "Lançamentos", exact: true }).click();
+  await page.locator(".transaction-table tbody tr").filter({ hasText: "Lançamento 15" }).getByRole("button", { name: "Editar" }).click();
+  await expectEditorVisible("Editar lançamento");
+
+  await page.getByRole("button", { name: "Cartões", exact: true }).click();
+  await page.locator(".card-workspace > section.surface-card").first().locator(".data-table tbody tr").filter({ hasText: "Cartão 15" }).getByRole("button", { name: "Editar" }).click();
+  await expectEditorVisible("Editar cartão");
+
+  await page.getByRole("button", { name: "Programados", exact: true }).click();
+  await page.locator(".recurrence-rule-row").filter({ hasText: "Regra 15" }).getByRole("button", { name: "Editar Regra 15" }).click();
+  await expectEditorVisible("Editar recorrência");
+
+  const commitment = page.locator(".recurrence-occurrences-card").first().locator(".recurrence-occurrence-row").filter({ hasText: "Pagamento previsto 15" });
+  await commitment.getByRole("button", { name: "Editar Pagamento previsto 15" }).click();
+  await expectEditorVisible("Editar pagamento previsto");
+
+  const occurrence = page.locator(".recurrence-occurrences-card").nth(1).locator(".recurrence-occurrence-row").filter({ hasText: "Ocorrência 15" });
+  await occurrence.getByRole("button", { name: "Editar", exact: true }).click();
+  await expectEditorVisible("Editar ocorrência");
+});
+
 test("clicar em um cartão no resumo abre os ciclos desse cartão", async ({ page }) => {
   await mockFinanceApi(page);
   await page.goto("/");

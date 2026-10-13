@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { CalendarClock, Check, CircleOff, Pencil, Plus, Repeat2, Trash2, X } from "lucide-react";
 
 import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import { CurrencyInput } from "@/components/currency-input";
+import { useEditorScroll } from "@/lib/use-editor-scroll";
 import { HelpTip } from "@/components/help-tip";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { BrandMark } from "@/components/brand-mark";
@@ -162,7 +163,7 @@ export function RecurrenceWorkspace({
   const [commitmentFormOpen, setCommitmentFormOpen] = useState(false);
   const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(null);
   const [commitmentForm, setCommitmentForm] = useState<CommitmentForm>(emptyCommitment);
-  const activeFormRef = useRef<HTMLFormElement>(null);
+  const { editorRef: activeFormRef, scrollToEditor } = useEditorScroll<HTMLFormElement>();
   const rulePagination = usePagination(rules, String(rules.length));
   const commitmentPagination = usePagination(commitments, String(commitments.length));
   const occurrencePagination = usePagination(occurrences, String(occurrences.length));
@@ -239,18 +240,6 @@ export function RecurrenceWorkspace({
     occurrences,
   ]);
 
-  useEffect(() => {
-    if (!ruleFormOpen && !editingOccurrence && !commitmentFormOpen) return;
-
-    const frame = window.requestAnimationFrame(() => {
-      activeFormRef.current?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "start",
-      });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [commitmentFormOpen, editingOccurrence, ruleFormOpen]);
-
   const activeAccounts = accounts.filter((account) => account.is_active);
   const currentCategories = categories.filter(
     (category) => !category.is_archived && category.type === ruleForm.type,
@@ -271,6 +260,7 @@ export function RecurrenceWorkspace({
       category_id: expenseCategory?.id ?? "",
     });
     setRuleFormOpen(true);
+    scrollToEditor();
     setNotice(null);
   }
 
@@ -281,6 +271,7 @@ export function RecurrenceWorkspace({
     setEditingCommitmentId(null);
     setCommitmentForm({ ...emptyCommitment(), account_id: activeAccounts[0]?.id ?? "", category_id: expenseCategory?.id ?? "" });
     setCommitmentFormOpen(true);
+    scrollToEditor();
     setNotice(null);
   }
 
@@ -290,6 +281,7 @@ export function RecurrenceWorkspace({
     setEditingCommitmentId(item.id);
     setCommitmentForm({ account_id: item.account_id, category_id: item.category_id, type: item.type, description: item.description, amount: item.amount.replace(".", ","), due_date: item.due_date, notes: item.notes ?? "" });
     setCommitmentFormOpen(true);
+    scrollToEditor();
     setNotice(null);
   }
 
@@ -370,6 +362,7 @@ export function RecurrenceWorkspace({
       notes: rule.notes ?? "",
     });
     setRuleFormOpen(true);
+    scrollToEditor();
     setNotice(null);
   }
 
@@ -470,6 +463,7 @@ export function RecurrenceWorkspace({
       notes: occurrence.notes ?? "",
       scope: "THIS",
     });
+    scrollToEditor();
     setNotice(null);
   }
 
@@ -523,9 +517,9 @@ export function RecurrenceWorkspace({
       )}
 
       {ruleFormOpen && (
-        <form className="editor-form recurrence-form" onSubmit={saveRule} ref={activeFormRef}>
+        <form className="editor-form recurrence-form" data-scroll-editor="true" onSubmit={saveRule} ref={activeFormRef}>
           <div className="editor-heading">
-            <div><p className="eyebrow">Programação financeira</p><h3>{editingRuleId ? "Editar recorrência" : "Nova recorrência"}</h3></div>
+            <div><p className="eyebrow">Programação financeira</p><h3 data-editor-heading tabIndex={-1}>{editingRuleId ? "Editar recorrência" : "Nova recorrência"}</h3></div>
             <button aria-label="Fechar formulário" className="text-button" onClick={() => setRuleFormOpen(false)} type="button"><X size={17} /></button>
           </div>
           <div className="form-grid recurrence-form-grid">
@@ -546,8 +540,8 @@ export function RecurrenceWorkspace({
       )}
 
       {editingOccurrence && (
-        <form className="editor-form recurrence-form" onSubmit={saveOccurrence} ref={activeFormRef}>
-          <div className="editor-heading"><div><p className="eyebrow">{displayDate(editingOccurrence.due_date)}</p><h3>Editar ocorrência</h3></div><button aria-label="Fechar edição" className="text-button" onClick={() => setEditingOccurrence(null)} type="button"><X size={17} /></button></div>
+        <form className="editor-form recurrence-form" data-scroll-editor="true" onSubmit={saveOccurrence} ref={activeFormRef}>
+          <div className="editor-heading"><div><p className="eyebrow">{displayDate(editingOccurrence.due_date)}</p><h3 data-editor-heading tabIndex={-1}>Editar ocorrência</h3></div><button aria-label="Fechar edição" className="text-button" onClick={() => setEditingOccurrence(null)} type="button"><X size={17} /></button></div>
           <div className="form-grid recurrence-edit-grid">
             <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setOccurrenceForm({ ...occurrenceForm, description: event.target.value })} required value={occurrenceForm.description} /></label>
             <div className="field-label"><label htmlFor="occurrence-amount">Valor</label><CurrencyInput id="occurrence-amount" onChange={(value) => setOccurrenceForm({ ...occurrenceForm, amount: value })} placeholder="0,00" required value={occurrenceForm.amount} /></div>
@@ -559,8 +553,8 @@ export function RecurrenceWorkspace({
       )}
 
       {commitmentFormOpen && (
-        <form className="editor-form recurrence-form" onSubmit={saveCommitment} ref={activeFormRef}>
-          <div className="editor-heading"><div><p className="eyebrow">Previsão sem recorrência</p><h3>{editingCommitmentId ? "Editar pagamento previsto" : "Novo pagamento previsto"}</h3></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setCommitmentFormOpen(false)} type="button"><X size={17} /></button></div>
+        <form className="editor-form recurrence-form" data-scroll-editor="true" onSubmit={saveCommitment} ref={activeFormRef}>
+          <div className="editor-heading"><div><p className="eyebrow">Previsão sem recorrência</p><h3 data-editor-heading tabIndex={-1}>{editingCommitmentId ? "Editar pagamento previsto" : "Novo pagamento previsto"}</h3></div><button aria-label="Fechar formulário" className="text-button" onClick={() => setCommitmentFormOpen(false)} type="button"><X size={17} /></button></div>
           <div className="form-grid recurrence-form-grid">
             <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setCommitmentForm({ ...commitmentForm, description: event.target.value })} required value={commitmentForm.description} /></label>
             <label className="field-label">Tipo<select onChange={(event) => setCommitmentForm({ ...commitmentForm, type: event.target.value as MovementType, category_id: "" })} value={commitmentForm.type}><option value="EXPENSE">Despesa</option><option value="INCOME">Receita prevista</option></select></label>
