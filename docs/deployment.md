@@ -150,6 +150,12 @@ O PR [#11](https://github.com/vitokkkj/finance-ai/pull/11) foi mesclado como `08
 
 Não houve migration nem alteração de dados financeiros; Alembic permaneceu em `0021_mfa_pending_secret (head)`, por isso não foi criado dump temporário nesta atualização. No domínio HTTPS, `/api/health/live` e `/api/health/ready` retornaram `200`, `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`. A resposta de readiness incluiu CSP, HSTS, Permissions-Policy, Referrer-Policy, `X-Content-Type-Options` e `X-Frame-Options`. A validação não abriu registros financeiros, `.env` ou segredos.
 
+### Gesto lateral do menu no iPhone — publicado em 13/10/2026
+
+O PR [#13](https://github.com/vitokkkj/finance-ai/pull/13) foi mesclado como `ff69605334d1fc438cf0365cecce1deed422c817` após os três jobs passarem no CI do PR (`38459553876`) e no CI de `main` (`38459995535`). A VM em `/opt/sophia-test` avançou por fast-forward de `0841b97` para `ff69605`, sem alterações locais. `docker compose ... config -q` passou e `up -d --build --wait` concluiu; os seis serviços ficaram ativos, com web, API e PostgreSQL saudáveis.
+
+Não houve migration nem alteração de dados financeiros; Alembic permaneceu em `0021_mfa_pending_secret (head)`, então não foi criado dump temporário. No domínio HTTPS, `/api/health/live` e `/api/health/ready` retornaram `200`, `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`. O serviço SSH permaneceu ativo. A correção limita o gesto nativo de voltar do Safari à faixa em que o drawer da aplicação abre; os controles Voltar/Avançar do navegador continuam disponíveis.
+
 ## Verificação de segurança pós-deploy
 
 - `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`: confira que web, API, worker, PostgreSQL, Caddy e cloudflared estão ativos.
