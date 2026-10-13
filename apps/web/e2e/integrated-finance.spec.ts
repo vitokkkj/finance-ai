@@ -152,13 +152,35 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
   // Recarrega o workspace para incluir a categoria sintética criada via API.
   await page.reload();
   await expect(overviewButton).toBeVisible();
+  await expect(page.locator(".finance-loading")).toHaveCount(0);
   await page.getByRole("button", { name: "Lançamentos", exact: true }).click();
   await page.getByRole("button", { name: "Novo lançamento" }).click();
   const transactionForm = page.locator("form.editor-form").filter({
     has: page.getByRole("heading", { name: "Adicionar lançamento" }),
   });
   await expect(transactionForm).toBeVisible();
-  await transactionForm.getByLabel("Conta", { exact: true }).selectOption({
+  const transactionAccount = transactionForm.getByLabel("Conta", { exact: true });
+  const financeLoadError = page.locator(".workspace-notice.error");
+  if (await financeLoadError.count()) {
+    throw new Error(`Falha ao carregar o workspace: ${await financeLoadError.innerText()}`);
+  }
+  const accountOptions = await transactionAccount.locator("option").allTextContents();
+  if (!accountOptions.includes("Conta integrada E2E")) {
+    const accountApiState = await page.evaluate(async () => {
+      const response = await fetch("/api/accounts?include_archived=true");
+      const accounts = await response.json();
+      return {
+        status: response.status,
+        expectedAccountPresent:
+          Array.isArray(accounts) &&
+          accounts.some((account) => account.name === "Conta integrada E2E"),
+      };
+    });
+    throw new Error(
+      `Conta ausente no formulário. Opções=${JSON.stringify(accountOptions)}; API=${JSON.stringify(accountApiState)}.`,
+    );
+  }
+  await transactionAccount.selectOption({
     label: "Conta integrada E2E",
   });
   await transactionForm

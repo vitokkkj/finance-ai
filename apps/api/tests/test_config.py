@@ -38,6 +38,7 @@ def test_production_api_requires_valid_managed_mfa_encryption_key() -> None:
             database_url="sqlite+pysqlite:///:memory:",
             session_cookie_secure=True,
             owner_totp_secret="A" * 32,
+            mfa_encryption_key="",
         )
 
     configured = Settings(
