@@ -2902,7 +2902,7 @@ function AccountView({
                 <input autoComplete="current-password" id="account-mfa-current-password" minLength={12} name="current_password" onChange={(event) => setMfaRotationPassword(event.target.value)} required type="password" value={mfaRotationPassword} />
               </label>
               <label className="account-form-field" htmlFor="account-mfa-current-code">Código atual do Authy
-                <input autoComplete="one-time-code" id="account-mfa-current-code" inputMode="numeric" maxLength={6} minLength={6} name="current_totp_code" onChange={(event) => setMfaRotationCurrentCode(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required value={mfaRotationCurrentCode} />
+                <input autoComplete="one-time-code" id="account-mfa-current-code" inputMode="numeric" maxLength={6} minLength={6} name="current_totp_code" onChange={(event) => setMfaRotationCurrentCode(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required spellCheck={false} value={mfaRotationCurrentCode} />
               </label>
               <div className="account-form-actions">
                 <button className="secondary-button" onClick={cancelMfaRotation} type="button">Cancelar</button>
@@ -2922,7 +2922,7 @@ function AccountView({
                 </details>
               </div>
               <label className="account-form-field" htmlFor="account-mfa-new-code">Código do novo autenticador
-                <input autoComplete="one-time-code" id="account-mfa-new-code" inputMode="numeric" maxLength={6} minLength={6} name="new_totp_code" onChange={(event) => setMfaRotationNewCode(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required value={mfaRotationNewCode} />
+                <input autoComplete="one-time-code" id="account-mfa-new-code" inputMode="numeric" maxLength={6} minLength={6} name="new_totp_code" onChange={(event) => setMfaRotationNewCode(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required spellCheck={false} value={mfaRotationNewCode} />
               </label>
               <p className="settings-help">Ao confirmar, o novo autenticador substitui o atual e todos os acessos serão encerrados. Entre novamente com o novo código.</p>
               <div className="account-form-actions">
