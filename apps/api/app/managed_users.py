@@ -15,12 +15,11 @@ from app.auth import (
     _consume_totp_counter,
     _password_authenticated_user,
     _raise_rate_limit,
+    _user_totp_counter,
     get_current_user,
     login_rate_limiter,
     password_hasher,
 )
-from app.auth_security import matching_totp_counter
-from app.config import settings
 from app.database import Base, get_db
 from app.models import AuthSession, User
 from app.schemas import ReauthenticationRequest
@@ -191,11 +190,10 @@ def reset_managed_user_mfa(
         )
 
     authenticated_owner = _password_authenticated_user(db, user.email, payload.current_password)
-    owner_counter = matching_totp_counter(settings.owner_totp_secret or "", payload.totp_code)
+    owner_counter = _user_totp_counter(user, payload.totp_code)
     if (
         authenticated_owner is None
         or authenticated_owner.id != user.id
-        or not settings.owner_totp_secret
         or user.mfa_enrolled_at is None
         or owner_counter is None
         or not _consume_totp_counter(db, user, owner_counter)
@@ -206,6 +204,7 @@ def reset_managed_user_mfa(
         )
 
     managed_user.mfa_secret_encrypted = None
+    managed_user.mfa_pending_secret_encrypted = None
     managed_user.mfa_enrolled_at = None
     managed_user.mfa_enrollment_expires_at = None
     managed_user.last_totp_counter = None

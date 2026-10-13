@@ -35,6 +35,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     last_totp_counter: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     mfa_secret_encrypted: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    mfa_pending_secret_encrypted: Mapped[str | None] = mapped_column(String(256), nullable=True)
     avatar_revision: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

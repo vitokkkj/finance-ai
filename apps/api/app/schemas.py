@@ -103,6 +103,7 @@ class LoginCheckResponse(BaseModel):
 
 class MFAEnrollmentRequest(Credentials):
     enrollment_token: str | None = Field(default=None, min_length=32, max_length=256)
+    totp_code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
     @field_validator("enrollment_token", mode="before")
     @classmethod

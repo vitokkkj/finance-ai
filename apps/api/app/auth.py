@@ -97,15 +97,30 @@ def _encrypt_managed_totp_secret(secret: str) -> str:
     return _managed_mfa_fernet().encrypt(secret.encode("ascii")).decode("ascii")
 
 
-def _decrypt_managed_totp_secret(user: User) -> str | None:
-    if not user.mfa_secret_encrypted:
+def _decrypt_secret(encrypted_secret: str | None) -> str | None:
+    if not encrypted_secret:
         return None
     try:
-        return _managed_mfa_fernet().decrypt(user.mfa_secret_encrypted.encode("ascii")).decode(
-            "ascii"
-        )
+        return _managed_mfa_fernet().decrypt(encrypted_secret.encode("ascii")).decode("ascii")
     except (InvalidToken, UnicodeDecodeError, ValueError):
         return None
+
+
+def _decrypt_managed_totp_secret(user: User) -> str | None:
+    return _decrypt_secret(user.mfa_secret_encrypted)
+
+
+def _user_totp_secret(user: User) -> str | None:
+    if user.mfa_secret_encrypted:
+        return _decrypt_managed_totp_secret(user)
+    if _is_managed_user(user):
+        return None
+    return (settings.owner_totp_secret or "").strip().upper().rstrip("=") or None
+
+
+def _user_totp_counter(user: User, code: str | None) -> int | None:
+    secret = _user_totp_secret(user)
+    return matching_totp_counter(secret, code) if secret else None
 
 
 def _owner_totp_counter(code: str | None) -> int | None:
@@ -281,7 +296,7 @@ def _reauthentication_matches(db: Session, user: User, payload: Reauthentication
         return False
     if not _email_requires_mfa(user.email):
         return True
-    counter = _owner_totp_counter(payload.totp_code)
+    counter = _user_totp_counter(user, payload.totp_code)
     mfa_matches = (
         user.mfa_enrolled_at is not None
         and counter is not None
@@ -295,6 +310,19 @@ def _session_is_active(session: AuthSession, now: datetime) -> bool:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=UTC)
     return expires_at > now
+
+
+def _request_session_matches_user(request: Request, db: Session, user: User) -> bool:
+    token = request.cookies.get(settings.session_cookie_name)
+    if not token:
+        return False
+    token_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    session = db.scalar(select(AuthSession).where(AuthSession.token_digest == token_digest))
+    return bool(
+        session
+        and session.user_id == user.id
+        and _session_is_active(session, datetime.now(UTC))
+    )
 
 
 def _set_session_cookie(response: Response, token: str, max_age: int) -> None:
@@ -437,28 +465,57 @@ def check_login_password(
 def start_mfa_enrollment(
     payload: MFAEnrollmentRequest,
     request: Request,
+    response: Response,
     db: Annotated[Session, Depends(get_db)],
 ) -> MFAEnrollmentResponse:
     keys = _client_rate_keys(request, "mfa-enrollment-start", payload.email)
     now_monotonic = time.monotonic()
     if not login_rate_limiter.allow_attempt(keys, now_monotonic):
         _raise_rate_limit()
-    user = _password_authenticated_user(db, payload.email, payload.password)
+    user = _password_authenticated_user(db, payload.email, payload.password, lock_user=True)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível autorizar o pareamento do autenticador.",
         )
     managed_user = _is_managed_user(user)
+    if user.mfa_enrolled_at is not None:
+        if payload.totp_code is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="O autenticador já está configurado. Informe o código atual para trocá-lo.",
+            )
+        if not _request_session_matches_user(request, db, user):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Entre na conta antes de trocar o autenticador.",
+            )
+        current_counter = _user_totp_counter(user, payload.totp_code)
+        if (
+            current_counter is None
+            or not _consume_totp_counter(db, user, current_counter)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Não foi possível confirmar sua senha e o código MFA atual.",
+            )
+        secret = base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+        user.mfa_pending_secret_encrypted = _encrypt_managed_totp_secret(secret)
+        expires_at = datetime.now(UTC) + timedelta(minutes=10)
+        user.mfa_enrollment_expires_at = expires_at
+        db.commit()
+        login_rate_limiter.clear(keys)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        return MFAEnrollmentResponse(
+            qr_code_data_url=_make_totp_qr(secret, user.email),
+            manual_key=secret,
+            expires_at=expires_at,
+        )
     if not managed_user and not _mfa_enrollment_token_matches(payload.enrollment_token or ""):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível autorizar o pareamento do autenticador.",
-        )
-    if user.mfa_enrolled_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="O autenticador desta conta já foi configurado.",
         )
     if not managed_user and not _totp_is_required():
         raise HTTPException(
@@ -477,6 +534,8 @@ def start_mfa_enrollment(
     user.mfa_enrollment_expires_at = expires_at
     db.commit()
     login_rate_limiter.clear(keys)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
     return MFAEnrollmentResponse(
         qr_code_data_url=_make_totp_qr(secret, user.email if managed_user else "proprietário"),
         manual_key=secret,
@@ -502,12 +561,18 @@ def confirm_mfa_enrollment(
             detail="Não foi possível confirmar o pareamento do autenticador.",
         )
     managed_user = _is_managed_user(user)
-    if not managed_user and not _mfa_enrollment_token_matches(payload.enrollment_token or ""):
+    rotation = user.mfa_enrolled_at is not None and user.mfa_pending_secret_encrypted is not None
+    if rotation and not _request_session_matches_user(request, db, user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Entre na conta antes de confirmar a troca do autenticador.",
+        )
+    if not rotation and not managed_user and not _mfa_enrollment_token_matches(payload.enrollment_token or ""):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível confirmar o pareamento do autenticador.",
         )
-    if user.mfa_enrolled_at is not None:
+    if user.mfa_enrolled_at is not None and not rotation:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="O autenticador desta conta já foi configurado.",
@@ -518,17 +583,24 @@ def confirm_mfa_enrollment(
             status_code=status.HTTP_410_GONE,
             detail="O QR expirou. Gere um novo para continuar.",
         )
-    secret = _decrypt_managed_totp_secret(user) if managed_user else settings.owner_totp_secret
+    secret = (
+        _decrypt_secret(user.mfa_pending_secret_encrypted)
+        if rotation
+        else _decrypt_managed_totp_secret(user)
+        if managed_user
+        else settings.owner_totp_secret
+    )
     if secret is None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="O pareamento expirou ou não está disponível. Gere um novo QR.",
         )
-    totp_counter = (
-        matching_totp_counter(secret, payload.totp_code)
-        if managed_user
-        else _owner_totp_counter(payload.totp_code)
-    )
+    totp_counter = matching_totp_counter(secret, payload.totp_code)
+    if rotation:
+        # The old and new secrets can generate codes in the same 30-second
+        # step. Reset only after validating a code from the new secret.
+        user.last_totp_counter = None
+        db.flush()
     if totp_counter is None or not _consume_totp_counter(db, user, totp_counter):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -537,6 +609,24 @@ def confirm_mfa_enrollment(
 
     user.mfa_enrolled_at = datetime.now(UTC)
     user.mfa_enrollment_expires_at = None
+    if rotation:
+        user.mfa_secret_encrypted = user.mfa_pending_secret_encrypted
+        user.mfa_pending_secret_encrypted = None
+        for session in db.scalars(select(AuthSession).where(AuthSession.user_id == user.id)).all():
+            db.delete(session)
+        response.delete_cookie(
+            key=settings.session_cookie_name,
+            httponly=True,
+            secure=settings.session_cookie_secure,
+            samesite="strict",
+            path="/",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        login_rate_limiter.clear(keys)
+        db.commit()
+        return _user_response(user)
+    user.mfa_pending_secret_encrypted = None
     login_rate_limiter.clear(keys)
     _create_session(db, user, response)
     db.commit()
@@ -563,20 +653,8 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Configure o autenticador antes de entrar.",
         )
-    secret = (
-        _decrypt_managed_totp_secret(user)
-        if managed_user and user is not None
-        else settings.owner_totp_secret
-    )
-    totp_counter = (
-        (
-            matching_totp_counter(secret or "", payload.totp_code)
-            if managed_user
-            else _owner_totp_counter(payload.totp_code)
-        )
-        if mfa_required
-        else None
-    )
+    secret = _user_totp_secret(user) if user is not None else None
+    totp_counter = matching_totp_counter(secret or "", payload.totp_code) if mfa_required else None
     if user is None or (
         mfa_required
         and (
