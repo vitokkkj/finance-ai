@@ -31,13 +31,55 @@ O repositório público está em [vitokkkj/finance-ai](https://github.com/vitokk
 - Conectividade de saída da VM para a Cloudflare na porta `7844` (UDP ou TCP). O acesso da aplicação não exige portas de entrada, pois usa o túnel de saída; o SSH administrativo na porta 22 permanece ativo conforme a política documentada acima.
 - Token do túnel salvo em arquivo local privado no servidor. `cloudflared` executa como usuário não-root e lê `/run/secrets/cloudflare_tunnel_token`; o token não é colocado na linha de comando, no `.env` nem no Git.
 - Segredo TOTP do proprietário em `OWNER_TOTP_SECRET`, no `.env` privado da VM. Gere-o em um terminal confiável com `python3 scripts/generate-owner-totp.py` e mantenha a chave fora do banco e do repositório. O QR de pareamento do Authy é exibido pela aplicação após a autenticação da senha e autorização temporária do servidor.
-- Chave Fernet em `MFA_ENCRYPTION_KEY`, obrigatória para a API em produção. Gere uma única chave em terminal confiável com `python3 -c 'import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'`; grave-a no `.env` privado com modo `0600` e mantenha uma cópia independente em um gerenciador de segredos ou backup offline protegido. Não gere outra chave a cada deploy: ela é necessária para descriptografar os autenticadores das contas gerenciadas.
+- Chave Fernet em `MFA_ENCRYPTION_KEY`, obrigatória para a API em produção. Siga o procedimento abaixo para gravá-la diretamente no `.env` sem exibi-la; mantenha uma cópia independente em um gerenciador de segredos ou backup offline protegido. Não gere outra chave a cada deploy: ela é necessária para descriptografar os autenticadores das contas gerenciadas.
 - `MFA_ENROLLMENT_TOKEN` autoriza somente o primeiro pareamento do autenticador do proprietário. Gere com `openssl rand -hex 32`, use-o uma vez na tela privada do proprietário e remova a variável do `.env` após confirmar o código. Contas gerenciadas não usam esse token; cada pessoa inicia o pareamento com seu próprio e-mail e senha.
 - Token aleatório e temporário para criar a primeira conta. Gere com `openssl rand -hex 32` e configure em `INITIAL_SETUP_TOKEN` somente durante o bootstrap.
 - O limitador combina endereço de origem e conta, mas fica em memória e reinicia junto com a API. A regra de borda da Cloudflare cobre os POSTs de login, bootstrap e pareamento MFA. Não substitua o limitador da API por essa regra: ela agrega requisições por IP e existe como defesa adicional.
 - `POSTGRES_PASSWORD` aleatória, com letras e números para evitar codificação especial na URL do banco.
 
 Não reutilize valores de desenvolvimento do `.env.example` em produção. Não cole tokens, senhas, códigos TOTP, cookies ou credenciais OAuth no chat, em issues, logs ou workflows.
+
+### Provisionar a chave Fernet sem exibi-la
+
+Execute como `root` na VM, no diretório do projeto, apenas se `MFA_ENCRYPTION_KEY` ainda não tiver valor. O script gera a chave no processo, atualiza `.env` atomicamente e não imprime o segredo. Se já existir uma chave, preserve-a; não gere outra durante um deploy.
+
+```bash
+cd /opt/sophia-test
+python3 - <<'PY'
+import base64
+import os
+import secrets
+from pathlib import Path
+
+path = Path(".env")
+lines = path.read_text().splitlines()
+indexes = [i for i, line in enumerate(lines) if line.startswith("MFA_ENCRYPTION_KEY=")]
+if len(indexes) > 1:
+    raise SystemExit("Há mais de uma variável MFA_ENCRYPTION_KEY; corrija manualmente")
+if indexes and lines[indexes[0]].partition("=")[2]:
+    raise SystemExit("A chave já está configurada; ela não será substituída")
+
+key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
+line = "MFA_ENCRYPTION_KEY=" + key
+if indexes:
+    lines[indexes[0]] = line
+else:
+    lines.append(line)
+temporary = path.with_name(".env.mfa.tmp")
+fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w") as stream:
+    stream.write("\n".join(lines) + "\n")
+os.chown(temporary, 0, 0)
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+os.chown(path, 0, 0)
+os.chmod(path, 0o600)
+print("MFA_ENCRYPTION_KEY configurada; valor não exibido")
+PY
+stat -c '%a %U:%G .env' .env
+```
+
+Transfira a chave para o cofre do proprietário por um canal seguro e independente da VM e do banco. Confirme que o backup pode ser recuperado antes de considerar a proteção contra perda concluída. Não a inclua em comandos gravados no histórico, em capturas de tela ou nesta documentação.
 
 ## Rota Cloudflare
 
@@ -64,9 +106,9 @@ O hostname público permite que qualquer visitante alcance a tela de login. Não
 
 A migration `0011_public_auth_hardening` revoga sessões antigas para exigir novo login. A migration `0012_owner_mfa_enrollment` adiciona apenas o estado e o prazo temporário de pareamento. A migration `0016_totp_replay` acrescenta o contador de códigos já consumidos e impede que o mesmo código abra sessões ou autorize novamente uma ação sensível. A migration `0017_financial_idempotency` introduziu os campos de idempotência nos movimentos. A migration `0018_idempotency_tombstones` cria uma tabela separada, preserva as chaves existentes e mantém a garantia de não duplicar uma operação depois da exclusão explícita do movimento; não remove nem altera lançamentos financeiros. As migrations `0017` e `0018` estão aplicadas na VM; `0018_idempotency_tombstones` é o head atual. O downgrade de `0018` é bloqueado; uma reversão exige restaurar um backup validado, não apagar a tabela manualmente. A compatibilidade de leitura/gravação com as colunas de `0017` cobre retries feitos durante um rollback de imagem, enquanto o movimento original ainda existir. Não mantenha uma versão anterior atendendo exclusões financeiras depois de `0018`: ela não preserva tombstones ao apagar a linha; nesse cenário, restaure também o banco do backup junto com a imagem anterior.
 
-O PR de MFA individual e paginação passou migrations PostgreSQL (`alembic upgrade head` e `alembic check`) no CI `38326869097`, na revisão `07076f5`. A migration `0019_managed_user_totp` adiciona o campo nullable do segredo TOTP cifrado; não altera dados financeiros e seu downgrade é bloqueado para evitar apagar autenticadores. A migration `0020_transaction_cursor_index` adiciona o índice da paginação. A cadeia `0018 → 0019 → 0020` foi validada em CI, mas ainda não está aplicada na VM; o deploy está pendente do merge e da CI no SHA resultante de `main`. Antes de subir a API, provisionar `MFA_ENCRYPTION_KEY` na VM e guardar uma cópia independente em cofre protegido.
+O PR de MFA individual e paginação passou migrations PostgreSQL (`alembic upgrade head` e `alembic check`) no CI `38326869097`; o PR #6 foi mesclado como `9079acc` e os três jobs passaram no SHA de `main` em `38327681278`. A migration `0019_managed_user_totp` adiciona o campo nullable do segredo TOTP cifrado; não altera dados financeiros e seu downgrade é bloqueado para evitar apagar autenticadores. A migration `0020_transaction_cursor_index` adiciona o índice da paginação. A cadeia `0018 → 0019 → 0020` foi validada no CI e aplicada na VM; `0020_transaction_cursor_index` é o head atual. A chave `MFA_ENCRYPTION_KEY` foi gerada diretamente na VM e está configurada em `/opt/sophia-test/.env`, `root:root`, modo `0600`; o valor não foi exibido nem armazenado no repositório. O proprietário ainda precisa guardar uma cópia independente em cofre protegido e testar a recuperação.
 
-O banco guarda apenas o segredo TOTP individual cifrado, mas não contém a chave `MFA_ENCRYPTION_KEY`; backups PostgreSQL sem essa chave não conseguem restaurar o MFA das contas gerenciadas. Faça backup da chave em local independente e teste a recuperação. A aplicação ainda não automatiza rotação: antes de trocar a chave, re-cifre cada segredo com a chave nova em uma migração controlada, verifique que todos podem ser descriptografados e mantenha o backup antigo até validar o login. Substituir a chave sem re-cifrar torna os segredos atuais ilegíveis. Se a chave for perdida, gere uma nova, configure-a antes de iniciar a API e use, para cada conta gerenciada, `POST /api/admin/users/{id}/mfa/reset`; essa operação exige uma sessão do proprietário e sua senha e TOTP, revoga todas as sessões da pessoa e limpa apenas seu MFA, preservando os dados financeiros para novo pareamento. A chave e o MFA do proprietário são separados e não são redefinidos por essa rota.
+O banco guarda apenas o segredo TOTP individual cifrado, mas não contém a chave `MFA_ENCRYPTION_KEY`; backups PostgreSQL sem essa chave não conseguem restaurar o MFA das contas gerenciadas. A chave foi provisionada na VM e ainda precisa de cópia independente em cofre protegido e teste de recuperação. A aplicação ainda não automatiza rotação: antes de trocar a chave, re-cifre cada segredo com a chave nova em uma migração controlada, verifique que todos podem ser descriptografados e mantenha o backup antigo até validar o login. Substituir a chave sem re-cifrar torna os segredos atuais ilegíveis. Se a chave for perdida, gere uma nova, configure-a antes de iniciar a API e use, para cada conta gerenciada, `POST /api/admin/users/{id}/mfa/reset`; essa operação exige uma sessão do proprietário e sua senha e TOTP, revoga todas as sessões da pessoa e limpa apenas seu MFA, preservando os dados financeiros para novo pareamento. A chave e o MFA do proprietário são separados e não são redefinidos por essa rota.
 
 ### Publicação anterior confirmada em 12/10/2026
 
@@ -83,6 +125,14 @@ Pelo hostname HTTPS, `/api/health/live` e `/api/health/ready` responderam `200`;
 Antes da migration foi criado um dump custom PostgreSQL temporário de 143.674 bytes, modo `0600`, sem criptografia. `pg_restore --list` passou dentro do container PostgreSQL; o arquivo foi removido após as checagens e sua ausência confirmada. A máquina tinha 8,7 GB livres de 40 GB e 7,3 GiB de memória disponível após o deploy. Não foram lidos registros financeiros, `.env` ou segredos. O host não tinha `pg_restore` instalado, então a listagem foi validada pela ferramenta do container.
 
 Na zona `ruralflow.com.br`, a regra ativa **Autenticacao - limite por IP** corresponde ao host `finance.ruralflow.com.br`, método `POST` e às rotas `/api/auth/setup`, `/api/auth/login/check`, `/api/auth/login`, `/api/auth/mfa/enrollment/start` e `/api/auth/mfa/enrollment/confirm`. Ela conta por IP e bloqueia por 10 segundos depois de mais de 20 requisições em 10 segundos. A regra foi validada pelo Cloudflare e aparece ativa; não foi gerado tráfego de força bruta para testá-la em produção. Na inspeção de 12/10/2026, o plano Free mostrava `1/1` regras de rate limit em uso; consolide futuras rotas nesta regra ou revise o plano antes de adicionar outra.
+
+### Publicação de MFA individual e paginação em 12/10/2026
+
+PR [#6](https://github.com/vitokkkj/finance-ai/pull/6) foi mesclado após os três checks obrigatórios passarem em `38327392851`. O commit `9079acc0da289099c44c362362c1dabfa20bc4fa` passou nos três jobs do CI de `main`, run [38327681278](https://github.com/vitokkkj/finance-ai/actions/runs/38327681278), antes do deploy manual. A VM em `/opt/sophia-test` avançou em fast-forward de `41368d9` para `9079acc`, sem alterações locais. `docker compose ... config -q` passou e `up -d --build --wait` concluiu.
+
+As migrations `0019_managed_user_totp` e `0020_transaction_cursor_index` foram aplicadas; Alembic reportou `0020_transaction_cursor_index (head)`. A chave Fernet foi gerada na VM e adicionada a `.env` sem exibição; o arquivo tem proprietário `root:root` e modo `0600`. A chave ainda não tem cópia independente em cofre do proprietário. Antes de confiar nela para recuperação de longo prazo, salvar essa cópia e testar o procedimento documentado acima.
+
+Os seis serviços Compose estão ativos; API, web e PostgreSQL ficaram saudáveis. Nenhum serviço publica porta no host. No hostname HTTPS, live/ready retornaram `200`, `/api/accounts` e `/api/admin/users` sem sessão retornaram `401`, e `/api/docs` retornou `404`. HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`, Referrer-Policy e Permissions-Policy foram conferidos. O SSH permaneceu ativo com senha para `sophia`, `su -` mantido, root por chave e TCP/22 aberto. O dump custom pré-deploy tinha 147.749 bytes, foi validado com `pg_restore --list` dentro do container e removido após as checagens. O disco ficou com 8,5 GB livres de 40 GB. Nenhum registro financeiro ou valor de segredo foi aberto.
 
 ## Verificação de segurança pós-deploy
 
