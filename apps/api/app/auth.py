@@ -119,6 +119,8 @@ def _user_totp_secret(user: User) -> str | None:
 
 
 def _user_totp_counter(user: User, code: str | None) -> int | None:
+    if not _is_managed_user(user) and not user.mfa_secret_encrypted:
+        return _owner_totp_counter(code)
     secret = _user_totp_secret(user)
     return matching_totp_counter(secret, code) if secret else None
 
@@ -599,7 +601,11 @@ def confirm_mfa_enrollment(
             status_code=status.HTTP_410_GONE,
             detail="O pareamento expirou ou não está disponível. Gere um novo QR.",
         )
-    totp_counter = matching_totp_counter(secret, payload.totp_code)
+    totp_counter = (
+        matching_totp_counter(secret, payload.totp_code)
+        if rotation or managed_user
+        else _owner_totp_counter(payload.totp_code)
+    )
     if rotation:
         # The old and new secrets can generate codes in the same 30-second
         # step. Reset only after validating a code from the new secret.
@@ -658,7 +664,7 @@ def login(
             detail="Configure o autenticador antes de entrar.",
         )
     secret = _user_totp_secret(user) if user is not None else None
-    totp_counter = matching_totp_counter(secret or "", payload.totp_code) if mfa_required else None
+    totp_counter = _user_totp_counter(user, payload.totp_code) if mfa_required and user else None
     if user is None or (
         mfa_required
         and (
