@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 
 import { apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
+import { useEditorScroll } from "@/lib/use-editor-scroll";
 import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { PaginationControls, usePagination } from "@/components/pagination";
@@ -165,7 +166,9 @@ export function CreditCardWorkspace({
   const [notice, setNotice] = useState<Notice>(null);
   const invoiceDetailsRef = useRef<HTMLDivElement>(null);
   const invoiceCyclesHeadingRef = useRef<HTMLDivElement>(null);
-  const openingInvoiceFormRef = useRef<HTMLFormElement>(null);
+  const { editorRef: cardEditorRef, scrollToEditor: scrollToCardEditor } = useEditorScroll<HTMLFormElement>();
+  const { editorRef: purchaseEditorRef, scrollToEditor: scrollToPurchaseEditor } = useEditorScroll<HTMLFormElement>();
+  const { editorRef: openingInvoiceFormRef, scrollToEditor: scrollToOpeningInvoiceEditor } = useEditorScroll<HTMLFormElement>();
   const initialCardFocusHandled = useRef(false);
   const { confirm, dialog: confirmationDialog } = useSophiaConfirmation();
 
@@ -346,10 +349,7 @@ export function CreditCardWorkspace({
     setOpeningInvoiceId(invoice.id);
     setOpeningInvoiceForm({ due_month: invoice.due_date.slice(0, 7), amount: invoice.opening_balance });
     setOpeningInvoiceFormOpen(true);
-    window.requestAnimationFrame(() => {
-      openingInvoiceFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      openingInvoiceFormRef.current?.querySelector<HTMLInputElement>("input[type='month']")?.focus({ preventScroll: true });
-    });
+    scrollToOpeningInvoiceEditor();
   }
 
   function editCard(card: CreditCard) {
@@ -363,6 +363,7 @@ export function CreditCardWorkspace({
       payment_account_id: card.payment_account_id ?? "",
     });
     setCardFormOpen(true);
+    scrollToCardEditor();
   }
 
   async function saveCard(event: FormEvent<HTMLFormElement>) {
@@ -540,11 +541,11 @@ export function CreditCardWorkspace({
       <section className="surface-card data-card">
         <div className="surface-heading">
           <div><p className="eyebrow">Crédito</p><h2>Cartões</h2></div>
-          <button className="primary-button compact-button" onClick={() => { setCardEditingId(null); setCardForm(emptyCard()); setCardFormOpen(true); }} type="button">＋ Novo cartão</button>
+          <button className="primary-button compact-button" onClick={() => { setCardEditingId(null); setCardForm(emptyCard()); setCardFormOpen(true); scrollToCardEditor(); }} type="button">＋ Novo cartão</button>
         </div>
         {cardFormOpen && (
-          <form className="editor-form" onSubmit={saveCard}>
-            <div className="editor-heading"><h3>{cardEditingId ? "Editar cartão" : "Adicionar cartão"}</h3><button className="text-button" onClick={() => setCardFormOpen(false)} type="button">Fechar</button></div>
+          <form className="editor-form" data-scroll-editor="true" onSubmit={saveCard} ref={cardEditorRef}>
+            <div className="editor-heading"><h3 data-editor-heading tabIndex={-1}>{cardEditingId ? "Editar cartão" : "Adicionar cartão"}</h3><button className="text-button" onClick={() => setCardFormOpen(false)} type="button">Fechar</button></div>
             <div className="form-grid transaction-form-grid">
               <label className="field-label">Nome<input maxLength={100} onChange={(event) => setCardForm({ ...cardForm, name: event.target.value })} required value={cardForm.name} /></label>
               <label className="field-label">Instituição<input maxLength={100} onChange={(event) => setCardForm({ ...cardForm, institution: event.target.value })} value={cardForm.institution} /></label>
@@ -556,7 +557,7 @@ export function CreditCardWorkspace({
             <div className="form-actions"><button className="primary-button compact-button" disabled={busy} type="submit">{busy ? "Salvando…" : "Salvar cartão"}</button><span className="form-note">Quando o dia não existe no mês, usamos o último dia daquele mês.</span></div>
           </form>
         )}
-        {cards.length === 0 ? <EmptyState actionLabel="Cadastrar primeiro cartão" message="Cadastre um cartão para acompanhar compras e faturas." onAction={() => { setCardEditingId(null); setCardForm(emptyCard()); setCardFormOpen(true); }} /> : (
+        {cards.length === 0 ? <EmptyState actionLabel="Cadastrar primeiro cartão" message="Cadastre um cartão para acompanhar compras e faturas." onAction={() => { setCardEditingId(null); setCardForm(emptyCard()); setCardFormOpen(true); scrollToCardEditor(); }} /> : (
           <><div className="table-wrap"><table className="data-table"><thead><tr><th>Cartão</th><th>Limite</th><th>Utilizado</th><th>Disponível</th><th>Próximo vencimento</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
             {cardsPagination.items.map((card) => <tr key={card.id}><td><strong className="cell-primary">{card.name}</strong><small className="cell-secondary">{card.institution ?? "Cartão de crédito"} · fecha {card.closing_day} · vence {card.due_day}</small></td><td className="table-money">{formatCurrency(card.credit_limit)}</td><td className="table-money">{formatCurrency(card.used_limit)}</td><td className="table-money">{formatCurrency(card.available_limit)}</td><td>{card.next_due_date ? displayDate(card.next_due_date) : "—"}</td><td><span className={card.is_active ? "state-pill active" : "state-pill archived"}>{card.is_active ? "Ativo" : "Arquivado"}</span></td><td className="row-actions">{card.is_active && <><button className="table-action" onClick={() => editCard(card)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveCard(card)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteCard(card)} type="button">Excluir</button></td></tr>)}
           </tbody></table></div><PaginationControls end={cardsPagination.end} label="Paginação dos cartões" onPageChange={cardsPagination.setPage} page={cardsPagination.page} pageCount={cardsPagination.pageCount} start={cardsPagination.start} total={cardsPagination.total} /></>
@@ -566,11 +567,11 @@ export function CreditCardWorkspace({
       <section className="surface-card data-card">
         <div className="surface-heading">
           <div><p className="eyebrow">Consumo</p><h2>Compras no cartão</h2></div>
-          <button className="primary-button compact-button" disabled={activeCards.length === 0} onClick={() => { setPurchaseForm({ ...purchaseForm, credit_card_id: purchaseForm.credit_card_id || (activeCards.length === 1 ? activeCards[0]?.id ?? "" : ""), category_id: purchaseForm.category_id || (expenseCategories.length === 1 ? expenseCategories[0]?.id ?? "" : "") }); setPurchaseFormOpen(true); }} type="button">＋ Nova compra</button>
+          <button className="primary-button compact-button" disabled={activeCards.length === 0} onClick={() => { setPurchaseForm({ ...purchaseForm, credit_card_id: purchaseForm.credit_card_id || (activeCards.length === 1 ? activeCards[0]?.id ?? "" : ""), category_id: purchaseForm.category_id || (expenseCategories.length === 1 ? expenseCategories[0]?.id ?? "" : "") }); setPurchaseFormOpen(true); scrollToPurchaseEditor(); }} type="button">＋ Nova compra</button>
         </div>
         {purchaseFormOpen && (
-          <form className="editor-form" onSubmit={createPurchase}>
-            <div className="editor-heading"><h3>Registrar compra</h3><button className="text-button" onClick={() => setPurchaseFormOpen(false)} type="button">Fechar</button></div>
+          <form className="editor-form" data-scroll-editor="true" onSubmit={createPurchase} ref={purchaseEditorRef}>
+            <div className="editor-heading"><h3 data-editor-heading tabIndex={-1}>Registrar compra</h3><button className="text-button" onClick={() => setPurchaseFormOpen(false)} type="button">Fechar</button></div>
             <div className="form-grid transaction-form-grid">
               <label className="field-label">Cartão<select onChange={(event) => setPurchaseForm({ ...purchaseForm, credit_card_id: event.target.value })} required value={purchaseForm.credit_card_id}><option value="">Selecione</option>{activeCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></label>
               <div className="field-label"><label htmlFor="card-purchase-date">Data</label><CalendarDateInput id="card-purchase-date" onChange={(value) => setPurchaseForm({ ...purchaseForm, occurred_at: value })} required value={purchaseForm.occurred_at} /></div>
@@ -613,12 +614,12 @@ export function CreditCardWorkspace({
           <div><p className="eyebrow">Ciclos do cartão</p><h3>Faturas de {selectedCard?.name ?? "um cartão"}</h3><p className="form-note">Escolha um cartão para consultar seus ciclos, valores pagos e saldo em aberto.</p></div>
           <div className="invoice-heading-actions">
             <label className="month-picker">Cartão para visualizar<select aria-label="Cartão para visualizar" onChange={(event) => { setSelectedCardId(event.target.value); setSelectedInvoiceId(""); }} value={selectedCardId}><option value="">Selecione</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}{card.is_active ? "" : " (arquivado)"}</option>)}</select></label>
-            <button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceId(null); setOpeningInvoiceForm({ due_month: "", amount: "" }); setOpeningInvoiceFormOpen(true); }} type="button">＋ Registrar fatura existente</button>
+            <button className="secondary-button compact-button" disabled={activeCards.length === 0} onClick={() => { const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0]; if (card) setSelectedCardId(card.id); setOpeningInvoiceId(null); setOpeningInvoiceForm({ due_month: "", amount: "" }); setOpeningInvoiceFormOpen(true); scrollToOpeningInvoiceEditor(); }} type="button">＋ Registrar fatura existente</button>
           </div>
         </div>
         {openingInvoiceFormOpen && (
-          <form className="editor-form opening-invoice-form" onSubmit={(event) => void saveOpeningInvoice(event)} ref={openingInvoiceFormRef}>
-            <div className="editor-heading"><div><h3>{openingInvoiceId ? "Ajustar ciclo da fatura" : "Saldo de uma fatura existente"}</h3><p className="form-note">Informe o total em aberto e o mês em que a fatura vence. A SophIA associa automaticamente o ciclo pelo fechamento do cartão.</p></div><button aria-label="Fechar formulário" className="text-button" onClick={() => { setOpeningInvoiceFormOpen(false); setOpeningInvoiceId(null); }} type="button">Fechar</button></div>
+          <form className="editor-form opening-invoice-form" data-scroll-editor="true" onSubmit={(event) => void saveOpeningInvoice(event)} ref={openingInvoiceFormRef}>
+            <div className="editor-heading"><div><h3 data-editor-heading tabIndex={-1}>{openingInvoiceId ? "Ajustar ciclo da fatura" : "Saldo de uma fatura existente"}</h3><p className="form-note">Informe o total em aberto e o mês em que a fatura vence. A SophIA associa automaticamente o ciclo pelo fechamento do cartão.</p></div><button aria-label="Fechar formulário" className="text-button" onClick={() => { setOpeningInvoiceFormOpen(false); setOpeningInvoiceId(null); }} type="button">Fechar</button></div>
             <div className="form-grid transaction-form-grid">
               <label className="field-label">Cartão<select onChange={(event) => setSelectedCardId(event.target.value)} required value={selectedCardId}><option value="">Selecione</option>{activeCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></label>
               <label className="field-label">Mês do vencimento<input onChange={(event) => setOpeningInvoiceForm({ ...openingInvoiceForm, due_month: event.target.value })} required type="month" value={openingInvoiceForm.due_month} /><small>Ex.: a fatura que vence em novembro pode fechar em outubro, conforme o cartão.</small></label>
@@ -633,12 +634,14 @@ export function CreditCardWorkspace({
             setCardEditingId(null);
             setCardForm(emptyCard());
             setCardFormOpen(true);
+            scrollToCardEditor();
           } else {
             const card = activeCards.find((item) => item.id === selectedCardId) ?? activeCards[0];
             if (card) setSelectedCardId(card.id);
             setOpeningInvoiceId(null);
             setOpeningInvoiceForm({ due_month: "", amount: "" });
             setOpeningInvoiceFormOpen(true);
+            scrollToOpeningInvoiceEditor();
           }
         }} /> : (
           <><div className="table-wrap"><table className="data-table"><thead><tr><th>Ciclo</th><th>Fechamento</th><th>Vencimento</th><th>Total</th><th>Pago</th><th>Em aberto</th><th>Status</th><th /></tr></thead><tbody>

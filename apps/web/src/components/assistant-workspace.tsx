@@ -42,6 +42,7 @@ import { FinanceWorkspace } from "@/components/finance-workspace";
 import { FirstUseSetup } from "@/components/first-use-setup";
 import { BrandMark } from "@/components/brand-mark";
 import { ApiError, apiRequest } from "@/lib/api";
+import { useEditorScroll } from "@/lib/use-editor-scroll";
 import type { FinanceFocusTarget } from "@/lib/finance-types";
 import { formatCurrency } from "@/lib/money";
 import { PaginationControls, usePagination } from "@/components/pagination";
@@ -2180,6 +2181,7 @@ function SettingsView({
   const [assistantPreferencesSaved, setAssistantPreferencesSaved] = useState(false);
   const [memoryDraft, setMemoryDraft] = useState("");
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+  const { editorRef: memoryEditorRef, scrollToEditor: scrollToMemoryEditor } = useEditorScroll<HTMLFormElement>();
   const [savingMemory, setSavingMemory] = useState(false);
   const [memoryError, setMemoryError] = useState("");
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
@@ -2324,6 +2326,7 @@ function SettingsView({
     setMemoryDraft(memory.content);
     setEditingMemoryId(memory.id);
     setMemoryError("");
+    scrollToMemoryEditor();
   }
 
   function chooseMemoryExample(content: string) {
@@ -2403,8 +2406,8 @@ function SettingsView({
                 <button onClick={() => chooseMemoryExample("Quando eu mencionar [assunto], quero dizer [contexto].")} type="button">Contexto</button>
               </div>
             </fieldset>
-            <form className="settings-memory-form" onSubmit={(event) => void submitMemory(event)}>
-              <label className="settings-memory-label" htmlFor="assistant-preference">Lembrete para a SophIA</label>
+            <form className="settings-memory-form" data-scroll-editor="true" onSubmit={(event) => void submitMemory(event)} ref={memoryEditorRef}>
+              <label className="settings-memory-label" data-editor-heading htmlFor="assistant-preference" tabIndex={-1}>Lembrete para a SophIA</label>
               <p className="settings-memory-help" id="assistant-memory-help">Escreva uma frase específica. Você poderá editar ou remover essa memória depois.</p>
               <textarea
                 aria-describedby="assistant-memory-help"

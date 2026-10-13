@@ -18,6 +18,7 @@ import {
 import { ApiError, apiRequest } from "@/lib/api";
 import { formatCurrency, toDecimalString } from "@/lib/money";
 import type { FinanceFocusTarget } from "@/lib/finance-types";
+import { useEditorScroll } from "@/lib/use-editor-scroll";
 import { CurrencyInput } from "@/components/currency-input";
 import { CalendarDateInput } from "@/components/calendar-date-input";
 import { CalendarMonthInput } from "@/components/calendar-month-input";
@@ -320,6 +321,9 @@ export function FinanceWorkspace({
   const [filters, setFilters] = useState<TransactionFilters>(emptyFilters);
   const loadVersion = useRef(0);
   const workspaceHeadingRef = useRef<HTMLDivElement>(null);
+  const { editorRef: accountEditorRef, scrollToEditor: scrollToAccountEditor } = useEditorScroll<HTMLFormElement>();
+  const { editorRef: categoryEditorRef, scrollToEditor: scrollToCategoryEditor } = useEditorScroll<HTMLFormElement>();
+  const { editorRef: transactionEditorRef, scrollToEditor: scrollToTransactionEditor } = useEditorScroll<HTMLFormElement>();
 
   function navigateToSection(nextSection: Section) {
     setSection(nextSection);
@@ -427,6 +431,7 @@ export function FinanceWorkspace({
       if (returnToTransaction) {
         setTransactionForm((current) => ({ ...current, account_id: savedAccount.id }));
         setTransactionFormOpen(true);
+        scrollToTransactionEditor();
         setReturnToTransactionsAfterAccount(false);
         navigateToSection("transactions");
       }
@@ -508,6 +513,7 @@ export function FinanceWorkspace({
         setCategories((current) => [...current.filter((category) => category.id !== savedCategory.id), savedCategory]);
         setTransactionForm((current) => ({ ...current, category_id: savedCategory.id }));
         setTransactionFormOpen(true);
+        scrollToTransactionEditor();
         setReturnToTransactionsAfterCategory(false);
         navigateToSection("transactions");
       }
@@ -662,6 +668,7 @@ export function FinanceWorkspace({
       opening_balance_date: account.opening_balance_date ?? dateInSaoPaulo(),
     });
     setAccountFormOpen(true);
+    scrollToAccountEditor();
   }
 
   function editCategory(category: Category) {
@@ -669,12 +676,14 @@ export function FinanceWorkspace({
     setCategoryName(category.name);
     setCategoryType(category.type);
     setCategoryFormOpen(true);
+    scrollToCategoryEditor();
   }
 
   function addAccountForCurrentTransaction() {
     setAccountEditingId(null);
     setAccountForm(emptyAccount());
     setAccountFormOpen(true);
+    scrollToAccountEditor();
     setReturnToTransactionsAfterAccount(true);
     navigateToSection("accounts");
   }
@@ -684,6 +693,7 @@ export function FinanceWorkspace({
     setCategoryName("");
     setCategoryType(transactionForm.type);
     setCategoryFormOpen(true);
+    scrollToCategoryEditor();
     setReturnToTransactionsAfterCategory(true);
     navigateToSection("categories");
   }
@@ -703,6 +713,7 @@ export function FinanceWorkspace({
       notes: transaction.notes ?? "",
     });
     setTransactionFormOpen(true);
+    scrollToTransactionEditor();
   }
 
   const activeAccounts = accounts.filter((account) => account.is_active);
@@ -808,11 +819,13 @@ export function FinanceWorkspace({
                     setAccountEditingId(null);
                     setAccountForm(emptyAccount());
                     setAccountFormOpen(true);
+                    scrollToAccountEditor();
                   } else if (section === "categories") {
                     setCategoryEditingId(null);
                     setCategoryName("");
                     setCategoryType("EXPENSE");
                     setCategoryFormOpen(true);
+                    scrollToCategoryEditor();
                   } else if (section === "transactions") {
                     setTransactionEditingId(null);
                     setTransactionForm({
@@ -820,6 +833,7 @@ export function FinanceWorkspace({
                       account_id: activeAccounts.length === 1 ? activeAccounts[0].id : "",
                     });
                     setTransactionFormOpen(true);
+                    scrollToTransactionEditor();
                   }
                 }}
                 type="button"
@@ -947,8 +961,8 @@ export function FinanceWorkspace({
                     {dashboard && dashboard.checking_balance === null && dashboard.incomplete_checking_account_count > 0 && <p>Informe o saldo inicial e a data-base das contas correntes pendentes para calcular o total.</p>}
                   </div>
                   {accountFormOpen && (
-                    <form className="editor-form" onSubmit={saveAccount}>
-                      <div className="editor-heading"><h3>{accountEditingId ? "Editar conta" : "Adicionar conta"}</h3><button className="text-button" onClick={() => { setAccountFormOpen(false); setReturnToTransactionsAfterAccount(false); }} type="button">Fechar</button></div>
+                    <form className="editor-form" data-scroll-editor="true" onSubmit={saveAccount} ref={accountEditorRef}>
+                      <div className="editor-heading"><h3 data-editor-heading tabIndex={-1}>{accountEditingId ? "Editar conta" : "Adicionar conta"}</h3><button className="text-button" onClick={() => { setAccountFormOpen(false); setReturnToTransactionsAfterAccount(false); }} type="button">Fechar</button></div>
                       <div className="form-grid">
                         <label className="field-label">Nome<input maxLength={100} onChange={(event) => setAccountForm({ ...accountForm, name: event.target.value })} required value={accountForm.name} /></label>
                         <label className="field-label">Tipo<select onChange={(event) => setAccountForm({ ...accountForm, type: event.target.value as AccountType })} value={accountForm.type}><option value="CHECKING">Conta corrente</option><option value="SAVINGS">Poupança</option><option value="CASH">Dinheiro</option><option value="OTHER">Outra</option></select></label>
@@ -958,7 +972,7 @@ export function FinanceWorkspace({
                       <div className="form-actions"><button className="primary-button compact-button" disabled={busy} type="submit">{busy ? "Salvando…" : "Salvar conta"}</button><span className="form-note">Deixe saldo e data em branco se ainda não souber. O saldo deste tipo ficará indisponível até preencher os dois.</span></div>
                     </form>
                   )}
-                  {accounts.length === 0 ? <EmptyState actionLabel="Adicionar primeira conta" message="Cadastre uma conta para começar a acompanhar seu saldo." onAction={() => { setAccountForm(emptyAccount()); setAccountEditingId(null); setAccountFormOpen(true); }} /> : (
+                  {accounts.length === 0 ? <EmptyState actionLabel="Adicionar primeira conta" message="Cadastre uma conta para começar a acompanhar seu saldo." onAction={() => { setAccountForm(emptyAccount()); setAccountEditingId(null); setAccountFormOpen(true); scrollToAccountEditor(); }} /> : (
                     <><div className="table-wrap"><table className="data-table"><thead><tr><th>Conta</th><th>Tipo</th><th>Saldo atual</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
                       {accountPagination.items.map((account) => <tr key={account.id}><td><strong className="cell-primary">{account.name}</strong><small className="cell-secondary">{account.opening_balance_date ? `Saldo inicial em ${displayDate(account.opening_balance_date)}` : "Saldo inicial não informado"}</small></td><td>{accountTypeLabel(account.type)}</td><td className="table-money">{account.balance === null ? "Pendente" : formatCurrency(account.balance)}</td><td><span className={account.is_active ? "state-pill active" : "state-pill archived"}>{account.is_active ? "Ativa" : "Arquivada"}</span></td><td className="row-actions">{account.is_active && <><button className="table-action" onClick={() => editAccount(account)} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={() => void archiveAccount(account)} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteAccount(account)} type="button">Excluir</button></td></tr>)}
                     </tbody></table></div><PaginationControls end={accountPagination.end} label="Paginação das contas" onPageChange={accountPagination.setPage} page={accountPagination.page} pageCount={accountPagination.pageCount} start={accountPagination.start} total={accountPagination.total} /></>
@@ -970,8 +984,8 @@ export function FinanceWorkspace({
                 <section className="surface-card data-card">
                   <div className="surface-heading"><div><p className="eyebrow">Classificação</p><h2>Suas categorias</h2></div><span className="record-count">{categories.length} {categories.length === 1 ? "categoria" : "categorias"}</span></div>
                   {categoryFormOpen && (
-                    <form className="editor-form" onSubmit={saveCategory}>
-                      <div className="editor-heading"><h3>{categoryEditingId ? "Editar categoria" : "Adicionar categoria"}</h3><button className="text-button" onClick={() => { setCategoryFormOpen(false); setReturnToTransactionsAfterCategory(false); }} type="button">Fechar</button></div>
+                    <form className="editor-form" data-scroll-editor="true" onSubmit={saveCategory} ref={categoryEditorRef}>
+                      <div className="editor-heading"><h3 data-editor-heading tabIndex={-1}>{categoryEditingId ? "Editar categoria" : "Adicionar categoria"}</h3><button className="text-button" onClick={() => { setCategoryFormOpen(false); setReturnToTransactionsAfterCategory(false); }} type="button">Fechar</button></div>
                       <div className="form-grid category-form-grid">
                         <label className="field-label">Nome<input maxLength={100} onChange={(event) => setCategoryName(event.target.value)} required value={categoryName} /></label>
                         <label className="field-label">Tipo<select onChange={(event) => setCategoryType(event.target.value as MovementType)} value={categoryType}><option value="EXPENSE">Despesa</option><option value="INCOME">Receita</option></select></label>
@@ -979,12 +993,12 @@ export function FinanceWorkspace({
                       <div className="form-actions"><button className="primary-button compact-button" disabled={busy} type="submit">{busy ? "Salvando…" : "Salvar categoria"}</button><span className="form-note">Arquivar preserva os lançamentos já registrados.</span></div>
                     </form>
                   )}
-                  {categories.length === 0 ? <EmptyState actionLabel="Criar categoria" message="Crie categorias para classificar receitas e despesas." onAction={() => { setCategoryName(""); setCategoryEditingId(null); setCategoryFormOpen(true); }} /> : (
+                  {categories.length === 0 ? <EmptyState actionLabel="Criar categoria" message="Crie categorias para classificar receitas e despesas." onAction={() => { setCategoryName(""); setCategoryEditingId(null); setCategoryFormOpen(true); scrollToCategoryEditor(); }} /> : (
                     <div className="category-groups">
                       {categoryGroups.map((group) => (
                         <section aria-label={`Categorias de ${group.label.toLowerCase()}`} className={`category-group category-group-${group.type.toLowerCase()}`} key={group.type}>
                           <div className="category-group-heading"><h3>{group.label}</h3><span>{group.pagination.total} {group.pagination.total === 1 ? "categoria" : "categorias"}</span></div>
-                          <div className="table-wrap"><table className="data-table"><thead><tr><th>Categoria</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
+                          <div className="table-wrap"><table className="data-table category-table"><colgroup><col className="category-name-column" /><col className="category-status-column" /><col className="category-actions-column" /></colgroup><thead><tr><th>Categoria</th><th>Situação</th><th aria-label="Ações" /></tr></thead><tbody>
                             {group.pagination.items.map((category) => <tr className="category-drilldown-row" key={category.id} onClick={(event) => { if (!(event.target as HTMLElement).closest(".row-actions")) openCategoryTransactions(category.id); }}><td><button aria-label={`Ver lançamentos da categoria ${category.name}`} className="category-name-drilldown" type="button"><strong className="cell-primary">{category.name}</strong></button></td><td><span className={category.is_archived ? "state-pill archived" : "state-pill active"}>{category.is_archived ? "Arquivada" : "Ativa"}</span></td><td className="row-actions">{!category.is_archived && <><button className="table-action" onClick={(event) => { event.stopPropagation(); editCategory(category); }} type="button">Editar</button><button className="table-action danger-action" disabled={busy} onClick={(event) => { event.stopPropagation(); void archiveCategory(category); }} type="button">Arquivar</button></>}<button className="table-action danger-action" disabled={busy} onClick={(event) => { event.stopPropagation(); void deleteCategory(category); }} type="button">Excluir</button></td></tr>)}
                           </tbody></table></div><PaginationControls end={group.pagination.end} label={`Paginação das categorias de ${group.label.toLowerCase()}`} onPageChange={group.pagination.setPage} page={group.pagination.page} pageCount={group.pagination.pageCount} start={group.pagination.start} total={group.pagination.total} />
                         </section>
@@ -999,8 +1013,8 @@ export function FinanceWorkspace({
                   <div className="surface-heading"><div><p className="eyebrow">Histórico financeiro</p><h2>{activeCategoryFilter ? `Lançamentos · ${activeCategoryFilter.name}` : "Receitas, despesas e movimentos"}</h2></div><span className="record-count">{transactions.length} {transactions.length === 1 ? "lançamento" : "lançamentos"}</span></div>
                   <TransactionImport onImported={async (message) => { await loadFinance(); setNotice({ kind: "success", message }); }} />
                   {transactionFormOpen && (
-                    <form className="editor-form" onSubmit={saveTransaction}>
-                      <div className="editor-heading"><h3>{transactionEditingId ? "Editar lançamento" : "Adicionar lançamento"}</h3><button className="text-button" onClick={() => setTransactionFormOpen(false)} type="button">Fechar</button></div>
+                    <form className="editor-form" data-scroll-editor="true" onSubmit={saveTransaction} ref={transactionEditorRef}>
+                      <div className="editor-heading"><h3 data-editor-heading tabIndex={-1}>{transactionEditingId ? "Editar lançamento" : "Adicionar lançamento"}</h3><button className="text-button" onClick={() => setTransactionFormOpen(false)} type="button">Fechar</button></div>
                       <div className="form-grid transaction-form-grid">
                         <label className="field-label">Tipo<select onChange={(event) => setTransactionForm({ ...transactionForm, type: event.target.value as MovementType, category_id: "" })} value={transactionForm.type}><option value="EXPENSE">Despesa</option><option value="INCOME">Receita</option></select></label>
                         <label className="field-label">Conta<select onChange={(event) => setTransactionForm({ ...transactionForm, account_id: event.target.value })} required value={transactionForm.account_id}><option value="">Selecione</option>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
