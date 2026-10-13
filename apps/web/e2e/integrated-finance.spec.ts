@@ -90,7 +90,10 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     await expect(
       page.getByLabel("Código de seis dígitos do Authy"),
     ).toBeVisible();
-    const loginTotp = await freshTotp(totpSecret, setupCounter);
+    const loginTotp = await freshTotp(
+      totpSecret,
+      setupCounter ?? Math.floor(Date.now() / 30_000),
+    );
     ownerLastCounter = loginTotp.counter;
     await page
       .getByLabel("Código de seis dígitos do Authy")
@@ -159,7 +162,10 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     has: page.getByRole("heading", { name: "Adicionar lançamento" }),
   });
   await expect(transactionForm).toBeVisible();
-  const transactionAccount = transactionForm.getByLabel("Conta", { exact: true });
+  const transactionAccount = transactionForm.getByRole("combobox", {
+    name: "Conta",
+    exact: true,
+  });
   const financeLoadError = page.locator(".workspace-notice.error");
   if (await financeLoadError.count()) {
     throw new Error(`Falha ao carregar o workspace: ${await financeLoadError.innerText()}`);
@@ -190,7 +196,7 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
     .getByLabel("Descrição", { exact: true })
     .fill("Despesa pela interface integrada E2E");
   await transactionForm
-    .getByLabel("Categoria", { exact: true })
+    .getByRole("combobox", { name: "Categoria", exact: true })
     .selectOption({ label: "Categoria de interface integrada E2E" });
   await transactionForm
     .getByRole("button", { name: "Salvar lançamento" })
