@@ -13,6 +13,8 @@ export type E2EApiState = {
   transactionQueries: string[];
   chatPrompts: string[];
   importPreviewRequests: number;
+  mfaRotationStartRequests: number;
+  mfaRotationConfirmRequests: number;
   importConfirmRequests: {
     confirmed: boolean;
     decisions: { row_number: number; action: string }[];
@@ -219,6 +221,8 @@ export async function mockFinanceApi(
     transactionQueries: [],
     chatPrompts: [],
     importPreviewRequests: 0,
+    mfaRotationStartRequests: 0,
+    mfaRotationConfirmRequests: 0,
     importConfirmRequests: [],
   };
   let conversationCreated = false;
@@ -384,9 +388,27 @@ export async function mockFinanceApi(
         id: "synthetic-user",
         email: options.owner ? "gamercreeper74@gmail.com" : "teste@example.invalid",
         display_name: "Pessoa de teste",
-        mfa_required: false,
-        mfa_enrolled: false,
+        mfa_required: Boolean(options.owner),
+        mfa_enrolled: Boolean(options.owner),
       });
+      return;
+    }
+    if (url.pathname === "/api/auth/mfa/enrollment/start" && route.request().method() === "POST") {
+      state.mfaRotationStartRequests += 1;
+      await json(route, {
+        qr_code_data_url: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=",
+        manual_key: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+        expires_at: "2026-10-12T12:10:00-03:00",
+      });
+      return;
+    }
+    if (url.pathname === "/api/auth/mfa/enrollment/confirm" && route.request().method() === "POST") {
+      state.mfaRotationConfirmRequests += 1;
+      await json(route, { mfa_enrolled: true });
+      return;
+    }
+    if (url.pathname === "/api/auth/logout" && route.request().method() === "POST") {
+      await json(route, { status: "logged_out" });
       return;
     }
     if (url.pathname === "/api/admin/users" && options.owner) {

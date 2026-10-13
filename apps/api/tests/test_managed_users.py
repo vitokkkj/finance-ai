@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import struct
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -244,6 +245,55 @@ def test_managed_users_enroll_individual_encrypted_mfa_and_login_with_replay_pro
     assert client.post("/api/auth/login", json=login_payload).status_code == 401
 
 
+def test_managed_user_reauthenticates_with_own_totp_for_password_change(
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+    authenticate_as_user: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import auth
+
+    encryption_key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setattr(settings, "mfa_encryption_key", encryption_key)
+    monkeypatch.setattr(settings, "owner_totp_secret", None)
+    _create_first_user(client)
+    managed = _create_managed_user(client)
+    managed_secret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+    monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+
+    def matching_counter(
+        secret: str, code: str | None, *, now: float | None = None
+    ) -> int | None:
+        return 123 if secret == managed_secret and code == "123456" else None
+
+    monkeypatch.setattr(
+        auth,
+        "matching_totp_counter",
+        matching_counter,
+    )
+
+    with test_session_factory() as db:
+        user = db.get(User, UUID(managed["id"]))
+        assert user is not None
+        user.mfa_secret_encrypted = Fernet(encryption_key.encode("ascii")).encrypt(
+            managed_secret.encode("ascii")
+        ).decode("ascii")
+        user.mfa_enrolled_at = datetime.now(UTC)
+        db.commit()
+    authenticate_as_user(managed["email"])
+
+    changed = client.post(
+        "/api/auth/password/change",
+        json={
+            "current_password": "senha-inicial-segura-123",
+            "new_password": "nova-senha-segura-456",
+            "totp_code": "123456",
+        },
+    )
+    assert changed.status_code == 200
+    assert client.get("/api/auth/me").status_code == 401
+
+
 def test_managed_mfa_enrollment_is_rate_limited_and_expires(
     client: TestClient,
     test_session_factory: sessionmaker[Session],
@@ -295,8 +345,8 @@ def test_managed_mfa_reset_requires_owner_reauthentication_and_preserves_financi
     monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
     monkeypatch.setattr(
         managed_users,
-        "matching_totp_counter",
-        lambda secret, code: 456 if code == "123456" else None,
+        "_user_totp_counter",
+        lambda user, code: 456 if code == "123456" else None,
     )
     target = _create_managed_user(client)
     target_id = UUID(target["id"])

@@ -2573,6 +2573,14 @@ function AccountView({
   const [sessionPassword, setSessionPassword] = useState("");
   const [sessionTotp, setSessionTotp] = useState("");
   const [revokingSessions, setRevokingSessions] = useState(false);
+  const [mfaRotationStep, setMfaRotationStep] = useState<"closed" | "reauth" | "confirm">("closed");
+  const [mfaRotationPassword, setMfaRotationPassword] = useState("");
+  const [mfaRotationCurrentCode, setMfaRotationCurrentCode] = useState("");
+  const [mfaRotationNewCode, setMfaRotationNewCode] = useState("");
+  const [mfaRotationQr, setMfaRotationQr] = useState("");
+  const [mfaRotationManualKey, setMfaRotationManualKey] = useState("");
+  const [mfaRotationExpiresAt, setMfaRotationExpiresAt] = useState("");
+  const [rotatingMfa, setRotatingMfa] = useState(false);
 
   const loadSessions = useCallback(async () => {
     setLoadingSessions(true);
@@ -2779,6 +2787,66 @@ function AccountView({
     }
   }
 
+  async function startMfaRotation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAccountError("");
+    setNotice("");
+    setRotatingMfa(true);
+    try {
+      const enrollment = await apiRequest<{ qr_code_data_url: string; manual_key: string; expires_at: string }>("/api/auth/mfa/enrollment/start", {
+        method: "POST",
+        body: JSON.stringify({ email, password: mfaRotationPassword, totp_code: mfaRotationCurrentCode }),
+      });
+      setMfaRotationQr(enrollment.qr_code_data_url);
+      setMfaRotationManualKey(enrollment.manual_key);
+      setMfaRotationExpiresAt(enrollment.expires_at);
+      setMfaRotationStep("confirm");
+      setMfaRotationCurrentCode("");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível iniciar a troca do autenticador.");
+      setMfaRotationCurrentCode("");
+    } finally {
+      setRotatingMfa(false);
+    }
+  }
+
+  async function confirmMfaRotation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAccountError("");
+    setNotice("");
+    setRotatingMfa(true);
+    try {
+      await apiRequest<{ mfa_enrolled: boolean }>("/api/auth/mfa/enrollment/confirm", {
+        method: "POST",
+        body: JSON.stringify({ email, password: mfaRotationPassword, totp_code: mfaRotationNewCode }),
+      });
+      setNotice("Autenticador trocado. Entre novamente usando o novo código MFA.");
+      setMfaRotationPassword("");
+      setMfaRotationNewCode("");
+      setMfaRotationQr("");
+      setMfaRotationManualKey("");
+      setMfaRotationExpiresAt("");
+      setMfaRotationStep("closed");
+      await onLogout();
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Não foi possível confirmar o novo autenticador.");
+      setMfaRotationNewCode("");
+    } finally {
+      setRotatingMfa(false);
+    }
+  }
+
+  function cancelMfaRotation() {
+    setMfaRotationStep("closed");
+    setMfaRotationPassword("");
+    setMfaRotationCurrentCode("");
+    setMfaRotationNewCode("");
+    setMfaRotationQr("");
+    setMfaRotationManualKey("");
+    setMfaRotationExpiresAt("");
+    setAccountError("");
+  }
+
   const otherSessionCount = sessions.filter((session) => !session.is_current).length;
 
   return (
@@ -2825,7 +2893,44 @@ function AccountView({
         <section className="assistant-settings-card account-card">
           <h2>Proteção da conta</h2>
           <div className="settings-row"><span>Autenticação em duas etapas</span><strong className={mfaRequired && mfaEnrolled ? "settings-state ready" : "settings-state"}>{mfaRequired && mfaEnrolled ? "Ativa · TOTP" : mfaRequired ? "Configuração pendente" : "Não obrigatória neste ambiente"}</strong></div>
-          <p className="settings-help">{mfaRequired ? "O código do Authy é solicitado depois da senha. A chave do autenticador fica no servidor e nunca aparece nesta tela." : "O TOTP está configurado por ambiente. Em produção, mantenha a verificação obrigatória ativa."}</p>
+          <p className="settings-help">{mfaRequired ? "O código do Authy é solicitado depois da senha. Para trocar o autenticador, confirme sua senha e o código atual." : "O TOTP está configurado por ambiente. Em produção, mantenha a verificação obrigatória ativa."}</p>
+          {mfaRequired && mfaEnrolled && mfaRotationStep === "closed" && <button className="secondary-button account-secondary-action" onClick={() => { setAccountError(""); setMfaRotationStep("reauth"); }} type="button">Trocar autenticador</button>}
+          {mfaRotationStep === "reauth" && (
+            <form className="account-form account-password-form" onSubmit={(event) => void startMfaRotation(event)}>
+              <p className="settings-help">Confirme sua senha e use um código atual que ainda não tenha sido usado. O QR vale por dez minutos, e seu autenticador atual continua funcionando até você confirmar o novo.</p>
+              <label className="account-form-field" htmlFor="account-mfa-current-password">Senha atual
+                <input autoComplete="current-password" id="account-mfa-current-password" minLength={12} name="current_password" onChange={(event) => setMfaRotationPassword(event.target.value)} required type="password" value={mfaRotationPassword} />
+              </label>
+              <label className="account-form-field" htmlFor="account-mfa-current-code">Código atual do Authy
+                <input autoComplete="one-time-code" id="account-mfa-current-code" inputMode="numeric" maxLength={6} minLength={6} name="current_totp_code" onChange={(event) => setMfaRotationCurrentCode(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required spellCheck={false} value={mfaRotationCurrentCode} />
+              </label>
+              <div className="account-form-actions">
+                <button className="secondary-button" onClick={cancelMfaRotation} type="button">Cancelar</button>
+                <button className="settings-memory-save" disabled={rotatingMfa} type="submit">{rotatingMfa ? "Gerando QR…" : "Gerar novo QR"}</button>
+              </div>
+            </form>
+          )}
+          {mfaRotationStep === "confirm" && (
+            <form className="account-form account-password-form" onSubmit={(event) => void confirmMfaRotation(event)}>
+              <div className="mfa-enrollment-qr-panel">
+                <Image alt="QR code para configurar o novo autenticador da SophIA" className="mfa-enrollment-qr" height={240} src={mfaRotationQr} unoptimized width={240} />
+                <p>Escaneie com o Authy. O QR expira às {new Date(mfaRotationExpiresAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })} (horário de São Paulo). O autenticador atual continua válido até a confirmação.</p>
+                <details>
+                  <summary>Precisa inserir manualmente?</summary>
+                  <p>Adicione uma conta TOTP no Authy e informe esta chave temporária:</p>
+                  <code>{mfaRotationManualKey}</code>
+                </details>
+              </div>
+              <label className="account-form-field" htmlFor="account-mfa-new-code">Código do novo autenticador
+                <input autoComplete="one-time-code" id="account-mfa-new-code" inputMode="numeric" maxLength={6} minLength={6} name="new_totp_code" onChange={(event) => setMfaRotationNewCode(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="\d{6}" required spellCheck={false} value={mfaRotationNewCode} />
+              </label>
+              <p className="settings-help">Ao confirmar, o novo autenticador substitui o atual e todos os acessos serão encerrados. Entre novamente com o novo código.</p>
+              <div className="account-form-actions">
+                <button className="secondary-button" onClick={cancelMfaRotation} type="button">Cancelar</button>
+                <button className="settings-memory-save" disabled={rotatingMfa} type="submit">{rotatingMfa ? "Confirmando…" : "Confirmar novo autenticador"}</button>
+              </div>
+            </form>
+          )}
           {!passwordFormOpen ? (
             <button className="secondary-button account-secondary-action" onClick={() => { setAccountError(""); setPasswordFormOpen(true); }} type="button">Alterar senha</button>
           ) : (

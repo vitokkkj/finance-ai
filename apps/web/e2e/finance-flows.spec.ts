@@ -130,6 +130,26 @@ test("a pessoa usuária pode baixar a própria exportação de dados", async ({
   );
 });
 
+test("o proprietário pode reconfigurar o autenticador com QR temporário", async ({ page }) => {
+  const state = await mockFinanceApi(page, { owner: true });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Minha conta de Pessoa de teste" }).click();
+  await page.getByRole("button", { name: "Trocar autenticador" }).click();
+
+  await page.getByLabel("Senha atual", { exact: true }).fill("uma-senha-segura-para-teste");
+  await page.getByLabel("Código atual do Authy").fill("123456");
+  await page.getByRole("button", { name: "Gerar novo QR" }).click();
+  await expect(page.getByRole("img", { name: "QR code para configurar o novo autenticador da SophIA" })).toBeVisible();
+  await page.getByText("Precisa inserir manualmente?").click();
+  await expect(page.locator(".mfa-enrollment-qr-panel code")).toHaveText("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
+
+  await page.getByLabel("Código do novo autenticador").fill("654321");
+  await page.getByRole("button", { name: "Confirmar novo autenticador" }).click();
+  await expect(page.getByRole("heading", { name: "Entre na sua conta" })).toBeVisible();
+  expect(state.mfaRotationStartRequests).toBe(1);
+  expect(state.mfaRotationConfirmRequests).toBe(1);
+});
+
 test("a importação de CSV só grava depois da revisão de duplicidades e confirmação explícita", async ({
   page,
 }) => {

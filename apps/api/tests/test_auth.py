@@ -182,6 +182,137 @@ def test_owner_can_pair_authenticator_with_one_time_enrollment_token(
     assert repeated.status_code == 409
 
 
+def test_owner_can_rotate_authenticator_after_strong_reauthentication(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cryptography.fernet import Fernet
+
+    from app import auth
+
+    old_secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    monkeypatch.setattr(settings, "owner_totp_secret", old_secret)
+    monkeypatch.setattr(settings, "mfa_encryption_key", Fernet.generate_key().decode("ascii"))
+
+    def fake_counter(secret: str, code: str | None, *, now: float | None = None) -> int | None:
+        if secret == old_secret:
+            return {
+                "111110": 10,
+                "111111": 11,
+                "111112": 12,
+                "111113": 13,
+                "111114": 14,
+            }.get(code or "")
+        return {"222222": 15, "222223": 16}.get(code or "")
+
+    monkeypatch.setattr(auth, "matching_totp_counter", fake_counter)
+    created = client.post(
+        "/api/auth/setup",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "display_name": "Pessoa",
+            "password": "uma-senha-local-segura",
+            "totp_code": "111110",
+        },
+    )
+    assert created.status_code == 201
+    client.cookies.clear()
+
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "111111",
+        },
+    )
+    assert login.status_code == 200
+    assert client.get("/api/auth/me").status_code == 200
+
+    client.cookies.clear()
+    without_session = client.post(
+        "/api/auth/mfa/enrollment/start",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "111112",
+        },
+    )
+    assert without_session.status_code == 401
+
+    from app.main import app
+
+    other_client = TestClient(
+        app,
+        client=("203.0.113.10", 1234),
+        headers={"X-SophIA-Request": "1"},
+    )
+    second_login = other_client.post(
+        "/api/auth/login",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "111112",
+        },
+    )
+    assert second_login.status_code == 200
+    client.cookies.clear()
+    third_login = client.post(
+        "/api/auth/login",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "111113",
+        },
+    )
+    assert third_login.status_code == 200
+
+    start = client.post(
+        "/api/auth/mfa/enrollment/start",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "111114",
+        },
+    )
+    assert start.status_code == 200
+    assert start.headers["cache-control"] == "no-store"
+    assert start.json()["manual_key"] != old_secret
+
+    confirmed = client.post(
+        "/api/auth/mfa/enrollment/confirm",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "222222",
+        },
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.headers["cache-control"] == "no-store"
+    assert client.get("/api/auth/me").status_code == 401
+    assert other_client.get("/api/auth/me").status_code == 401
+
+    old_code = client.post(
+        "/api/auth/login",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "111112",
+        },
+    )
+    assert old_code.status_code == 401
+    new_code = client.post(
+        "/api/auth/login",
+        json={
+            "email": "gamercreeper74@gmail.com",
+            "password": "uma-senha-local-segura",
+            "totp_code": "222223",
+        },
+    )
+    assert new_code.status_code == 200
+    other_client.close()
+
+
 def test_mfa_enrollment_requires_the_server_token(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
