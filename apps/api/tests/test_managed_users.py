@@ -260,10 +260,16 @@ def test_managed_user_reauthenticates_with_own_totp_for_password_change(
     managed = _create_managed_user(client)
     managed_secret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
     monkeypatch.setattr(settings, "owner_totp_secret", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+
+    def matching_counter(
+        secret: str, code: str | None, *, now: float | None = None
+    ) -> int | None:
+        return 123 if secret == managed_secret and code == "123456" else None
+
     monkeypatch.setattr(
         auth,
         "matching_totp_counter",
-        lambda secret, code, *, now=None: 123 if secret == managed_secret and code == "123456" else None,
+        matching_counter,
     )
 
     with test_session_factory() as db:

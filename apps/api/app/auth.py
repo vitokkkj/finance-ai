@@ -567,7 +567,11 @@ def confirm_mfa_enrollment(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Entre na conta antes de confirmar a troca do autenticador.",
         )
-    if not rotation and not managed_user and not _mfa_enrollment_token_matches(payload.enrollment_token or ""):
+    if (
+        not rotation
+        and not managed_user
+        and not _mfa_enrollment_token_matches(payload.enrollment_token or "")
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Não foi possível confirmar o pareamento do autenticador.",
