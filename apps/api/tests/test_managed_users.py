@@ -62,6 +62,7 @@ def test_owner_can_create_list_and_delete_empty_managed_user(
     created = _create_managed_user(client, " Richard@Example.com ")
 
     assert created["email"] == "richard@example.com"
+    assert created["mfa_enrolled"] is False
     assert "password" not in created
     assert "password_hash" not in created
     assert {row["email"] for row in client.get("/api/admin/users").json()} == {
@@ -84,6 +85,29 @@ def test_owner_can_create_list_and_delete_empty_managed_user(
                 AuthSession.user_id == UUID(created["id"])
             )
         ) == 0
+
+
+def test_managed_user_summary_reports_mfa_enrollment_state(
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+) -> None:
+    _create_first_user(client)
+    managed = _create_managed_user(client)
+
+    listed = client.get("/api/admin/users")
+    assert listed.status_code == 200
+    managed_row = next(row for row in listed.json() if row["id"] == managed["id"])
+    assert managed_row["mfa_enrolled"] is False
+
+    with test_session_factory() as db:
+        user = db.get(User, UUID(managed["id"]))
+        assert user is not None
+        user.mfa_enrolled_at = datetime.now(UTC)
+        db.commit()
+
+    listed = client.get("/api/admin/users")
+    managed_row = next(row for row in listed.json() if row["id"] == managed["id"])
+    assert managed_row["mfa_enrolled"] is True
 
 
 def test_managed_user_with_data_cannot_be_deleted_and_data_is_preserved(

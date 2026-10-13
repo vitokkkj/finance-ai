@@ -55,6 +55,7 @@ class ManagedUserSummary(BaseModel):
     email: str
     display_name: str
     created_at: datetime
+    mfa_enrolled: bool
 
 
 class ManagedMFAResetResponse(BaseModel):
@@ -69,13 +70,24 @@ def _require_owner(user: User) -> None:
         )
 
 
+def _user_summary(user: User) -> ManagedUserSummary:
+    return ManagedUserSummary(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        created_at=user.created_at,
+        mfa_enrolled=user.mfa_enrolled_at is not None,
+    )
+
+
 @router.get("", response_model=list[ManagedUserSummary])
 def list_managed_users(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-) -> list[User]:
+) -> list[ManagedUserSummary]:
     _require_owner(user)
-    return list(db.scalars(select(User).order_by(User.created_at.desc(), User.email.asc())))
+    users = list(db.scalars(select(User).order_by(User.created_at.desc(), User.email.asc())))
+    return [_user_summary(managed_user) for managed_user in users]
 
 
 @router.post("", response_model=ManagedUserSummary, status_code=status.HTTP_201_CREATED)
@@ -83,7 +95,7 @@ def create_managed_user(
     payload: ManagedUserCreate,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-) -> User:
+) -> ManagedUserSummary:
     _require_owner(user)
     if db.scalar(select(User.id).where(User.email == payload.email)) is not None:
         raise HTTPException(
@@ -106,7 +118,7 @@ def create_managed_user(
             detail="Já existe uma conta com este e-mail.",
         ) from error
     db.refresh(managed_user)
-    return managed_user
+    return _user_summary(managed_user)
 
 
 @router.delete("/{managed_user_id}", status_code=status.HTTP_204_NO_CONTENT)

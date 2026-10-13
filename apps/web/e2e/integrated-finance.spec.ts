@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 
 const integrated = process.env.E2E_INTEGRATED === "1";
 const totpSecret = process.env.OWNER_TOTP_SECRET;
+const managedEmail = "acesso-e2e@example.invalid";
 
 test.skip(!integrated, "Executado no CI com API e PostgreSQL isolados.");
 
@@ -113,6 +114,22 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
         (await firstAccountHeading.count()) + (await overviewButton.count()),
     )
     .toBeGreaterThan(0);
+  await page.evaluate(async (emailAddress) => {
+    const response = await fetch("/api/admin/users");
+    const users = await response.json();
+    if (!response.ok || !Array.isArray(users)) {
+      throw new Error(`A listagem de acessos respondeu ${response.status}.`);
+    }
+    const previousAttemptUser = users.find((user) => user.email === emailAddress);
+    if (!previousAttemptUser) return;
+    const deleted = await fetch(`/api/admin/users/${previousAttemptUser.id}`, {
+      method: "DELETE",
+      headers: { "X-SophIA-Request": "1" },
+    });
+    if (deleted.status !== 204) {
+      throw new Error(`A limpeza do usuário sintético respondeu ${deleted.status}.`);
+    }
+  }, managedEmail);
   if (await firstAccountHeading.count()) {
     await page.getByLabel("Nome da conta").fill("Conta integrada E2E");
     await page.getByRole("button", { name: "Continuar" }).click();
@@ -426,7 +443,6 @@ test("primeiro acesso, MFA e fluxos financeiros persistidos pela API", async ({
   expect(result.managedUserId).toEqual(expect.any(String));
 
   if (totpSecret) {
-    const managedEmail = "acesso-e2e@example.invalid";
     const managedPassword = "Senha-sintetica-E2E-2026!";
     await page.getByRole("button", { name: "Sair" }).click();
     await expect(page.getByLabel("E-mail", { exact: true })).toBeVisible();
