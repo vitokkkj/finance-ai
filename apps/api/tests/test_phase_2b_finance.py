@@ -56,14 +56,18 @@ def create_account(client: TestClient, name: str, balance: str) -> dict[str, str
     return cast(dict[str, str], response.json())
 
 
-def create_card(client: TestClient, limit: str = "10000.00") -> dict[str, object]:
+def create_card(
+    client: TestClient,
+    limit: str = "10000.00",
+    closing_day: int = 13,
+) -> dict[str, object]:
     response = client.post(
         "/api/cards",
         json={
             "name": "Nubank",
             "institution": "Nu Pagamentos",
             "credit_limit": limit,
-            "closing_day": 13,
+            "closing_day": closing_day,
             "due_day": 20,
         },
     )
@@ -111,7 +115,7 @@ def test_card_purchase_creates_one_expense_and_does_not_change_bank_balance(
 ) -> None:
     setup_user(client)
     account = create_account(client, "Sicredi", "5000.00")
-    card = create_card(client)
+    card = create_card(client, closing_day=28)
     category_id = create_expense_category(client)
 
     purchase = client.post(
@@ -121,7 +125,7 @@ def test_card_purchase_creates_one_expense_and_does_not_change_bank_balance(
             "category_id": category_id,
             "description": "Restaurante",
             "amount": "100.00",
-            "occurred_at": "2026-10-08",
+            "occurred_at": TODAY,
         },
     )
 
@@ -155,7 +159,11 @@ def test_card_read_endpoints_batch_invoice_queries(
     today = datetime.now(UTC).astimezone(SAO_PAULO).date()
 
     def add_purchase(month_offset: int) -> None:
-        purchase_date = today - timedelta(days=60 * month_offset)
+        purchase_date = (
+            today.replace(day=min(today.day, 13))
+            if month_offset == 0
+            else today - timedelta(days=60 * month_offset)
+        )
         response = client.post(
             "/api/card-purchases",
             json={

@@ -131,12 +131,16 @@ export function CreditCardWorkspace({
   categories,
   focusTarget,
   focusCardId,
+  openPurchaseFormRequest,
+  onPurchaseFormRequestHandled,
   onFinanceChanged,
 }: {
   accounts: Account[];
   categories: Category[];
   focusTarget?: FinanceFocusTarget | null;
   focusCardId?: string | null;
+  openPurchaseFormRequest: boolean;
+  onPurchaseFormRequestHandled: () => void;
   onFinanceChanged: () => void;
 }) {
   const [cards, setCards] = useState<CreditCard[]>([]);
@@ -243,6 +247,14 @@ export function CreditCardWorkspace({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [focusTarget, selectedInvoice, selectedInvoiceId]);
+
+  useEffect(() => {
+    if (!openPurchaseFormRequest) return;
+    setNotice(null);
+    setPurchaseFormOpen(true);
+    scrollToPurchaseEditor();
+    onPurchaseFormRequestHandled();
+  }, [onPurchaseFormRequestHandled, openPurchaseFormRequest, scrollToPurchaseEditor]);
 
   useEffect(() => {
     if (!selectedInvoiceId || focusTarget?.source === "CARD_INVOICE") return;
