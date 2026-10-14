@@ -156,6 +156,14 @@ O PR [#13](https://github.com/vitokkkj/finance-ai/pull/13) foi mesclado como `ff
 
 Não houve migration nem alteração de dados financeiros; Alembic permaneceu em `0021_mfa_pending_secret (head)`, então não foi criado dump temporário. No domínio HTTPS, `/api/health/live` e `/api/health/ready` retornaram `200`, `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`. O serviço SSH permaneceu ativo. A correção limita o gesto nativo de voltar do Safari à faixa em que o drawer da aplicação abre; os controles Voltar/Avançar do navegador continuam disponíveis.
 
+### Atalho de compra no cartão em Lançamentos — publicado em 14/10/2026
+
+O PR [#15](https://github.com/vitokkkj/finance-ai/pull/15) foi mesclado no commit `ad69ca4753f719d73ab0831f1b4c2ad2f53651a3` após os três checks (`API`, `Frontend` e `Imagens e perfil público`) passarem no CI do PR ([workflow 38612627497](https://github.com/vitokkkj/finance-ai/actions/runs/38612627497)) e no CI de `main` ([workflow 38613109259](https://github.com/vitokkkj/finance-ai/actions/runs/38613109259)). A VM em `/opt/sophia-test` avançou por fast-forward de `ff69605` para `ad69ca4`. Em **Lançamentos**, o botão **Compra no cartão** leva ao formulário **Registrar compra** em **Cartões**, abre e foca o formulário existente. A compra continua vinculada à fatura e entra no histórico unificado; não houve mudança de regra financeira nem de API.
+
+O deploy não incluiu migration nem alteração de dados financeiros; Alembic permaneceu em `0021_mfa_pending_secret (head)`. O Compose validou com `config -q` e a construção/publicação concluiu com `up -d --build --wait`; os seis serviços ficaram saudáveis. A primeira chamada remota enviada como script por SSH respondeu `unknown flag` antes de recriar containers; o checkout já estava atualizado, os containers anteriores foram confirmados ativos e saudáveis, e a execução direta do mesmo comando de Compose concluiu. A causa da primeira resposta não foi determinada.
+
+Após o deploy, `/api/health/live` e `/api/health/ready` retornaram `200`; `/api/accounts` e `/api/admin/users`, sem sessão, retornaram `401`; `/api/docs` retornou `404`. Foram confirmados HSTS, CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, Referrer-Policy e Permissions-Policy. API, web, PostgreSQL e Caddy não publicam portas no host. O serviço SSH permaneceu ativo com a política já aprovada: senha para `sophia`, root somente por chave e `AllowUsers sophia root`. Nenhuma migration, `.env`, credencial ou registro financeiro foi aberto durante a verificação.
+
 ## Verificação de segurança pós-deploy
 
 - `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`: confira que web, API, worker, PostgreSQL, Caddy e cloudflared estão ativos.
