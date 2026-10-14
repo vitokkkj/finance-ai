@@ -42,6 +42,21 @@ test("uma seção financeira pode ser aberta por URL direta", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Receitas, despesas e movimentos", exact: true })).toBeVisible();
 });
 
+test("atalho em lançamentos abre o formulário de compra no cartão", async ({ page }) => {
+  await mockFinanceApi(page);
+  await page.goto("/?view=finance&section=transactions");
+
+  await page.getByRole("button", { name: "Compra no cartão", exact: true }).click();
+
+  await expect(page).toHaveURL(/view=finance&section=cards/);
+  const purchaseHeading = page.getByRole("heading", { name: "Registrar compra", exact: true });
+  await expect(purchaseHeading).toBeVisible();
+  await expect(purchaseHeading).toBeFocused();
+  const purchaseForm = page.locator("form.editor-form").filter({ hasText: "Registrar compra" });
+  await expect(purchaseForm.locator("select").first()).toBeVisible();
+  await expect(purchaseForm.getByLabel("Descrição")).toBeVisible();
+});
+
 test("o gesto de borda no celular abre o menu sem voltar ao chat anterior", async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },

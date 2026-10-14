@@ -69,6 +69,7 @@ O Ollama continua disponível como alternativa local explicitamente iniciada com
 - Transferências próprias em um único registro com origem e destino; elas mudam os saldos das duas contas sem criar receita ou despesa.
 - Cartões com limite, dia de fechamento e vencimento, além de ciclos de fatura explícitos.
 - Compras no cartão associadas a uma fatura. A compra conta como despesa na data da compra e não movimenta uma conta bancária.
+- Em Lançamentos, o atalho **Compra no cartão** abre o formulário próprio em Cartões; a compra aparece no histórico unificado e permanece vinculada à fatura.
 - Pagamentos integrais ou parciais associados à fatura e à conta pagadora. Cada pagamento reduz essa conta e o saldo aberto da fatura sem repetir a despesa.
 - Importação pelo chat do total de uma ou mais faturas existentes, com confirmação. Compras já cadastradas no ciclo são abatidas do total e somente o saldo restante vira dívida inicial; não são criadas despesas históricas. O pagamento segue o fluxo normal.
 - Dashboard com limite usado e disponível e próximo vencimento de cada cartão ativo.

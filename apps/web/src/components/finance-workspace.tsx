@@ -318,12 +318,14 @@ export function FinanceWorkspace({
   const [transactionForm, setTransactionForm] = useState<TransactionForm>(emptyTransaction);
   const [transferFormOpen, setTransferFormOpen] = useState(false);
   const [transferForm, setTransferForm] = useState<TransferForm>(emptyTransfer);
+  const [cardPurchaseFormRequest, setCardPurchaseFormRequest] = useState(false);
   const [filters, setFilters] = useState<TransactionFilters>(emptyFilters);
   const loadVersion = useRef(0);
   const workspaceHeadingRef = useRef<HTMLDivElement>(null);
   const { editorRef: accountEditorRef, scrollToEditor: scrollToAccountEditor } = useEditorScroll<HTMLFormElement>();
   const { editorRef: categoryEditorRef, scrollToEditor: scrollToCategoryEditor } = useEditorScroll<HTMLFormElement>();
   const { editorRef: transactionEditorRef, scrollToEditor: scrollToTransactionEditor } = useEditorScroll<HTMLFormElement>();
+  const acknowledgeCardPurchaseFormRequest = useCallback(() => setCardPurchaseFormRequest(false), []);
 
   function navigateToSection(nextSection: Section) {
     setSection(nextSection);
@@ -841,7 +843,12 @@ export function FinanceWorkspace({
                 <Plus aria-hidden="true" className="button-icon" size={17} />
                 {section === "accounts" ? "Nova conta" : section === "categories" ? "Nova categoria" : "Novo lançamento"}
               </button>
-              {section === "transactions" && <button className="secondary-button compact-button" onClick={() => { setTransferForm(emptyTransfer()); setTransferFormOpen(true); }} type="button">Transferência</button>}
+              {section === "transactions" && <>
+                <button className="secondary-button compact-button" onClick={() => { setCardPurchaseFormRequest(true); navigateToSection("cards"); }} type="button">
+                  <CreditCard aria-hidden="true" className="button-icon" size={17} />Compra no cartão
+                </button>
+                <button className="secondary-button compact-button" onClick={() => { setTransferForm(emptyTransfer()); setTransferFormOpen(true); }} type="button">Transferência</button>
+              </>}
               </div>
             )}
           </div>
@@ -1069,6 +1076,8 @@ export function FinanceWorkspace({
                   categories={categories}
                   focusTarget={focusTarget?.source === "CARD_INVOICE" ? focusTarget : null}
                   focusCardId={cardFocusId}
+                  openPurchaseFormRequest={cardPurchaseFormRequest}
+                  onPurchaseFormRequestHandled={acknowledgeCardPurchaseFormRequest}
                   onFinanceChanged={loadFinance}
                 />
               )}
