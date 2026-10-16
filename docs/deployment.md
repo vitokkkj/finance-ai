@@ -239,6 +239,12 @@ A VM `/opt/sophia-test` avançou por fast-forward de `b309b5b` para `1dd032b`. O
 
 ### Histórico de conversas com carregamento progressivo — publicado em 16/10/2026
 
-O PR [#23](https://github.com/vitokkkj/finance-ai/pull/23) foi mesclado como `8eb4457`. Os três checks obrigatórios passaram no workflow [38963966479](https://github.com/vitokkkj/finance-ai/actions/runs/38963966479), incluindo API, E2E de frontend e build de produção. A barra lateral passou a exibir dez conversas recentes e o botão **Carregar mais** acrescenta até dez por vez; a conversa ativa permanece visível quando já está em um grupo mais antigo.
+O PR [#23](https://github.com/vitokkkj/finance-ai/pull/23) foi mesclado como `8eb4457`. Os três checks obrigatórios passaram no workflow [38963966479](https://github.com/vitokkkj/finance-ai/actions/runs/38963966479), incluindo API, E2E de frontend e build de produção. A barra lateral passou a exibir dez conversas recentes e o botão **Carregar mais** acrescentava até dez por vez; a conversa ativa permanecia visível quando já estava em um grupo mais antigo. Essa interface inicial foi substituída pelo carregamento automático na atualização seguinte.
 
 A VM `/opt/sophia-test` avançou por fast-forward de `38e47f0` para `8eb4457`. `docker compose ... config -q` e `up -d --build --wait` passaram. Os seis serviços ficaram ativos; API, web e PostgreSQL estavam saudáveis. `/api/health/live` e `/api/health/ready` retornaram `200`, `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`. Alembic permaneceu em `0021_mfa_pending_secret (head)`; não houve migration nem alteração de dados financeiros.
+
+### Histórico de conversas com carregamento automático — publicado em 16/10/2026
+
+O PR [#25](https://github.com/vitokkkj/finance-ai/pull/25) foi mesclado no commit `a516ded0aa6a2c46a0878a0723431690d6f500a5`. Os três checks obrigatórios passaram no workflow [38965578838](https://github.com/vitokkkj/finance-ai/actions/runs/38965578838), incluindo API, E2E do frontend e build das imagens. A barra lateral mostra dez conversas no início e acrescenta automaticamente até dez quando a pessoa rola perto do fim; um anúncio acessível informa o progresso para leitores de tela.
+
+A VM `/opt/sophia-test` avançou por fast-forward de `592ecd2` para `a516ded`. `docker compose ... config -q` e `up -d --build --wait` passaram. Os seis serviços ficaram ativos; API, web e PostgreSQL estavam saudáveis. `/api/health/live` e `/api/health/ready` retornaram `200`, `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`. Alembic permaneceu em `0021_mfa_pending_secret (head)`; não houve migration nem alteração de dados financeiros.
