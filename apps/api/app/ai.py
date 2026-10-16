@@ -72,19 +72,22 @@ ai_message_stream_slots = threading.BoundedSemaphore(MAX_CONCURRENT_AI_STREAMS)
 chatgpt_credentials = ChatGPTCredentialStore(settings.chatgpt_auth_dir)
 
 
-async def get_ai_provider() -> AsyncIterator[AIProvider]:
+def create_ai_provider() -> AIProvider:
     if settings.ai_provider == "ollama":
-        provider: AIProvider = OllamaProvider(
+        return OllamaProvider(
             settings.ollama_base_url,
             settings.ollama_context_length,
             timeout_seconds=settings.ollama_timeout_seconds,
         )
-    else:
-        provider = OpenAIResponsesProvider(chatgpt_credentials)
-    try:
-        yield provider
-    finally:
-        await provider.close()
+    return OpenAIResponsesProvider(chatgpt_credentials)
+
+
+async def get_ai_provider(request: Request) -> AIProvider:
+    """Share the app-scoped provider so HTTP keep-alive connections can be reused."""
+    provider = getattr(request.app.state, "ai_provider", None)
+    if provider is None:
+        raise RuntimeError("O provider de IA não foi inicializado no ciclo de vida da API.")
+    return cast(AIProvider, provider)
 
 
 def _conversation_response(conversation: AIConversation) -> ConversationResponse:
@@ -369,8 +372,7 @@ async def send_message(
     )
     user_message_number = previous_user_message_count + 1
     generate_title = not conversation.title_is_custom and (
-        user_message_number == 1
-        or user_message_number - conversation.title_generated_for_message_count
+        user_message_number - conversation.title_generated_for_message_count
         >= TITLE_REFRESH_INTERVAL
     )
     message = AIMessage(

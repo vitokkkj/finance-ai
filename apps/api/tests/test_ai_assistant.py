@@ -704,7 +704,9 @@ def test_provider_uses_plan_token_store_false_and_namespaced_input_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: dict[str, object] = {}
-    tokens: list[str] = []
+    clients: list[object] = []
+    client_closes = 0
+    stream_closes = 0
 
     class Credentials:
         async def get_access_token(self) -> str:
@@ -724,6 +726,10 @@ def test_provider_uses_plan_token_store_false_and_namespaced_input_tools(
                 ),
             )
 
+        async def close(self) -> None:
+            nonlocal stream_closes
+            stream_closes += 1
+
     class FakeResponses:
         async def create(self, **kwargs: object) -> CompletedStream:
             calls.update(kwargs)
@@ -733,13 +739,15 @@ def test_provider_uses_plan_token_store_false_and_namespaced_input_tools(
         responses = FakeResponses()
 
         async def close(self) -> None:
-            return None
+            nonlocal client_closes
+            client_closes += 1
 
     provider = OpenAIResponsesProvider(Credentials())
 
-    def make_client(token: str) -> FakeClient:
-        tokens.append(token)
-        return FakeClient()
+    def make_client() -> FakeClient:
+        client = FakeClient()
+        clients.append(client)
+        return client
 
     monkeypatch.setattr(provider, "_new_client", make_client)
     tools: list[dict[str, object]] = [
@@ -766,8 +774,13 @@ def test_provider_uses_plan_token_store_false_and_namespaced_input_tools(
 
     events = run(collect())
     completed = events[-1]
+    run(collect())
 
-    assert tokens == ["oauth-plan-token"]
+    assert len(clients) == 1
+    assert client_closes == 0
+    assert stream_closes == 2
+    run(provider.close())
+    assert client_closes == 1
     assert calls["store"] is False
     assert calls["stream"] is True
     assert calls["model"] == "gpt-6-luna"
@@ -787,6 +800,8 @@ def test_provider_uses_plan_token_store_false_and_namespaced_input_tools(
 def test_provider_maps_streamed_plan_usage_limit_without_paid_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    stream_closes = 0
+
     class Credentials:
         async def get_access_token(self) -> str:
             return "oauth-plan-token"
@@ -803,6 +818,10 @@ def test_provider_maps_streamed_plan_usage_limit_without_paid_fallback(
                 ),
             )
 
+        async def close(self) -> None:
+            nonlocal stream_closes
+            stream_closes += 1
+
     class FakeResponses:
         async def create(self, **kwargs: object) -> FailedStream:
             _ = kwargs
@@ -815,7 +834,7 @@ def test_provider_maps_streamed_plan_usage_limit_without_paid_fallback(
             return None
 
     provider = OpenAIResponsesProvider(Credentials())
-    monkeypatch.setattr(provider, "_new_client", lambda token: FakeClient())
+    monkeypatch.setattr(provider, "_new_client", lambda: FakeClient())
 
     async def collect() -> None:
         async for _ in provider.stream(ProviderRequest("gpt-6-luna", "", [], [])):
@@ -827,6 +846,50 @@ def test_provider_maps_streamed_plan_usage_limit_without_paid_fallback(
     assert caught.value.code == "plan_usage_limit"
     assert "não trocará para uma API paga" in str(caught.value)
     assert "private account" not in str(caught.value)
+    assert stream_closes == 1
+    run(provider.close())
+
+
+def test_provider_closes_stream_when_consumer_cancels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream_closes = 0
+
+    class Credentials:
+        async def get_access_token(self) -> str:
+            return "oauth-plan-token"
+
+    class OpenStream:
+        async def __aiter__(self) -> AsyncIterator[object]:
+            yield SimpleNamespace(type="response.output_text.delta", delta="Resposta parcial")
+
+        async def close(self) -> None:
+            nonlocal stream_closes
+            stream_closes += 1
+
+    class FakeResponses:
+        async def create(self, **kwargs: object) -> OpenStream:
+            _ = kwargs
+            return OpenStream()
+
+    class FakeClient:
+        responses = FakeResponses()
+
+        async def close(self) -> None:
+            return None
+
+    provider = OpenAIResponsesProvider(Credentials())
+    monkeypatch.setattr(provider, "_new_client", lambda: FakeClient())
+
+    async def consume_one_event() -> None:
+        response = provider.stream(ProviderRequest("gpt-6-luna", "", [], []))
+        event = await response.__anext__()
+        assert event.type == "text_delta"
+        await response.aclose()
+        assert stream_closes == 1
+        await provider.close()
+
+    run(consume_one_event())
 
 
 def test_provider_requires_authorized_plan_and_never_requests_api_key() -> None:
@@ -848,6 +911,7 @@ def test_provider_requires_authorized_plan_and_never_requests_api_key() -> None:
 
     assert caught.value.code == "connection_required"
     assert "API paga" in str(caught.value)
+    run(provider.close())
 
 
 def _today() -> date:
@@ -878,7 +942,7 @@ def test_sse_response_persists_messages_context_and_usage(client: TestClient) ->
     assert "event: text_delta" in first.text
     assert 'event: done\ndata: {"status": "ok"}' in first.text
     detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
-    assert detail["title"] == "Resumo financeiro"
+    assert detail["title"] == "Oi"
     messages = detail["messages"]
     assert [(item["role"], item["content"]) for item in messages] == [
         ("USER", "Oi"),
@@ -897,8 +961,8 @@ def test_sse_response_persists_messages_context_and_usage(client: TestClient) ->
     )
     usage = client.get("/api/ai/usage").json()
     assert usage["calls_today"] == 2
-    assert usage["input_tokens_today"] == 37
-    assert usage["output_tokens_today"] == 19
+    assert usage["input_tokens_today"] == 34
+    assert usage["output_tokens_today"] == 17
 
 
 def test_conversation_title_refreshes_from_recent_messages(client: TestClient) -> None:
@@ -911,7 +975,7 @@ def test_conversation_title_refreshes_from_recent_messages(client: TestClient) -
             [ProviderEvent(type="text_delta", text="Resposta três."), _completed()],
             [ProviderEvent(type="text_delta", text="Resposta quatro."), _completed()],
         ],
-        title_responses=["Primeiro assunto", "Resumo atualizado"],
+        title_responses=["Resumo atualizado"],
     )
     _set_fake_provider(client, fake)
     user_messages = [
@@ -934,8 +998,8 @@ def test_conversation_title_refreshes_from_recent_messages(client: TestClient) -
         if any(tool.get("name") == "suggest_conversation_title" for tool in request.tools)
     ]
     assert all(response.status_code == 200 for response in responses)
-    assert len(title_requests) == 2
-    refreshed_context = str(title_requests[-1].input_items[0]["content"])
+    assert len(title_requests) == 1
+    refreshed_context = str(title_requests[0].input_items[0]["content"])
     assert "Vamos organizar minhas contas" in refreshed_context
     assert "gastos com combustível" in refreshed_context
     assert "Falamos de [valor] em combustível em [data]" in refreshed_context
@@ -944,7 +1008,7 @@ def test_conversation_title_refreshes_from_recent_messages(client: TestClient) -
     assert client.get(f"/api/ai/conversations/{conversation['id']}").json()["title"] == (
         "Resumo atualizado"
     )
-    assert '"title": "Resumo atualizado"' in responses[-1].text
+    assert '"title": "Resumo atualizado"' in responses[2].text
 
 
 def test_month_summary_uses_finance_engine_and_returns_structured_card(client: TestClient) -> None:
@@ -2315,9 +2379,9 @@ def test_development_diagnostics_show_usage_without_messages_or_secrets(
     assert row["model"] == settings.ai_model_fast
     assert row["status"] == "SUCCEEDED"
     assert row["duration_ms"] >= 0
-    assert row["input_tokens"] == 33
+    assert row["input_tokens"] == 30
     assert row["cached_input_tokens"] == 0
-    assert row["output_tokens"] == 8
+    assert row["output_tokens"] == 6
     assert row["estimated_cost_usd"] is None
     assert secret not in diagnostics.text
     assert (client.cookies.get("finance_ai_session") or "") not in diagnostics.text
