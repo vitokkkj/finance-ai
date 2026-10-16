@@ -243,7 +243,7 @@ export async function mockFinanceApi(
       }] : [])]
     : [];
   const mockConversations = options.largeLists
-    ? Array.from({ length: 21 }, (_, index) => ({
+    ? Array.from({ length: 32 }, (_, index) => ({
         id: `synthetic-conversation-${index + 1}`,
         title: `Conversa de teste ${index + 1}`,
         created_at: `2026-10-${String(12 - (index % 12)).padStart(2, "0")}T12:00:00-03:00`,
