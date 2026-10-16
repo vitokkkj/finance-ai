@@ -3747,13 +3747,7 @@ textarea:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-pending-icon {
-    animation: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
+  :not(.assistant-pending-icon),
   *::before,
   *::after {
     scroll-behavior: auto !important;
