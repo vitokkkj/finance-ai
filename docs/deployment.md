@@ -164,6 +164,14 @@ O deploy não incluiu migration nem alteração de dados financeiros; Alembic pe
 
 Após o deploy, `/api/health/live` e `/api/health/ready` retornaram `200`; `/api/accounts` e `/api/admin/users`, sem sessão, retornaram `401`; `/api/docs` retornou `404`. Foram confirmados HSTS, CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, Referrer-Policy e Permissions-Policy. API, web, PostgreSQL e Caddy não publicam portas no host. O serviço SSH permaneceu ativo com a política já aprovada: senha para `sophia`, root somente por chave e `AllowUsers sophia root`. Nenhuma migration, `.env`, credencial ou registro financeiro foi aberto durante a verificação.
 
+### Login móvel e tabelas financeiras — publicados em 16/10/2026
+
+O PR [#17](https://github.com/vitokkkj/finance-ai/pull/17) foi mesclado como `9e4dcbe0573b9815f4f860ec727adba1f21531ae` após os três checks obrigatórios — `API`, `Frontend` e `Imagens e perfil público` — passarem no PR (workflow `38951965641`) e no CI de `main` (workflow `38952398989`). A correção define fonte mínima de 16 px nos campos móveis para evitar zoom automático no Safari e reorganiza contas, categorias, lançamentos, cartões e faturas em cartões rotulados que mostram todos os valores sem arraste horizontal. Foram adicionados cenários E2E para login e listagens em 390 px.
+
+A VM em `/opt/sophia-test` avançou por fast-forward de `ad69ca4` para `9e4dcbe`. `docker compose ... config -q` passou e `up -d --build --wait` concluiu; web, API e PostgreSQL ficaram saudáveis, e os seis serviços estavam ativos. Não houve alteração de API ou migration; Alembic permaneceu em `0021_mfa_pending_secret (head)` e não foi criado dump temporário. O checkout estava limpo antes do deploy e a configuração SSH permaneceu inalterada.
+
+Após o deploy, GET `/api/health/live` e `/api/health/ready` retornaram `200`; `/api/accounts`, sem sessão, retornou `401`; `/api/docs` retornou `404`. Foram observados HSTS, CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, Referrer-Policy e Permissions-Policy. A validação automatizada de viewport passou em Chromium; confirmar o zoom e a rolagem no Safari/iPhone real continua pendente.
+
 ## Verificação de segurança pós-deploy
 
 - `docker compose -f docker-compose.yml -f docker-compose.vm.yml ps`: confira que web, API, worker, PostgreSQL, Caddy e cloudflared estão ativos.
