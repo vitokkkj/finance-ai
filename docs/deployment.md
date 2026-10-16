@@ -224,3 +224,9 @@ docker compose -f docker-compose.yml -f docker-compose.vm.yml exec api alembic c
 ```
 
 Os logs não devem conter senhas, token do túnel, token de bootstrap, códigos TOTP, cookies ou credenciais OAuth. Remova o token de primeiro acesso do `.env` assim que a conta for criada.
+
+### Otimização de latência da IA — publicada em 16/10/2026
+
+O PR [#19](https://github.com/vitokkkj/finance-ai/pull/19) foi mesclado no commit `b309b5b87bb288e05af28861038fd31452bd290b`. Os checks do PR passaram no workflow [38956609979](https://github.com/vitokkkj/finance-ai/actions/runs/38956609979) e os checks de `main` passaram no workflow [38957027235](https://github.com/vitokkkj/finance-ai/actions/runs/38957027235), incluindo API/PostgreSQL, E2E Chromium, auditoria de dependências, lint, tipos e build.
+
+A VM `/opt/sophia-test` avançou por fast-forward de `4d2aa3a` para `b309b5b`. `docker compose ... config -q` e `up -d --build --wait` passaram; os seis serviços ficaram ativos, com API, web e PostgreSQL saudáveis. `/api/health/live` e `/api/health/ready` retornaram `200`, `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`. Alembic permaneceu em `0021_mfa_pending_secret (head)`; não houve migration nem alteração de dados financeiros. A comparação de latência pós-publicação ainda depende de novas respostas do proprietário.

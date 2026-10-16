@@ -10,7 +10,7 @@ O título inicial é gerado localmente a partir da primeira mensagem, sem uma se
 
 ### Desempenho sem reduzir a capacidade
 
-As respostas abertas mantêm o mesmo modelo, prompt financeiro, contexto recente e conjunto de ferramentas. O provider e o pool HTTP ficam reutilizáveis durante a vida do processo da API; cada stream é fechado ao terminar ou ser interrompido, sem descartar o pool. A API já registra duração total e uso de tokens. Na amostra agregada de 26 primeiras respostas medida em 16/10/2026, a mediana foi 14,2 s e o percentil 90 foi 19,2 s; isso mede o turno completo, não somente o tempo até o primeiro token. Esses números são a referência anterior à otimização e devem ser comparados com uma nova amostra após a publicação, sem consultar conteúdo de mensagens.
+As respostas abertas mantêm o mesmo modelo, prompt financeiro, contexto recente e conjunto de ferramentas. O provider e o pool HTTP ficam reutilizáveis durante a vida do processo da API; cada stream é fechado ao terminar ou ser interrompido, sem descartar o pool. A API já registra duração total e uso de tokens. Na amostra agregada de 26 primeiras respostas medida em 16/10/2026, a mediana foi 14,2 s e o percentil 90 foi 19,2 s; isso mede o turno completo, não somente o tempo até o primeiro token. A otimização foi publicada na VM no commit `b309b5b` em 16/10/2026; a comparação posterior aguarda novas respostas reais, sem consultar o conteúdo das mensagens.
 
 ## Fonte dos dados e ferramentas
 
