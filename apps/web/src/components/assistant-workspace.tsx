@@ -58,6 +58,7 @@ type WorkspaceRefreshSnapshot = {
 };
 
 const WORKSPACE_REFRESH_SNAPSHOT_KEY = "sophia-workspace-refresh-v1";
+const CONVERSATION_HISTORY_BATCH_SIZE = 10;
 
 function readWorkspaceRefreshSnapshot(): WorkspaceRefreshSnapshot | null {
   try {
@@ -563,7 +564,7 @@ export function AssistantWorkspace({
   const financeFocusRequestId = useRef(0);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const conversationPagination = usePagination(conversations, String(conversations.length));
+  const [visibleConversationCount, setVisibleConversationCount] = useState(CONVERSATION_HISTORY_BATCH_SIZE);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [status, setStatus] = useState<AIStatus | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -617,8 +618,11 @@ export function AssistantWorkspace({
   useEffect(() => {
     if (view !== "chat" || !conversationId) return;
     const index = conversations.findIndex((conversation) => conversation.id === conversationId);
-    if (index >= 0) conversationPagination.setPage(Math.floor(index / conversationPagination.pageSize) + 1);
-  }, [conversationId, conversationPagination.pageSize, conversationPagination.setPage, conversations, view]);
+    if (index >= visibleConversationCount) {
+      const requiredCount = Math.ceil((index + 1) / CONVERSATION_HISTORY_BATCH_SIZE) * CONVERSATION_HISTORY_BATCH_SIZE;
+      setVisibleConversationCount((count) => Math.max(count, requiredCount));
+    }
+  }, [conversationId, conversations, view, visibleConversationCount]);
 
   useEffect(() => {
     if (!mobileMenuOpen || window.matchMedia("(min-width: 761px)").matches) return;
@@ -1446,7 +1450,7 @@ export function AssistantWorkspace({
           <p>Conversas recentes</p>
           {loading ? <span className="history-placeholder">Carregando…</span> : conversations.length === 0 ? (
             <span className="history-placeholder">Pergunte sobre seus gastos para começar.</span>
-          ) : conversationPagination.items.map((conversation) => (
+          ) : conversations.slice(0, visibleConversationCount).map((conversation) => (
             <div className={conversation.id === conversationId && view === "chat" ? "history-row current" : "history-row"} key={conversation.id}>
               {editingConversationId === conversation.id ? (
                 <form className="history-rename-form" onSubmit={(event) => { event.preventDefault(); void saveConversationTitle(conversation.id); }}>
@@ -1475,7 +1479,14 @@ export function AssistantWorkspace({
               </>}
             </div>
           ))}
-          <PaginationControls end={conversationPagination.end} label="Paginação das conversas" onPageChange={conversationPagination.setPage} page={conversationPagination.page} pageCount={conversationPagination.pageCount} start={conversationPagination.start} total={conversationPagination.total} />
+          {!loading && conversations.length > CONVERSATION_HISTORY_BATCH_SIZE && <>
+            <span aria-live="polite" className="history-count">Mostrando {Math.min(visibleConversationCount, conversations.length)} de {conversations.length}</span>
+            {visibleConversationCount < conversations.length && <button
+              className="history-load-more"
+              onClick={() => setVisibleConversationCount((count) => count + CONVERSATION_HISTORY_BATCH_SIZE)}
+              type="button"
+            >Carregar mais {Math.min(CONVERSATION_HISTORY_BATCH_SIZE, conversations.length - visibleConversationCount)}</button>}
+          </>}
         </div>
         <nav className="assistant-nav" aria-label="Navegação financeira">
           <div className="assistant-nav-group">

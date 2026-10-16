@@ -598,14 +598,23 @@ test("o proprietário pode criar e excluir contas de acesso sem dados", async ({
   await expect(page.getByText("richard@example.com")).toHaveCount(0);
 });
 
-test("o histórico de conversas mostra 15 itens por página", async ({ page }) => {
+test("o histórico mostra 10 conversas e carrega mais 10 por vez", async ({ page }) => {
   await mockFinanceApi(page, { largeLists: true });
   await page.goto("/");
 
   const history = page.locator(".assistant-history");
-  await expect(history.locator(".history-row")).toHaveCount(15);
-  await history.getByRole("navigation", { name: "Paginação das conversas" }).getByRole("button", { name: "Próxima" }).click();
-  await expect(history.locator(".history-row")).toHaveCount(6);
+  await expect(history.locator(".history-row")).toHaveCount(10);
+  await expect(history.getByText("Mostrando 10 de 32")).toBeVisible();
+  await history.getByRole("button", { name: "Carregar mais 10" }).click();
+  await expect(history.locator(".history-row")).toHaveCount(20);
+  await expect(history.getByText("Mostrando 20 de 32")).toBeVisible();
+  await history.getByRole("button", { name: "Carregar mais 10" }).click();
+  await expect(history.locator(".history-row")).toHaveCount(30);
+  await expect(history.getByText("Mostrando 30 de 32")).toBeVisible();
+  await history.getByRole("button", { name: "Carregar mais 2" }).click();
+  await expect(history.locator(".history-row")).toHaveCount(32);
+  await expect(history.getByText("Mostrando 32 de 32")).toBeVisible();
+  await expect(history.getByRole("button", { name: /Carregar mais/ })).toHaveCount(0);
 });
 
 for (const width of [390, 820]) {
