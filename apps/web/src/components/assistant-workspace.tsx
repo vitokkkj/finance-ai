@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TouchEvent as ReactTouchEvent, type UIEvent as ReactUIEvent } from "react";
 import Image from "next/image";
 import {
   Archive,
@@ -565,6 +565,7 @@ export function AssistantWorkspace({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [visibleConversationCount, setVisibleConversationCount] = useState(CONVERSATION_HISTORY_BATCH_SIZE);
+  const lastHistoryAutoLoadHeightRef = useRef(0);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [status, setStatus] = useState<AIStatus | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -614,6 +615,14 @@ export function AssistantWorkspace({
     // Safari treats a left-edge swipe as browser Back unless the app claims touchstart.
     layout?.addEventListener("touchstart", preventNativeBackGesture, { capture: true, passive: false });
   }, [preventNativeBackGesture]);
+
+  const loadMoreConversationsOnScroll = useCallback((event: ReactUIEvent<HTMLDivElement>) => {
+    const history = event.currentTarget;
+    const nearEnd = history.scrollHeight - history.scrollTop - history.clientHeight <= 48;
+    if (!nearEnd || lastHistoryAutoLoadHeightRef.current === history.scrollHeight || visibleConversationCount >= conversations.length) return;
+    lastHistoryAutoLoadHeightRef.current = history.scrollHeight;
+    setVisibleConversationCount((count) => Math.min(count + CONVERSATION_HISTORY_BATCH_SIZE, conversations.length));
+  }, [conversations.length, visibleConversationCount]);
 
   useEffect(() => {
     if (view !== "chat" || !conversationId) return;
@@ -1446,7 +1455,7 @@ export function AssistantWorkspace({
           <RefreshCw aria-hidden="true" size={15} />
           <span>Atualizar aplicativo</span>
         </button>
-        <div className="assistant-history">
+        <div className="assistant-history" onScroll={loadMoreConversationsOnScroll}>
           <p>Conversas recentes</p>
           {loading ? <span className="history-placeholder">Carregando…</span> : conversations.length === 0 ? (
             <span className="history-placeholder">Pergunte sobre seus gastos para começar.</span>
@@ -1479,14 +1488,9 @@ export function AssistantWorkspace({
               </>}
             </div>
           ))}
-          {!loading && conversations.length > CONVERSATION_HISTORY_BATCH_SIZE && <>
-            <span aria-live="polite" className="history-count">Mostrando {Math.min(visibleConversationCount, conversations.length)} de {conversations.length}</span>
-            {visibleConversationCount < conversations.length && <button
-              className="history-load-more"
-              onClick={() => setVisibleConversationCount((count) => count + CONVERSATION_HISTORY_BATCH_SIZE)}
-              type="button"
-            >Carregar mais {Math.min(CONVERSATION_HISTORY_BATCH_SIZE, conversations.length - visibleConversationCount)}</button>}
-          </>}
+          {!loading && conversations.length > CONVERSATION_HISTORY_BATCH_SIZE && <span aria-atomic="true" aria-live="polite" className="sr-only">
+            Histórico: {Math.min(visibleConversationCount, conversations.length)} de {conversations.length} conversas exibidas.
+          </span>}
         </div>
         <nav className="assistant-nav" aria-label="Navegação financeira">
           <div className="assistant-nav-group">

@@ -4539,36 +4539,6 @@ textarea:focus-visible {
   margin-bottom: 14px;
 }
 
-.assistant-history .history-count {
-  margin: 6px 8px 0;
-  color: var(--color-sidebar-muted);
-  font-size: 9px;
-  line-height: 1.4;
-}
-
-.assistant-history .history-load-more {
-  width: calc(100% - 8px);
-  min-height: 32px;
-  margin: 4px 4px 0;
-  padding: 0 8px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--color-sidebar-text);
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 650;
-  text-align: center;
-}
-
-.assistant-history .history-load-more:hover,
-.assistant-history .history-load-more:focus-visible {
-  border-color: var(--color-brand);
-  background: var(--color-brand-soft);
-  color: var(--color-ink);
-}
-
 .assistant-notifications-panel .pagination-controls {
   align-items: stretch;
   flex-direction: column;
