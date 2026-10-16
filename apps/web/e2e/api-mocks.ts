@@ -214,7 +214,7 @@ function json(route: Route, body: unknown) {
 
 export async function mockFinanceApi(
   page: Page,
-  options: { largeLists?: boolean; categoryBreakdown?: boolean; owner?: boolean; managedUserEnrolled?: boolean; failTransactionsRequests?: number } = {},
+  options: { largeLists?: boolean; categoryBreakdown?: boolean; owner?: boolean; managedUserEnrolled?: boolean; failTransactionsRequests?: number; authenticated?: boolean } = {},
 ): Promise<E2EApiState> {
   const state: E2EApiState = {
     dashboardQueries: [],
@@ -384,6 +384,14 @@ export async function mockFinanceApi(
       return;
     }
     if (url.pathname === "/api/auth/me") {
+      if (options.authenticated === false) {
+        await route.fulfill({
+          status: 401,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "Sessão necessária." }),
+        });
+        return;
+      }
       await json(route, {
         id: "synthetic-user",
         email: options.owner ? "gamercreeper74@gmail.com" : "teste@example.invalid",

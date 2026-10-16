@@ -42,6 +42,58 @@ test("uma seção financeira pode ser aberta por URL direta", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Receitas, despesas e movimentos", exact: true })).toBeVisible();
 });
 
+test("os campos de login mantêm fonte de 16 px em uma tela de iPhone", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    timezoneId: "America/Sao_Paulo",
+  });
+  const page = await context.newPage();
+  await mockFinanceApi(page, { authenticated: false });
+  await page.goto("/");
+
+  const email = page.getByLabel("E-mail", { exact: true });
+  const password = page.getByLabel("Senha", { exact: true });
+  await expect(email).toBeVisible();
+  await expect(password).toBeVisible();
+  for (const field of [email, password]) {
+    const fontSize = await field.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+    expect(fontSize).toBeGreaterThanOrEqual(16);
+  }
+  await context.close();
+});
+
+test("tabelas financeiras cabem na largura do celular sem esconder valores", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    timezoneId: "America/Sao_Paulo",
+  });
+  const page = await context.newPage();
+  await mockFinanceApi(page, { largeLists: true });
+  await page.goto("/?view=finance&section=transactions");
+  await expect(page.locator(".transaction-table tbody tr").first()).toBeVisible();
+  await expect(page.locator('.transaction-table td[data-label="Valor"]').first()).toBeVisible();
+
+  const tableFits = async () => page.locator(".table-wrap").evaluateAll((wrappers) =>
+    wrappers.every((wrapper) => wrapper.scrollWidth <= wrapper.clientWidth + 1),
+  );
+  expect(await tableFits()).toBe(true);
+
+  for (const [section, label] of [["accounts", "Contas"], ["categories", "Categorias"], ["cards", "Cartões"]] as const) {
+    await page.goto(`/?view=finance&section=${section}`);
+    await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
+    await expect.poll(tableFits).toBe(true);
+    if (section === "cards") {
+      await expect(page.locator('td[data-label="Disponível"]').first()).toBeVisible();
+      await expect(page.locator('td[data-label="Em aberto"]').first()).toBeVisible();
+    }
+  }
+  await context.close();
+});
+
 test("atalho em lançamentos abre o formulário de compra no cartão", async ({ page }) => {
   await mockFinanceApi(page);
   await page.goto("/?view=finance&section=transactions");
