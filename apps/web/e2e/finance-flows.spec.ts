@@ -42,6 +42,37 @@ test("uma seção financeira pode ser aberta por URL direta", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Receitas, despesas e movimentos", exact: true })).toBeVisible();
 });
 
+test("o indicador de pensamento continua animado com movimento reduzido no sistema", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockFinanceApi(page);
+
+  let releaseResponse: (() => void) | undefined;
+  await page.route("**/api/ai/conversations/*/messages", async (route) => {
+    await new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: 'event: done\ndata: {"status":"ok"}\n\n',
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Mensagem para o assistente" }).fill("Como está meu mês?");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+
+  const spinner = page.locator(".assistant-pending-icon");
+  await expect(spinner).toBeVisible();
+  await expect.poll(() => spinner.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return [style.animationName, style.animationDuration, style.animationIterationCount];
+  })).toEqual(["assistant-status-rotate", "1.2s", "infinite"]);
+
+  releaseResponse?.();
+  await expect(page.locator(".assistant-pending-card")).toHaveCount(0);
+});
+
 test("os campos de login mantêm fonte de 16 px em uma tela de iPhone", async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
