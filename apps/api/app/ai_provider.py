@@ -8,12 +8,14 @@ from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
 import httpx
+import httpx2
 from openai import (
     APIConnectionError,
     APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     AuthenticationError,
+    DefaultAsyncHttpx2Client,
     RateLimitError,
 )
 
@@ -159,22 +161,36 @@ class OpenAIResponsesProvider:
 
     def __init__(self, credentials: AccessTokenProvider) -> None:
         self._credentials = credentials
+        self._client: AsyncOpenAI | None = None
 
-    def _new_client(self, access_token: str) -> AsyncOpenAI:
+    def _new_client(self) -> AsyncOpenAI:
+        # Keep one connection pool for the lifetime of this provider. The OAuth
+        # callback refreshes the bearer token for every request without rebuilding
+        # the HTTP client or discarding its keep-alive connections.
+        http_client = DefaultAsyncHttpx2Client(
+            timeout=httpx2.Timeout(45.0, connect=5.0),
+            limits=httpx2.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30.0,
+            ),
+            follow_redirects=True,
+        )
         return AsyncOpenAI(
-            api_key=access_token,
+            api_key=self._credentials.get_access_token,
             base_url="https://api.openai.com/v1",
             timeout=45.0,
             max_retries=0,
+            http_client=http_client,
         )
 
-    async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderEvent]:
-        try:
-            access_token = await self._credentials.get_access_token()
-        except ChatGPTPlanError as error:
-            raise AIProviderError(str(error), error.code) from None
+    def _get_client(self) -> AsyncOpenAI:
+        if self._client is None:
+            self._client = self._new_client()
+        return self._client
 
-        client = self._new_client(access_token)
+    async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderEvent]:
+        client = self._get_client()
         # This plan-sharing route requires tools in the input stream and rejects
         # max_output_tokens. The app's own PostgreSQL history is sent each turn.
         input_items = list(request.input_items)
@@ -199,9 +215,10 @@ class OpenAIResponsesProvider:
 
         create = cast(Any, client.responses).create
         completed = False
+        response_stream: Any | None = None
         try:
-            stream = await create(**create_kwargs)
-            async for raw_event in stream:
+            response_stream = await create(**create_kwargs)
+            async for raw_event in response_stream:
                 event = cast(object, raw_event)
                 event_type = getattr(event, "type", "")
                 if event_type == "response.output_text.delta":
@@ -254,6 +271,8 @@ class OpenAIResponsesProvider:
                 )
         except AIProviderError:
             raise
+        except ChatGPTPlanError as error:
+            raise AIProviderError(str(error), error.code) from None
         except APITimeoutError:
             raise AIProviderError(
                 "A solicitação ao ChatGPT excedeu o tempo limite. Tente novamente.", "timeout"
@@ -275,10 +294,17 @@ class OpenAIResponsesProvider:
                 "O ChatGPT retornou uma resposta inválida. Tente novamente.", "invalid_response"
             ) from None
         finally:
-            await client.close()
+            if response_stream is not None:
+                try:
+                    await response_stream.close()
+                except Exception:
+                    # Preserve the provider error or cancellation that ended the stream.
+                    pass
 
     async def close(self) -> None:
-        return None
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
 
 def _ollama_tool_schemas(tools: list[dict[str, object]]) -> list[dict[str, object]]:

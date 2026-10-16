@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
@@ -5,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.accounts import router as accounts_router
+from app.ai import create_ai_provider
 from app.ai import router as ai_router
 from app.auth import router as auth_router
 from app.cards import router as cards_router
@@ -22,6 +25,18 @@ from app.transactions import router as transactions_router
 from app.transfers import router as transfers_router
 
 is_development = settings.app_env == "development"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    provider = create_ai_provider()
+    app.state.ai_provider = provider
+    try:
+        yield
+    finally:
+        await provider.close()
+
+
 app = FastAPI(
     title="SophIA API",
     description="API privada da SophIA.",
@@ -29,6 +44,7 @@ app = FastAPI(
     docs_url="/api/docs" if is_development else None,
     redoc_url=None,
     openapi_url="/api/openapi.json" if is_development else None,
+    lifespan=lifespan,
 )
 app.add_middleware(RequestBodyLimitMiddleware, max_bytes=16 * 1024 * 1024)
 app.include_router(auth_router)
