@@ -63,6 +63,40 @@ IMAGE_ANALYSIS_TOOL_NAMES = {
     "create_credit_card_with_invoices",
     "set_card_invoice_opening_balances",
 }
+BALANCE_QUERY_TOOLS = {
+    "get_accounts",
+    "get_account_balance",
+    "get_dashboard_summary",
+}
+ACTUALS_QUERY_TOOLS = {
+    "get_month_summary",
+    "get_category_breakdown",
+    "get_transactions",
+    "search_transactions",
+    "get_accounts",
+    "get_dashboard_summary",
+}
+FORECAST_QUERY_TOOLS = {
+    "get_month_forecast",
+    "get_dashboard_summary",
+    "get_accounts",
+    "get_credit_cards",
+    "get_invoice",
+}
+CARD_QUERY_TOOLS = {
+    "get_credit_cards",
+    "get_card_summary",
+    "get_invoice",
+    "get_invoice_purchases",
+    "get_transactions",
+}
+TRANSACTION_QUERY_TOOLS = {
+    "get_transactions",
+    "search_transactions",
+    "get_month_summary",
+    "get_category_breakdown",
+    "get_accounts",
+}
 PROMPT_PATH = Path(__file__).parent / "prompts" / "assistant_v1.md"
 LOCAL_EXPENSE_MODEL = "local-expense-parser-v1"
 LOCAL_RECURRENCE_MODEL = "local-recurrence-parser-v1"
@@ -203,6 +237,104 @@ def choose_model(content: str) -> str:
     )
 
 
+def _first_turn_tool_names(
+    content: str, input_items: list[dict[str, object]]
+) -> set[str] | None:
+    """Trim tool definitions only for explicit, first-turn read requests.
+
+    Ambiguous, multi-step, write, and follow-up requests keep the full tool set so
+    the model retains the same choices whenever intent is not clear.
+    """
+    user_messages = sum(1 for item in input_items if item.get("role") == "user")
+    if user_messages != 1:
+        return None
+
+    normalized = "".join(
+        char
+        for char in unicodedata.normalize("NFD", content.casefold())
+        if unicodedata.category(char) != "Mn"
+    )
+    if any(
+        term in normalized
+        for term in (
+            "compar",
+            "analise",
+            "analisar",
+            "planej",
+            "detalhad",
+            "relatorio",
+            "completo",
+            "todas as",
+            "tudo sobre",
+            "corrig",
+            "na verdade",
+            "e tambem",
+            "alem disso",
+        )
+    ):
+        return None
+    if re.search(
+        r"\b(crie|criar|registre|registrar|lance|lancar|adicione|adicionar|"
+        r"transfira|transferir|programe|programar|agende|agendar|cadastre|"
+        r"cadastrar|altere|alterar|edite|editar|exclua|excluir|apague|apagar)\b",
+        normalized,
+    ):
+        return None
+
+    card_terms = ("cartao", "cartoes", "fatura", "faturas")
+    card_query = any(term in normalized for term in card_terms) and bool(
+        re.search(
+            r"\b(quanto|qual|quais|mostre|mostrar|liste|listar|consulte|consultar|"
+            r"ver|veja|existe|existem|como esta|como estao)\b",
+            normalized,
+        )
+    )
+    balance_query = bool(
+        re.search(r"\b(saldo|disponivel|quanto tenho|dinheiro em conta)\b", normalized)
+    )
+    forecast_query = bool(
+        re.search(
+            r"\b(previsao|previstos?|previstas|programados?|programadas|futuros?|futuras|"
+            r"contas a pagar|vencimentos)\b",
+            normalized,
+        )
+    )
+    actuals_query = bool(
+        re.search(
+            r"\b(quanto gastei|quanto recebi|quanto ganhei|total de gastos|total gasto|"
+            r"total de despesas|total de receitas|minhas despesas|minhas receitas|"
+            r"meus gastos|meus recebimentos|gastos deste mes|gastos desse mes)\b",
+            normalized,
+        )
+    )
+    transaction_query = bool(
+        re.search(
+            r"\b(encontre|encontrar|procure|procurar|localize|localizar|"
+            r"mostre|mostrar|liste|listar|busque|buscar)\b",
+            normalized,
+        )
+        and re.search(
+            r"\b(lancamento|lancamentos|despesa|despesas|receita|receitas|compra|compras)\b",
+            normalized,
+        )
+    )
+    if sum((card_query, balance_query, forecast_query, actuals_query, transaction_query)) > 1:
+        return None
+
+    if forecast_query:
+        return FORECAST_QUERY_TOOLS
+    if card_query:
+        return CARD_QUERY_TOOLS
+    if balance_query:
+        return BALANCE_QUERY_TOOLS
+    if actuals_query:
+        return ACTUALS_QUERY_TOOLS
+    if transaction_query:
+        return TRANSACTION_QUERY_TOOLS
+
+    return None
+
+
 def _safe_text_for_provider(content: str) -> str:
     redacted = re.sub(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b", "[CPF ocultado]", content)
     redacted = re.sub(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", "[e-mail ocultado]", redacted)
@@ -299,6 +431,10 @@ def _assistant_message(
     cached_input_tokens: int | None = None,
     cache_write_tokens: int | None = None,
     duration_ms: int | None = None,
+    preparation_ms: int | None = None,
+    first_output_ms: int | None = None,
+    first_text_ms: int | None = None,
+    available_tool_count: int | None = None,
     diagnostic_status: str = "SUCCEEDED",
     diagnostic_error: str | None = None,
 ) -> AIMessage:
@@ -335,6 +471,10 @@ def _assistant_message(
             )
         ),
         duration_ms=duration_ms,
+        preparation_ms=preparation_ms,
+        first_output_ms=first_output_ms,
+        first_text_ms=first_text_ms,
+        available_tool_count=available_tool_count,
         diagnostic_status=diagnostic_status,
         diagnostic_error=diagnostic_error,
         created_at=created_at,
@@ -1067,6 +1207,14 @@ async def stream_assistant_reply(
                 break
     tool_round = 0
     financial_tool_occurrences: dict[str, int] = {}
+    first_output_ms: int | None = None
+    first_text_ms: int | None = None
+    preparation_ms: int | None = None
+    provider_request_started: float | None = None
+    available_tool_count: int | None = None
+    selected_tool_names = (
+        None if image_data_urls else _first_turn_tool_names(user_message.content, input_items)
+    )
 
     yield sse_event("start", {"message_id": str(user_message.id), "model": model})
 
@@ -1349,15 +1497,38 @@ async def stream_assistant_reply(
                 calls.append(direct_forecast_call)
                 direct_forecast_call = None
             else:
+                request_tools = (
+                    []
+                    if forecast_period is not None
+                    else tool_schemas(
+                        IMAGE_ANALYSIS_TOOL_NAMES if image_data_urls else selected_tool_names
+                    )
+                )
+                if available_tool_count is None:
+                    available_tool_count = len(request_tools)
+                if provider_request_started is None:
+                    provider_request_started = time.monotonic()
+                    preparation_ms = max(
+                        0, int((provider_request_started - turn_started) * 1000)
+                    )
                 request = ProviderRequest(
                     model=model,
                     instructions=instructions,
                     input_items=input_items,
-                    tools=tool_schemas(IMAGE_ANALYSIS_TOOL_NAMES if image_data_urls else None),
+                    tools=request_tools,
                     tool_choice="none" if forecast_period is not None else "auto",
                 )
                 async for event in provider.stream(request):
+                    if event.type in {"text_delta", "function_call"} and first_output_ms is None:
+                        output_started = provider_request_started or turn_started
+                        first_output_ms = max(
+                            0, int((time.monotonic() - output_started) * 1000)
+                        )
                     if event.type == "text_delta" and event.text:
+                        if first_text_ms is None:
+                            first_text_ms = max(
+                                0, int((time.monotonic() - turn_started) * 1000)
+                            )
                         text_parts.append(event.text)
                         yield sse_event("text_delta", {"text": event.text})
                     elif event.type == "function_call" and event.function_call is not None:
@@ -1386,6 +1557,10 @@ async def stream_assistant_reply(
                 cached_input_tokens=cached_input_tokens,
                 cache_write_tokens=cache_write_tokens,
                 duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                preparation_ms=preparation_ms,
+                first_output_ms=first_output_ms,
+                first_text_ms=first_text_ms,
+                available_tool_count=available_tool_count,
                 diagnostic_status="FAILED",
                 diagnostic_error=f"Falha no provider de IA ({error.code}).",
             )
@@ -1414,6 +1589,10 @@ async def stream_assistant_reply(
                 cached_input_tokens=cached_input_tokens,
                 cache_write_tokens=cache_write_tokens,
                 duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                preparation_ms=preparation_ms,
+                first_output_ms=first_output_ms,
+                first_text_ms=first_text_ms,
+                available_tool_count=available_tool_count,
             )
             if cards:
                 yield sse_event("structured", {"items": cards})
@@ -1439,6 +1618,10 @@ async def stream_assistant_reply(
                 input_tokens,
                 output_tokens,
                 duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                preparation_ms=preparation_ms,
+                first_output_ms=first_output_ms,
+                first_text_ms=first_text_ms,
+                available_tool_count=available_tool_count,
                 diagnostic_status="FAILED",
                 diagnostic_error=content,
             )
@@ -1457,7 +1640,26 @@ async def stream_assistant_reply(
             yield sse_event("tool_status", {"name": call.name, "status": "running"})
             try:
                 arguments = _decode_arguments(call.arguments)
-                if image_data_urls and call.name not in IMAGE_ANALYSIS_TOOL_NAMES:
+                if selected_tool_names is not None and call.name not in selected_tool_names:
+                    result = ToolResult(
+                        status="FAILED",
+                        input_data={},
+                        output={"ok": False, "error": "Ferramenta fora do escopo da consulta."},
+                        cards=[
+                            {
+                                "type": "error",
+                                "data": {
+                                    "message": (
+                                        "Não concluí essa ação porque ela não faz parte "
+                                        "da consulta. "
+                                        "Envie o pedido completo em uma nova mensagem."
+                                    )
+                                },
+                            }
+                        ],
+                        error_message="Ferramenta fora do escopo da consulta.",
+                    )
+                elif image_data_urls and call.name not in IMAGE_ANALYSIS_TOOL_NAMES:
                     result = ToolResult(
                         status="FAILED",
                         input_data={},
@@ -1537,6 +1739,10 @@ async def stream_assistant_reply(
                     None,
                     None,
                     duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                    preparation_ms=preparation_ms,
+                    first_output_ms=first_output_ms,
+                    first_text_ms=first_text_ms,
+                    available_tool_count=available_tool_count,
                     diagnostic_status="FAILED",
                     diagnostic_error="Falha na execução da ferramenta.",
                 )
@@ -1577,6 +1783,10 @@ async def stream_assistant_reply(
                     None,
                     None,
                     duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                    preparation_ms=preparation_ms,
+                    first_output_ms=first_output_ms,
+                    first_text_ms=first_text_ms,
+                    available_tool_count=available_tool_count,
                     diagnostic_status="PENDING_CONFIRMATION",
                 )
                 yield sse_event("replace", {"text": content})
@@ -1607,6 +1817,10 @@ async def stream_assistant_reply(
                     input_tokens,
                     output_tokens,
                     duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+                    preparation_ms=preparation_ms,
+                    first_output_ms=first_output_ms,
+                    first_text_ms=first_text_ms,
+                    available_tool_count=available_tool_count,
                 )
                 yield sse_event("text_delta", {"text": content})
                 if safe_cards:
@@ -1638,6 +1852,10 @@ async def stream_assistant_reply(
         None,
         None,
         duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+        preparation_ms=preparation_ms,
+        first_output_ms=first_output_ms,
+        first_text_ms=first_text_ms,
+        available_tool_count=available_tool_count,
         diagnostic_status="FAILED",
         diagnostic_error="O limite seguro de etapas da ferramenta foi atingido.",
     )

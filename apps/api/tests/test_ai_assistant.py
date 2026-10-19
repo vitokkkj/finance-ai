@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app import ai as ai_module
 from app.ai import _conversation_title_from_message, get_ai_provider
-from app.ai_chat import choose_model
+from app.ai_chat import _first_turn_tool_names, choose_model
 from app.ai_pricing import estimated_cost
 from app.ai_provider import (
     AIProviderError,
@@ -97,6 +97,59 @@ def test_long_conversation_title_stays_within_sidebar_limit() -> None:
 
     assert len(title) <= 60
     assert title.endswith("…")
+
+
+def test_common_first_turn_read_requests_use_narrow_tool_sets() -> None:
+    summary_tools = _first_turn_tool_names(
+        "Quanto gastei este mês?", [{"role": "user", "content": "Quanto gastei este mês?"}]
+    )
+    balance_tools = _first_turn_tool_names(
+        "Qual é meu saldo disponível?",
+        [{"role": "user", "content": "Qual é meu saldo disponível?"}],
+    )
+
+    assert summary_tools == {
+        "get_month_summary",
+        "get_category_breakdown",
+        "get_transactions",
+        "search_transactions",
+        "get_accounts",
+        "get_dashboard_summary",
+    }
+    assert balance_tools == {
+        "get_accounts",
+        "get_account_balance",
+        "get_dashboard_summary",
+    }
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Compare meus gastos e receitas dos últimos meses",
+        "Registre um gasto de R$ 40 no mercado",
+        "Como organizo meu orçamento completo?",
+    ],
+)
+def test_complex_or_write_requests_keep_all_tools(content: str) -> None:
+    assert _first_turn_tool_names(content, [{"role": "user", "content": content}]) is None
+
+
+def test_follow_up_requests_keep_all_tools() -> None:
+    assert _first_turn_tool_names(
+        "E no mês passado?",
+        [
+            {"role": "user", "content": "Quanto gastei este mês?"},
+            {"role": "assistant", "content": "R$ 500,00."},
+            {"role": "user", "content": "E no mês passado?"},
+        ],
+    ) is None
+
+
+def test_mixed_intents_keep_all_tools() -> None:
+    content = "Quanto tenho disponível e quanto gastei este mês?"
+
+    assert _first_turn_tool_names(content, [{"role": "user", "content": content}]) is None
 
 
 def _sign_up(client: TestClient) -> None:
@@ -963,6 +1016,63 @@ def test_sse_response_persists_messages_context_and_usage(client: TestClient) ->
     assert usage["calls_today"] == 2
     assert usage["input_tokens_today"] == 34
     assert usage["output_tokens_today"] == 17
+
+
+def test_common_first_turn_query_sends_only_relevant_tool_schemas(client: TestClient) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [[ProviderEvent(type="text_delta", text="Você gastou R$ 500,00."), _completed()]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Quanto gastei este mês?"},
+    )
+
+    assert response.status_code == 200
+    sent_tool_names = {tool["name"] for tool in fake.requests[0].tools}
+    assert sent_tool_names == {
+        "get_month_summary",
+        "get_category_breakdown",
+        "get_transactions",
+        "search_transactions",
+        "get_accounts",
+        "get_dashboard_summary",
+    }
+
+
+def test_scoped_read_request_cannot_execute_an_unavailable_write_tool(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sign_up(client)
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall("hidden-write", "create_transaction", "{}"),
+                ),
+                _completed(),
+            ]
+        ]
+    )
+    _set_fake_provider(client, fake)
+
+    def unexpected_tool_execution(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("Uma ferramenta fora do escopo não pode ser executada.")
+
+    monkeypatch.setattr("app.ai_chat.execute_finance_tool", unexpected_tool_execution)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Quanto gastei este mês?"},
+    )
+
+    assert response.status_code == 200
+    assert "não faz parte da consulta" in response.text
 
 
 def test_conversation_title_refreshes_from_recent_messages(client: TestClient) -> None:
@@ -2362,7 +2472,12 @@ def test_development_diagnostics_show_usage_without_messages_or_secrets(
     monkeypatch.setattr(settings, "ai_model_fast", "gpt-6-luna")
     secret = "sensitive-prompt-marker"
     conversation = client.post("/api/ai/conversations", json={}).json()
-    _set_fake_provider(client, FakeAIProvider([[_completed(30, 6)]]))
+    _set_fake_provider(
+        client,
+        FakeAIProvider(
+            [[ProviderEvent(type="text_delta", text="Resposta de teste."), _completed(30, 6)]]
+        ),
+    )
 
     sent = client.post(
         f"/api/ai/conversations/{conversation['id']}/messages",
@@ -2379,6 +2494,10 @@ def test_development_diagnostics_show_usage_without_messages_or_secrets(
     assert row["model"] == settings.ai_model_fast
     assert row["status"] == "SUCCEEDED"
     assert row["duration_ms"] >= 0
+    assert row["preparation_ms"] >= 0
+    assert row["first_output_ms"] >= 0
+    assert row["first_text_ms"] >= 0
+    assert row["available_tool_count"] > 0
     assert row["input_tokens"] == 30
     assert row["cached_input_tokens"] == 0
     assert row["output_tokens"] == 6

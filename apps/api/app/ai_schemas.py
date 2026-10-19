@@ -111,6 +111,10 @@ class AIInteractionDiagnostic(BaseModel):
     tool_name: str | None
     status: str
     duration_ms: int | None
+    preparation_ms: int | None
+    first_output_ms: int | None
+    first_text_ms: int | None
+    available_tool_count: int | None
     input_tokens: int | None
     cached_input_tokens: int | None
     output_tokens: int | None
