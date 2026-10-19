@@ -158,6 +158,10 @@ type AIDiagnostic = {
   tool_name: string | null;
   status: string;
   duration_ms: number | null;
+  preparation_ms: number | null;
+  first_output_ms: number | null;
+  first_text_ms: number | null;
+  available_tool_count: number | null;
   input_tokens: number | null;
   cached_input_tokens: number | null;
   output_tokens: number | null;
@@ -2532,6 +2536,12 @@ function SettingsView({
                         <span>Em cache: {item.cached_input_tokens ?? "—"}</span>
                         <span>Saída: {item.output_tokens ?? "—"}</span>
                         <span>Custo: {formatUsdCost(item.estimated_cost_usd)}</span>
+                      </div>
+                      <div className="settings-diagnostic-meta">
+                        <span>Preparo: {item.preparation_ms === null ? "—" : `${(item.preparation_ms / 1000).toFixed(1)} s`}</span>
+                        <span>1ª saída do modelo: {item.first_output_ms === null ? "—" : `${(item.first_output_ms / 1000).toFixed(1)} s`}</span>
+                        <span>1º texto: {item.first_text_ms === null ? "—" : `${(item.first_text_ms / 1000).toFixed(1)} s`}</span>
+                        <span>Ferramentas disponíveis: {item.available_tool_count ?? "—"}</span>
                       </div>
                       {item.error_summary && <p className="settings-diagnostic-error">{item.error_summary}</p>}
                     </article>

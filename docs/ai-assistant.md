@@ -73,7 +73,9 @@ O Ollama é opcional. Para usá-lo deliberadamente, inicie com docker compose --
 
 ## Diagnóstico de desenvolvimento
 
-`GET /api/ai/diagnostics` e o painel discreto em Preferências existem somente com `APP_ENV=development`, além de exigirem a sessão autenticada. Exibem até 30 interações recentes: horário local, identificador da conversa, modelo, ferramenta, status, duração, tokens e custo estimado. Erros são resumos seguros. Conteúdo de conversa, prompt interno, usuário, credenciais OAuth e token da sessão não são retornados. Segredos permanecem apenas no backend.
+`GET /api/ai/diagnostics` e o painel discreto em Preferências existem somente com `APP_ENV=development`, além de exigirem a sessão autenticada. Exibem até 30 interações recentes: horário local, identificador da conversa, modelo, ferramenta, status, duração total, tempo de preparação antes do provider, tempo até a primeira saída do provider, tempo até o primeiro texto visível, quantidade de ferramentas oferecidas, tokens e custo estimado. Erros são resumos seguros. Conteúdo de conversa, prompt interno, usuário, credenciais OAuth e token da sessão não são retornados. Segredos permanecem apenas no backend.
+
+Em uma primeira mensagem que corresponda claramente a uma consulta simples de saldo, gastos realizados, cartões/faturas ou lançamentos, a API envia ao modelo somente as ferramentas de leitura pertinentes. Pedidos de alteração, perguntas complexas ou ambíguas e mensagens de continuidade mantêm o catálogo completo. A API também rejeita chamadas que não pertencem ao conjunto oferecido, antes de executar qualquer efeito financeiro. Essa seleção reduz o contexto de ferramentas sem mudar o modelo nem encurtar as instruções financeiras.
 
 ## Erros do provider
 

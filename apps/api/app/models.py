@@ -264,6 +264,22 @@ class AIMessage(Base):
         ),
         CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_ai_messages_duration"),
         CheckConstraint(
+            "preparation_ms IS NULL OR preparation_ms >= 0",
+            name="ck_ai_messages_preparation_duration",
+        ),
+        CheckConstraint(
+            "first_output_ms IS NULL OR first_output_ms >= 0",
+            name="ck_ai_messages_first_output_duration",
+        ),
+        CheckConstraint(
+            "first_text_ms IS NULL OR first_text_ms >= 0",
+            name="ck_ai_messages_first_text_duration",
+        ),
+        CheckConstraint(
+            "available_tool_count IS NULL OR available_tool_count >= 0",
+            name="ck_ai_messages_available_tool_count",
+        ),
+        CheckConstraint(
             "diagnostic_status IS NULL OR diagnostic_status IN "
             "('SUCCEEDED', 'FAILED', 'PENDING_CONFIRMATION')",
             name="ck_ai_messages_diagnostic_status",
@@ -285,6 +301,10 @@ class AIMessage(Base):
     output_tokens: Mapped[int | None] = mapped_column(nullable=True)
     estimated_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 8), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(nullable=True)
+    preparation_ms: Mapped[int | None] = mapped_column(nullable=True)
+    first_output_ms: Mapped[int | None] = mapped_column(nullable=True)
+    first_text_ms: Mapped[int | None] = mapped_column(nullable=True)
+    available_tool_count: Mapped[int | None] = mapped_column(nullable=True)
     diagnostic_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
     diagnostic_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
