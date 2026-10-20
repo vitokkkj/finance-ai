@@ -1559,6 +1559,34 @@ def test_clear_expense_is_registered_from_chat_without_model_or_form(
     assert messages[-1]["structured_content"][0]["type"] == "transaction_card"
 
 
+def test_amount_first_expense_with_explicit_category_is_registered_without_model(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    account_id, _ = _create_assistant_basics(client)
+    lunch = client.post("/api/categories", json={"name": "Lanche", "type": "EXPENSE"})
+    assert lunch.status_code == 201
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider([])
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "15 em Bolo, lançar em Lanche"},
+    )
+
+    transactions = client.get("/api/transactions").json()["items"]
+    assert response.status_code == 200
+    assert fake.requests == []
+    assert '"model": "local-expense-parser-v1"' in response.text
+    assert len(transactions) == 1
+    assert transactions[0]["account_id"] == account_id
+    assert transactions[0]["category_id"] == lunch.json()["id"]
+    assert transactions[0]["type"] == "EXPENSE"
+    assert transactions[0]["amount"] == "15.00"
+    assert transactions[0]["description"] == "Bolo"
+
+
 def test_clear_expense_duplicate_is_not_created_twice_and_missing_category_is_asked(
     client: TestClient,
 ) -> None:
