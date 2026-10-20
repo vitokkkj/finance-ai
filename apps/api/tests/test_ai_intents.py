@@ -8,6 +8,7 @@ import pytest
 
 from app.ai_intents import (
     format_brl,
+    is_manual_expense_candidate,
     parse_manual_expense,
     parse_manual_recurrence,
     parse_month_forecast_period,
@@ -100,6 +101,57 @@ def test_clear_expense_phrases_map_to_existing_account_and_category(
         "amount": amount,
         "occurred_at": "2026-10-09",
     }
+
+
+def test_explicit_amount_first_expense_uses_the_named_category_without_model_lookup() -> None:
+    account = _account()
+    lunch = _category("Lanche")
+    food = _category("Alimentação")
+
+    result = parse_manual_expense(
+        "15 em Bolo, lançar em Lanche",
+        [account],
+        [lunch, food],
+        date(2026, 10, 19),
+    )
+
+    assert result.kind == "READY"
+    assert result.arguments == {
+        "account_id": str(account.id),
+        "category_id": str(lunch.id),
+        "movement_type": "EXPENSE",
+        "description": "Bolo",
+        "amount": "15.00",
+        "occurred_at": "2026-10-19",
+    }
+
+
+def test_amount_first_expense_still_clarifies_ambiguous_account_and_card() -> None:
+    lunch = _category("Lanche")
+    content = "R$ 15,50 em Bolo, lançar na categoria Lanche"
+
+    ambiguous_account = parse_manual_expense(
+        content,
+        [_account(), _account("Inter")],
+        [lunch],
+        date(2026, 10, 19),
+    )
+    card_purchase = parse_manual_expense(
+        "15 no cartão em Bolo, lançar em Lanche",
+        [_account()],
+        [lunch],
+        date(2026, 10, 19),
+    )
+
+    assert ambiguous_account.kind == "CLARIFY"
+    assert ambiguous_account.clarification_field == "account"
+    assert card_purchase.kind == "CLARIFY"
+    assert card_purchase.clarification_field == "payment_method"
+
+
+def test_amount_first_message_requires_an_explicit_category_command() -> None:
+    assert is_manual_expense_candidate("15 em Bolo, lançar em Lanche")
+    assert not is_manual_expense_candidate("15 em Bolo")
 
 
 def test_expense_amount_uses_decimal_and_brazilian_grouping() -> None:

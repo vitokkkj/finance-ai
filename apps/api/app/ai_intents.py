@@ -15,6 +15,14 @@ ExpenseDecisionKind = Literal["NOT_APPLICABLE", "CLARIFY", "READY"]
 ExpenseClarificationField = Literal["payment_method", "amount", "date", "category", "account"]
 
 _ENTRY_START = re.compile(r"^(?:eu\s+)?(?:gastei|botei)\b", re.IGNORECASE)
+_EXPLICIT_AMOUNT_FIRST_EXPENSE = re.compile(
+    r"^(?P<amount>(?:r\$\s*)?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:[,.]\d{1,2})?)"
+    r"\s+(?:em|no|na)\s+(?P<description>.+?)\s*[,;]?\s+"
+    r"(?:lance|lan[cç]ar|registre|registrar|anote|anotar)\s+"
+    r"(?:(?:em|no|na|como)\s+)?(?:a\s+)?(?:categoria\s+)?"
+    r"(?P<category>[\wÀ-ÿ][\wÀ-ÿ '-]{0,99}?)\s*[.!?]?$",
+    re.IGNORECASE,
+)
 _MONEY = re.compile(
     r"(?<![\w])(?:r\$\s*)?(?P<value>"
     r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:[,.]\d{1,2})?"
@@ -245,7 +253,11 @@ class RecurrenceDecision:
 
 
 def is_manual_expense_candidate(content: str) -> bool:
-    return _ENTRY_START.match(content.strip()) is not None
+    normalized = content.strip()
+    return (
+        _ENTRY_START.match(normalized) is not None
+        or _EXPLICIT_AMOUNT_FIRST_EXPENSE.match(normalized) is not None
+    )
 
 
 def parse_manual_expense(
@@ -257,7 +269,18 @@ def parse_manual_expense(
     category_hint: str | None = None,
 ) -> ExpenseDecision:
     original = content.strip()
-    start_match = _ENTRY_START.match(original)
+    parse_content = original
+    explicit_category: str | None = None
+    amount_first_match = _EXPLICIT_AMOUNT_FIRST_EXPENSE.match(original)
+    if amount_first_match is not None:
+        amount_text = amount_first_match.group("amount").strip()
+        description_text = amount_first_match.group("description").strip(" ,;.")
+        explicit_category = amount_first_match.group("category").strip(" .,!?")
+        if not description_text or not explicit_category:
+            return ExpenseDecision("NOT_APPLICABLE")
+        parse_content = f"Gastei {amount_text} em {description_text}"
+
+    start_match = _ENTRY_START.match(parse_content)
     if start_match is None:
         return ExpenseDecision("NOT_APPLICABLE")
 
@@ -272,7 +295,7 @@ def parse_manual_expense(
             clarification_field="payment_method",
         )
 
-    tail = original[start_match.end() :]
+    tail = parse_content[start_match.end() :]
     money_match = _MONEY.search(tail)
     if money_match is None:
         return ExpenseDecision(
@@ -319,7 +342,11 @@ def parse_manual_expense(
             clarification_field="category",
             amount=amount,
         )
-    category = _match_category(normalized_content, active_categories, category_hint)
+    category = _match_category(
+        normalized_content,
+        active_categories,
+        category_hint or explicit_category,
+    )
     if category is None:
         options = _list_names(category.name for category in active_categories)
         message = "Em qual categoria devo classificar esse gasto?"
