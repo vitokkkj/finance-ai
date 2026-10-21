@@ -27,7 +27,7 @@ from app.invoices import (
     invoice_opening_balance_from_total,
     set_invoice_opening_balances,
 )
-from app.models import Account, AIMemory, CardInvoice, CreditCard, Transaction, User
+from app.models import Account, AIMemory, CardInvoice, Category, CreditCard, Transaction, User
 from app.recurrences import create_recurrence_for_user, validate_recurrence
 from app.schemas import (
     CardInvoiceOpeningBalanceSet,
@@ -476,6 +476,23 @@ def _preview_transaction_update(db: Session, user: User, args: BaseModel) -> tup
     }
     if not changes:
         raise HTTPException(status_code=422, detail="Informe ao menos uma alteração.")
+    if payload.category_id is not None:
+        category = db.scalar(
+            select(Category).where(
+                Category.id == payload.category_id,
+                Category.user_id == user.id,
+            )
+        )
+        if category is None:
+            raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+        if category.archived_at is not None:
+            raise HTTPException(status_code=409, detail="A categoria está arquivada.")
+        if category.type != transaction.type:
+            raise HTTPException(
+                status_code=422,
+                detail="O tipo da categoria precisa corresponder ao tipo do lançamento.",
+            )
+        changes["category_id"] = category.name
     return {"transaction_id": str(transaction.id), "changes": changes}, "confirmation"
 
 

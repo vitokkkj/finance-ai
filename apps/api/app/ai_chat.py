@@ -101,6 +101,7 @@ PROMPT_PATH = Path(__file__).parent / "prompts" / "assistant_v1.md"
 LOCAL_EXPENSE_MODEL = "local-expense-parser-v1"
 LOCAL_RECURRENCE_MODEL = "local-recurrence-parser-v1"
 PENDING_EXPENSE_CLARIFICATION_TYPE = "pending_expense_clarification"
+PENDING_TRANSACTION_CATEGORY_CHANGE_TYPE = "pending_transaction_category_change"
 TITLE_TOOL_SCHEMA: dict[str, object] = {
     "type": "function",
     "name": "suggest_conversation_title",
@@ -996,6 +997,104 @@ def _category_clarification_marker(
     ]
 
 
+def _is_transaction_category_change_request(content: str) -> bool:
+    normalized = _normalize_short_reply(content)
+    return normalized in {
+        "lancar em outra categoria",
+        "lancar em outra categoria por favor",
+        "trocar categoria",
+        "trocar de categoria",
+        "mudar categoria",
+        "mudar de categoria",
+        "alterar categoria",
+        "alterar de categoria",
+        "colocar em outra categoria",
+    }
+
+
+def _pending_transaction_category_change(message: AIMessage) -> tuple[UUID, str] | None:
+    content = message.structured_content
+    items = content if isinstance(content, list) else [content]
+    for item in items:
+        if (
+            not isinstance(item, dict)
+            or item.get("type") != PENDING_TRANSACTION_CATEGORY_CHANGE_TYPE
+        ):
+            continue
+        data = item.get("data")
+        if not isinstance(data, dict):
+            continue
+        transaction_id = data.get("transaction_id")
+        movement_type = data.get("movement_type")
+        if movement_type not in {"INCOME", "EXPENSE"} or not isinstance(transaction_id, str):
+            continue
+        try:
+            return UUID(transaction_id), movement_type
+        except ValueError:
+            continue
+    return None
+
+
+def _latest_assistant_single_transaction(
+    db: Session, user: User, conversation: AIConversation
+) -> Transaction | None:
+    latest_assistant = db.scalar(
+        select(AIMessage)
+        .where(
+            AIMessage.user_id == user.id,
+            AIMessage.conversation_id == conversation.id,
+            AIMessage.role == "ASSISTANT",
+        )
+        .order_by(AIMessage.created_at.desc(), AIMessage.id.desc())
+        .limit(1)
+    )
+    if latest_assistant is None:
+        return None
+
+    structured = latest_assistant.structured_content
+    items = structured if isinstance(structured, list) else [structured]
+    entries: list[dict[str, object]] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "transaction_card":
+            continue
+        data = item.get("data")
+        rows = data if isinstance(data, list) else [data]
+        entries.extend(
+            row
+            for row in rows
+            if isinstance(row, dict)
+        )
+    if (
+        len(entries) != 1
+        or entries[0].get("type") not in {"INCOME", "EXPENSE"}
+        or not isinstance(entries[0].get("id"), str)
+    ):
+        return None
+    try:
+        transaction_id = UUID(cast(str, entries[0]["id"]))
+    except ValueError:
+        return None
+    return db.scalar(
+        select(Transaction).where(
+            Transaction.id == transaction_id,
+            Transaction.user_id == user.id,
+            Transaction.type.in_(("INCOME", "EXPENSE")),
+        )
+    )
+
+
+def _transaction_category_change_marker(transaction: Transaction) -> list[dict[str, object]]:
+    return [
+        {
+            "type": PENDING_TRANSACTION_CATEGORY_CHANGE_TYPE,
+            "data": {
+                "transaction_id": str(transaction.id),
+                "movement_type": transaction.type,
+            },
+        }
+    ]
+
+
 def _unresolved_category_decision(
     decision: ExpenseDecision, suggested_category: str | None
 ) -> ExpenseDecision:
@@ -1039,10 +1138,115 @@ async def stream_assistant_reply(
 ) -> AsyncIterator[str]:
     image_data_urls = image_data_urls or []
     turn_started = time.monotonic()
+    category_change_request = (
+        not image_data_urls and _is_transaction_category_change_request(user_message.content)
+    )
+    category_change_prompt: str | None = None
+    category_change_cards: list[dict[str, object]] = []
+    direct_category_update_call: FunctionCall | None = None
+    if category_change_request:
+        target_transaction = _latest_assistant_single_transaction(db, user, conversation)
+        if target_transaction is None:
+            category_change_prompt = (
+                "Qual lançamento você quer alterar? Diga a descrição para eu localizar."
+            )
+        else:
+            category_change_prompt = "Qual categoria você quer usar nesse lançamento?"
+            category_change_cards = _transaction_category_change_marker(target_transaction)
+    elif not image_data_urls and _is_short_category_reply(user_message.content):
+        latest_assistant = db.scalar(
+            select(AIMessage)
+            .where(
+                AIMessage.user_id == user.id,
+                AIMessage.conversation_id == conversation.id,
+                AIMessage.role == "ASSISTANT",
+            )
+            .order_by(AIMessage.created_at.desc(), AIMessage.id.desc())
+            .limit(1)
+        )
+        pending_category_change = (
+            _pending_transaction_category_change(latest_assistant)
+            if latest_assistant is not None
+            else None
+        )
+        if pending_category_change is not None:
+            transaction_id, movement_type = pending_category_change
+            target_transaction = db.scalar(
+                select(Transaction).where(
+                    Transaction.id == transaction_id,
+                    Transaction.user_id == user.id,
+                    Transaction.type == movement_type,
+                )
+            )
+            if target_transaction is None:
+                category_change_prompt = (
+                    "Não encontrei mais esse lançamento. Nada foi alterado; "
+                    "abra o lançamento correto e peça a mudança novamente."
+                )
+            else:
+                categories = db.scalars(
+                    select(Category)
+                    .where(
+                        Category.user_id == user.id,
+                        Category.type == target_transaction.type,
+                        Category.archived_at.is_(None),
+                    )
+                    .order_by(Category.name, Category.id)
+                ).all()
+                normalized_reply = _normalize_short_reply(user_message.content)
+                matching_categories = [
+                    category
+                    for category in categories
+                    if _normalize_short_reply(category.name) == normalized_reply
+                ]
+                if len(matching_categories) == 1:
+                    direct_category_update_call = FunctionCall(
+                        call_id=uuid4().hex,
+                        name="update_transaction",
+                        arguments=json.dumps(
+                            {
+                                "transaction_id": str(target_transaction.id),
+                                "category_id": str(matching_categories[0].id),
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                elif _is_short_category_reply(user_message.content):
+                    category_change_cards = _transaction_category_change_marker(
+                        target_transaction
+                    )
+                    available_categories = ", ".join(
+                        f"“{category.name}”" for category in categories
+                    )
+                    if len(matching_categories) > 1:
+                        category_change_prompt = (
+                            f"Há mais de uma categoria chamada “{user_message.content.strip()}”. "
+                            "Renomeie uma delas em Categorias para eu saber qual usar."
+                        )
+                    elif available_categories:
+                        category_change_prompt = (
+                            "Não encontrei uma categoria ativa chamada "
+                            f"“{user_message.content.strip()}”. "
+                            f"Escolha entre: {available_categories}."
+                        )
+                    else:
+                        category_change_prompt = (
+                            "Não há categorias ativas desse tipo. Cadastre uma em Categorias "
+                            "e depois me diga o nome."
+                        )
+
     category_creation_request = _category_creation_request(user_message.content)
     category_source = (
         _pending_expense_category_source(db, user, conversation, user_message)
-        if _is_short_category_reply(user_message.content) or category_creation_request is not None
+        if (
+            not category_change_request
+            and direct_category_update_call is None
+            and category_change_prompt is None
+            and (
+                _is_short_category_reply(user_message.content)
+                or category_creation_request is not None
+            )
+        )
         else None
     )
     pending_suggestion = (
@@ -1142,7 +1346,9 @@ async def stream_assistant_reply(
     recurrence_category_created = False
     recurrence_category_name: str | None = None
     model = (
-        settings.ai_model_smart
+        settings.ai_model_fast
+        if direct_category_update_call is not None or category_change_prompt is not None
+        else settings.ai_model_smart
         if image_data_urls
         else settings.ai_model_smart
         if direct_forecast_call is not None
@@ -1154,7 +1360,10 @@ async def stream_assistant_reply(
     )
     instructions = (
         _instructions(db, user.id)
-        if expense_decision is None and recurrence_decision is None
+        if expense_decision is None
+        and recurrence_decision is None
+        and direct_category_update_call is None
+        and category_change_prompt is None
         else ""
     )
     if image_data_urls:
@@ -1217,6 +1426,22 @@ async def stream_assistant_reply(
     )
 
     yield sse_event("start", {"message_id": str(user_message.id), "model": model})
+
+    if category_change_prompt is not None:
+        _assistant_message(
+            db,
+            conversation,
+            user,
+            category_change_prompt,
+            category_change_cards,
+            model,
+            None,
+            None,
+            duration_ms=max(0, int((time.monotonic() - turn_started) * 1000)),
+        )
+        yield sse_event("text_delta", {"text": category_change_prompt})
+        yield sse_event("done", {"status": "ok"})
+        return
 
     if category_declined and category_source is not None:
         content = (
@@ -1483,7 +1708,10 @@ async def stream_assistant_reply(
         request_started = time.monotonic()
         response_output_items: list[dict[str, object]] = []
         try:
-            if direct_expense and expense_decision is not None:
+            if direct_category_update_call is not None:
+                calls.append(direct_category_update_call)
+                direct_category_update_call = None
+            elif direct_expense and expense_decision is not None:
                 calls.append(
                     FunctionCall(
                         call_id=uuid4().hex,

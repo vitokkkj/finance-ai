@@ -285,7 +285,7 @@ def test_acceptance_transfer_card_purchase_and_invoice_payment_are_not_double_co
 def test_partial_payment_leaves_invoice_partially_paid_and_limit_used(client: TestClient) -> None:
     setup_user(client)
     account = create_account(client, "Sicredi", "3000.00")
-    card = create_card(client)
+    card = create_card(client, closing_day=5)
     category_id = create_expense_category(client)
     purchase = client.post(
         "/api/card-purchases",
