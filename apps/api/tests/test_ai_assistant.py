@@ -2124,6 +2124,127 @@ def test_correcting_recent_expense_updates_same_transaction_after_confirmation(
     assert final_transactions[0]["amount"] == "120.00"
 
 
+def test_vague_category_change_clarifies_then_confirms_category_by_name(client: TestClient) -> None:
+    _sign_up(client)
+    _account_id, _original_category_id = _create_assistant_basics(client)
+    target_category = client.post("/api/categories", json={"name": "Lazer", "type": "EXPENSE"})
+    assert target_category.status_code == 201
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider([])
+    _set_fake_provider(client, fake)
+
+    created = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Gastei R$ 93 em alimentação no mercado."},
+    )
+    transactions = client.get("/api/transactions").json()["items"]
+    assert created.status_code == 200
+    assert len(transactions) == 1
+
+    clarification = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Lançar em outra categoria"},
+    )
+    assert clarification.status_code == 200
+    assert "qual categoria" in clarification.text.casefold()
+    assert "não consegui concluir" not in clarification.text.casefold()
+    current_category_id = client.get("/api/transactions").json()["items"][0]["category_id"]
+    assert current_category_id == transactions[0]["category_id"]
+
+    unknown_category = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Inexistente"},
+    )
+    assert unknown_category.status_code == 200
+    assert "não encontrei uma categoria ativa" in unknown_category.text.casefold()
+    current_category_id = client.get("/api/transactions").json()["items"][0]["category_id"]
+    assert current_category_id == transactions[0]["category_id"]
+
+    changed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Lazer"},
+    )
+    assert changed.status_code == 200
+    confirmation_events = [
+        json.loads(line.removeprefix("data: "))["items"][0]
+        for line in changed.text.splitlines()
+        if line.startswith("data: ") and '"items"' in line and '"tool_call_id"' in line
+    ]
+    assert confirmation_events, changed.text
+    confirmation = confirmation_events[0]
+    assert confirmation["type"] == "confirmation"
+    assert confirmation["data"]["changes"]["category_id"] == "Lazer"
+    current_category_id = client.get("/api/transactions").json()["items"][0]["category_id"]
+    assert current_category_id == transactions[0]["category_id"]
+
+    confirmed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/tool-calls/"
+        f"{confirmation['tool_call_id']}/confirm"
+    )
+    final_transactions = client.get("/api/transactions").json()["items"]
+    assert confirmed.status_code == 200
+    assert final_transactions[0]["category_id"] == target_category.json()["id"]
+    assert all(
+        {tool.get("name") for tool in request.tools} <= {"suggest_conversation_title"}
+        for request in fake.requests
+    )
+
+
+def test_category_update_preview_uses_category_name_not_identifier(client: TestClient) -> None:
+    _sign_up(client)
+    account_id, original_category_id = _create_assistant_basics(client)
+    target_category = client.post("/api/categories", json={"name": "Lazer", "type": "EXPENSE"})
+    assert target_category.status_code == 201
+    today = _today().isoformat()
+    transaction = client.post(
+        "/api/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": original_category_id,
+            "type": "EXPENSE",
+            "description": "Café",
+            "amount": "93.00",
+            "occurred_at": today,
+        },
+    ).json()
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [[
+            ProviderEvent(
+                type="function_call",
+                function_call=FunctionCall(
+                    "call_change_category",
+                    "update_transaction",
+                    json.dumps(
+                        {
+                            "transaction_id": transaction["id"],
+                            "category_id": target_category.json()["id"],
+                        }
+                    ),
+                ),
+            ),
+            _completed(),
+        ]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Troque a categoria para Lazer."},
+    )
+    confirmation_events = [
+        json.loads(line.removeprefix("data: "))["items"][0]
+        for line in response.text.splitlines()
+        if line.startswith("data: ") and '"items"' in line and '"tool_call_id"' in line
+    ]
+    assert confirmation_events, response.text
+    confirmation = confirmation_events[0]
+
+    assert response.status_code == 200
+    assert confirmation["data"]["changes"]["category_id"] == "Lazer"
+    assert confirmation["data"]["changes"]["category_id"] != target_category.json()["id"]
+
+
 def test_update_tool_waits_for_explicit_confirmation(client: TestClient) -> None:
     _sign_up(client)
     account_id, category_id = _create_assistant_basics(client)
