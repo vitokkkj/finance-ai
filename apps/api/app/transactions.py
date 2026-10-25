@@ -7,9 +7,10 @@ from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import Select
 
 from app.auth import get_current_user
 from app.database import get_db
@@ -18,6 +19,7 @@ from app.finance_engine import (
     FinancialMovement,
     calculate_account_balance,
     calculate_period_summary,
+    calculate_transaction_filter_totals,
     current_financial_date,
     financial_date,
     financial_day_after,
@@ -52,6 +54,7 @@ from app.schemas import (
     DashboardSummary,
     ForecastItem,
     TransactionCreate,
+    TransactionFilterSummary,
     TransactionPageResponse,
     TransactionResponse,
     TransactionUpdate,
@@ -154,6 +157,74 @@ def _decode_transaction_cursor(cursor: str) -> tuple[datetime, datetime, UUID]:
         raise HTTPException(status_code=422, detail="O cursor de lançamentos é inválido.") from None
 
 
+def _filtered_transaction_statement(
+    user_id: UUID,
+    start_date: date | None,
+    end_date: date | None,
+    account_id: UUID | None,
+    category_id: UUID | None,
+    transaction_type: FinancialTransactionType | None,
+    query: str | None,
+) -> Select[Transaction, str, UUID, str]:
+    statement = transaction_rows(user_id)
+    if start_date is not None:
+        statement = statement.where(Transaction.occurred_at >= financial_day_start(start_date))
+    if end_date is not None:
+        statement = statement.where(Transaction.occurred_at < financial_day_after(end_date))
+    if account_id is not None:
+        statement = statement.where(
+            or_(
+                Transaction.account_id == account_id,
+                Transaction.source_account_id == account_id,
+                Transaction.destination_account_id == account_id,
+            )
+        )
+    if category_id is not None:
+        statement = statement.where(Transaction.category_id == category_id)
+    if transaction_type is not None:
+        statement = statement.where(Transaction.type == transaction_type)
+    if query:
+        term = f"%{query.strip()}%"
+        statement = statement.where(
+            or_(
+                Transaction.description.ilike(term),
+                Transaction.notes.ilike(term),
+                Category.name.ilike(term),
+                CreditCard.name.ilike(term),
+            )
+        )
+    return statement
+
+
+def _summarize_transaction_statement(
+    db: Session,
+    statement: Select[Transaction, str, UUID, str],
+) -> TransactionFilterSummary:
+    grouped_rows = db.execute(
+        statement.with_only_columns(
+            Transaction.type,
+            func.count(Transaction.id),
+            func.coalesce(func.sum(Transaction.amount), ZERO),
+            maintain_column_froms=True,
+        )
+        .group_by(Transaction.type)
+        .order_by(None)
+    ).all()
+    totals = calculate_transaction_filter_totals(
+        [(str(row[0]), int(row[1]), Decimal(row[2])) for row in grouped_rows]
+    )
+    return TransactionFilterSummary(
+        transaction_count=totals.transaction_count,
+        income_total=totals.income_total,
+        expense_total=totals.expense_total,
+        card_purchase_total=totals.card_purchase_total,
+        expenses_total=totals.expenses_total,
+        transfer_total=totals.transfer_total,
+        card_payment_total=totals.card_payment_total,
+        result_total=totals.result_total,
+    )
+
+
 @router.get("/api/transactions", response_model=TransactionPageResponse)
 def list_transactions(
     user: Annotated[User, Depends(get_current_user)],
@@ -169,33 +240,10 @@ def list_transactions(
 ) -> TransactionPageResponse:
     if start_date is not None and end_date is not None and end_date < start_date:
         raise HTTPException(status_code=422, detail="O período informado é inválido.")
-    statement = transaction_rows(user.id)
-    if start_date is not None:
-        statement = statement.where(Transaction.occurred_at >= financial_day_start(start_date))
-    if end_date is not None:
-        statement = statement.where(Transaction.occurred_at < financial_day_after(end_date))
-    if account_id is not None:
-        statement = statement.where(
-            or_(
-                Transaction.account_id == account_id,
-                Transaction.source_account_id == account_id,
-                Transaction.destination_account_id == account_id,
-            )
-        )
-    if category_id is not None:
-        statement = statement.where(Transaction.category_id == category_id)
-    if type is not None:
-        statement = statement.where(Transaction.type == type)
-    if q:
-        term = f"%{q.strip()}%"
-        statement = statement.where(
-            or_(
-                Transaction.description.ilike(term),
-                Transaction.notes.ilike(term),
-                Category.name.ilike(term),
-                CreditCard.name.ilike(term),
-            )
-        )
+    statement = _filtered_transaction_statement(
+        user.id, start_date, end_date, account_id, category_id, type, q
+    )
+    summary = _summarize_transaction_statement(db, statement)
     if cursor is not None:
         occurred_at, created_at, transaction_id = _decode_transaction_cursor(cursor)
         statement = statement.where(
@@ -226,6 +274,7 @@ def list_transactions(
         items=[transaction_response(*row) for row in page_rows],
         next_cursor=next_cursor,
         has_more=has_more,
+        summary=summary,
     )
 
 

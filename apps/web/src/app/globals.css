@@ -245,6 +245,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .filter-actions { display: flex; align-items: center; gap: 7px; }
 .filter-actions .compact-button { min-height: 36px; padding: 0 11px; font-size: 10px; }
 .filter-actions .text-button { font-size: 10px; }
+.transaction-filter-summary { margin: -4px 0 17px; padding: 13px 15px; border: 1px solid #dce7dd; border-radius: 10px; background: #f6faf5; }
+.transaction-filter-summary-heading { margin-bottom: 11px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.transaction-filter-summary-heading strong { color: #344e47; font-size: 11px; }
+.transaction-filter-summary-heading span { color: #7b8b81; font-size: 9px; }
+.transaction-filter-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; }
+.transaction-filter-summary-metric { min-width: 0; padding: 10px 11px; display: grid; align-content: start; gap: 5px; border-radius: 8px; background: #fff; }
+.transaction-filter-summary-metric > span { color: #75877b; font-size: 9px; }
+.transaction-filter-summary-metric > strong { color: #304d43; font-size: 15px; font-variant-numeric: tabular-nums; }
+.transaction-filter-summary-metric > small { color: #87958c; font-size: 8px; line-height: 1.4; }
 .empty-state { min-height: 135px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #88958e; text-align: center; }
 .empty-state p { max-width: 300px; margin: 0; font-size: 11px; line-height: 1.6; }
 .empty-mark { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 10px; background: #edf4ed; color: #5a8b6a; font-size: 16px; }
@@ -285,6 +294,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .filter-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .search-field { grid-column: 1 / -1; }
   .filter-actions { grid-column: 1 / -1; }
+  .transaction-filter-summary { padding: 11px; }
+  .transaction-filter-summary-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .transaction-filter-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .finance-user-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .finance-footer { flex-direction: column; gap: 5px; }
 }
@@ -411,6 +423,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .assistant-summary-values > div { min-width: 0; display: grid; gap: 7px; }
 .assistant-summary-values span { color: #89978e; font-size: 8px; }
 .assistant-summary-values strong { color: #304a40; font-size: 11px; font-variant-numeric: tabular-nums; }
+.assistant-transaction-summary { padding: 10px 13px; display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 8px; border-bottom: 1px solid #edf1ed; }
+.assistant-transaction-summary > div { min-width: 0; display: grid; gap: 5px; }
+.assistant-transaction-summary span { color: #89978e; font-size: 8px; line-height: 1.35; }
+.assistant-transaction-summary strong { color: #304a40; font-size: 11px; font-variant-numeric: tabular-nums; }
 .assistant-category-list, .assistant-transaction-list { padding: 4px 13px; }
 .assistant-category-list > div, .assistant-transaction-row { min-height: 39px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #f0f2ef; color: #596b60; font-size: 9px; }
 .assistant-category-list > div:last-child, .assistant-transaction-row:last-child { border-bottom: 0; }

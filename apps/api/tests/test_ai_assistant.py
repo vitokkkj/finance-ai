@@ -1166,6 +1166,77 @@ def test_month_summary_uses_finance_engine_and_returns_structured_card(client: T
     assert fake.requests[1].input_items[-1]["type"] == "function_call_output"
 
 
+def test_custom_date_transaction_query_uses_finance_engine_total_not_model_arithmetic(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    account_id, _ = _create_assistant_basics(client)
+    income_category = client.post(
+        "/api/categories", json={"name": "Salário Entregas", "type": "INCOME"}
+    )
+    assert income_category.status_code == 201
+    for index in range(10):
+        created = client.post(
+            "/api/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": income_category.json()["id"],
+                "type": "INCOME",
+                "description": f"Entrega {index + 1}",
+                "amount": "40.00",
+                "occurred_at": "2026-10-15",
+            },
+        )
+        assert created.status_code == 201
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    arguments = {
+        "start_date": "2026-10-01",
+        "end_date": "2026-10-25",
+        "movement_type": "INCOME",
+        "query": "entregas",
+        "limit": 5,
+    }
+    fake = FakeAIProvider(
+        [
+            [
+                ProviderEvent(
+                    type="function_call",
+                    function_call=FunctionCall(
+                        "call_filtered_income", "get_transactions", json.dumps(arguments)
+                    ),
+                ),
+                _completed(40, 10),
+            ],
+            [
+                ProviderEvent(
+                    type="text_delta",
+                    text="Você ganhou R$ 400,00 em 10 lançamentos de entregas no período.",
+                ),
+                _completed(50, 12),
+            ],
+        ]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Quanto eu ganhei de entregas de 01/10 a 25/10?"},
+    )
+
+    assert response.status_code == 200
+    assert "Você ganhou R$ 400,00" in response.text
+    assert '"income_total": "400.00"' in response.text
+    assert '"transaction_count": 10' in response.text
+    transactions_tool = next(
+        tool for tool in fake.requests[0].tools if tool["name"] == "get_transactions"
+    )
+    assert "totais" in str(transactions_tool["description"])
+    assert "query" in transactions_tool["parameters"]["properties"]
+    tool_output = fake.requests[1].input_items[-1]
+    assert tool_output["type"] == "function_call_output"
+    assert '"income_total": "400.00"' in str(tool_output["output"])
+
+
 def test_month_forecast_tool_returns_future_month_commitments(client: TestClient) -> None:
     _sign_up(client)
     account_id, category_id = _create_assistant_basics(client)
