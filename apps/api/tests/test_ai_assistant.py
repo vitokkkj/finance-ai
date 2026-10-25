@@ -1176,6 +1176,7 @@ def test_custom_date_transaction_query_uses_finance_engine_total_not_model_arith
     )
     assert income_category.status_code == 201
     for index in range(10):
+        occurred_on = "2026-10-05" if index < 4 else "2026-10-15" if index < 7 else "2026-10-25"
         created = client.post(
             "/api/transactions",
             json={
@@ -1184,7 +1185,7 @@ def test_custom_date_transaction_query_uses_finance_engine_total_not_model_arith
                 "type": "INCOME",
                 "description": f"Entrega {index + 1}",
                 "amount": "40.00",
-                "occurred_at": "2026-10-15",
+                "occurred_at": occurred_on,
             },
         )
         assert created.status_code == 201
@@ -1195,6 +1196,7 @@ def test_custom_date_transaction_query_uses_finance_engine_total_not_model_arith
         "movement_type": "INCOME",
         "query": "entregas",
         "limit": 5,
+        "include_daily_breakdown": True,
     }
     fake = FakeAIProvider(
         [
@@ -1227,6 +1229,18 @@ def test_custom_date_transaction_query_uses_finance_engine_total_not_model_arith
     assert "Você ganhou R$ 400,00" in response.text
     assert '"income_total": "400.00"' in response.text
     assert '"transaction_count": 10' in response.text
+    assert '"occurred_on": "2026-10-05"' in response.text
+    assert '"income_total": "160.00"' in response.text
+    assert '"occurred_on": "2026-10-15"' in response.text
+    assert '"income_total": "120.00"' in response.text
+    assert '"occurred_on": "2026-10-25"' in response.text
+    assistant_message = client.get(
+        f"/api/ai/conversations/{conversation['id']}"
+    ).json()["messages"][-1]
+    transaction_card = assistant_message["structured_content"][0]["data"]
+    assert len(transaction_card["items"]) == 5
+    assert any(item["description"] == "Entrega 10" for item in transaction_card["items"])
+    assert transaction_card["summary"]["daily_totals"][0]["income_total"] == "160.00"
     transactions_tool = next(
         tool for tool in fake.requests[0].tools if tool["name"] == "get_transactions"
     )

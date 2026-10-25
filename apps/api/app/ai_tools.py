@@ -71,6 +71,7 @@ class GetTransactionsInput(ToolInput):
         Literal["INCOME", "EXPENSE", "TRANSFER", "CARD_PURCHASE", "CARD_PAYMENT"] | None
     ) = None
     limit: int = Field(default=30, ge=1, le=100)
+    include_daily_breakdown: bool = False
 
     @model_validator(mode="after")
     def validate_period(self) -> GetTransactionsInput:
@@ -85,6 +86,7 @@ class SearchTransactionsInput(ToolInput):
     start_date: date | None = None
     end_date: date | None = None
     limit: int = Field(default=30, ge=1, le=100)
+    include_daily_breakdown: bool = False
 
 
 class CreateTransactionInput(ToolInput):
@@ -416,6 +418,12 @@ def _account_balance(db: Session, user: User, args: BaseModel) -> tuple[object, 
 
 def _transactions(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
     payload = cast(GetTransactionsInput, args)
+    bounded_income_query = (
+        payload.movement_type == "INCOME"
+        and payload.start_date is not None
+        and payload.end_date is not None
+        and (payload.end_date - payload.start_date).days <= 62
+    )
     rows = list_transactions(
         user,
         db,
@@ -426,6 +434,7 @@ def _transactions(db: Session, user: User, args: BaseModel) -> tuple[object, str
         type=payload.movement_type,
         q=payload.query,
         limit=payload.limit,
+        include_daily_totals=payload.include_daily_breakdown or bounded_income_query,
     )
     return {"items": rows.items, "summary": rows.summary}, "transaction_card"
 
@@ -439,6 +448,7 @@ def _search_transactions(db: Session, user: User, args: BaseModel) -> tuple[obje
         end_date=payload.end_date,
         q=payload.query,
         limit=payload.limit,
+        include_daily_totals=payload.include_daily_breakdown,
     )
     return {"items": rows.items, "summary": rows.summary}, "transaction_card"
 
@@ -1014,7 +1024,9 @@ TOOL_DEFINITIONS = (
             "calculados pelo Finance Engine para todos os resultados, mesmo quando a lista "
             "é paginada. Use esses totais para responder perguntas sobre quanto ganhou, gastou "
             "ou sobre somas; nunca some os valores dos itens manualmente. A consulta pode filtrar "
-            "por texto em descrição, observação, categoria ou cartão."
+            "por texto em descrição, observação, categoria ou cartão. Defina "
+            "include_daily_breakdown quando a pessoa pedir ganhos por dia ou perguntar quanto "
+            "ganhou em um período delimitado e precisar do valor de cada data."
         ),
         GetTransactionsInput,
         _transactions,
@@ -1024,7 +1036,9 @@ TOOL_DEFINITIONS = (
         (
             "Busca lançamentos por descrição, categoria ou cartão e inclui totais calculados "
             "pelo Finance Engine para todos os resultados. Use os totais para perguntas de soma; "
-            "nunca some os itens manualmente."
+            "nunca some os itens manualmente. Defina include_daily_breakdown quando a pessoa "
+            "pedir ganhos por dia ou perguntar quanto ganhou em um período delimitado e precisar "
+            "do valor de cada data."
         ),
         SearchTransactionsInput,
         _search_transactions,
