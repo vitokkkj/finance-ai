@@ -1,4 +1,8 @@
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
+
+from app.finance_engine import calculate_transaction_filter_totals
 
 
 def setup_finances(client: TestClient) -> tuple[str, str, str]:
@@ -175,3 +179,89 @@ def test_transaction_filters_and_month_boundary_use_local_calendar_dates(
     )
     assert october_expenses.status_code == 200
     assert [row["id"] for row in october_expenses.json()["items"]] == [created_ids["Outubro"]]
+
+
+def test_transaction_filter_summary_covers_all_pages_and_respects_every_filter(
+    client: TestClient,
+) -> None:
+    account_id, expense_category_id, income_category_id = setup_finances(client)
+    for index in range(18):
+        response = client.post(
+            "/api/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": expense_category_id,
+                "type": "EXPENSE",
+                "description": f"Corrida {index + 1}",
+                "amount": "7.10",
+                "occurred_at": "2026-10-04",
+            },
+        )
+        assert response.status_code == 201
+    income = client.post(
+        "/api/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": income_category_id,
+            "type": "INCOME",
+            "description": "Salário",
+            "amount": "450.00",
+            "occurred_at": "2026-10-05",
+        },
+    )
+    assert income.status_code == 201
+
+    filtered = client.get(
+        "/api/transactions",
+        params={
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-31",
+            "account_id": account_id,
+            "category_id": expense_category_id,
+            "type": "EXPENSE",
+            "q": "Corrida",
+            "limit": 5,
+        },
+    )
+
+    assert filtered.status_code == 200
+    assert len(filtered.json()["items"]) == 5
+    assert filtered.json()["has_more"] is True
+    assert filtered.json()["summary"] == {
+        "transaction_count": 18,
+        "income_total": "0.00",
+        "expense_total": "127.80",
+        "card_purchase_total": "0.00",
+        "expenses_total": "127.80",
+        "transfer_total": "0.00",
+        "card_payment_total": "0.00",
+        "result_total": "-127.80",
+    }
+
+    all_october = client.get(
+        "/api/transactions",
+        params={"start_date": "2026-10-01", "end_date": "2026-10-31", "limit": 3},
+    )
+    assert all_october.status_code == 200
+    assert all_october.json()["summary"]["transaction_count"] == 19
+    assert all_october.json()["summary"]["income_total"] == "450.00"
+    assert all_october.json()["summary"]["expenses_total"] == "127.80"
+    assert all_october.json()["summary"]["result_total"] == "322.20"
+
+
+def test_transaction_filter_totals_keep_transfers_and_card_payments_out_of_expenses() -> None:
+    summary = calculate_transaction_filter_totals(
+        [
+            ("INCOME", 2, Decimal("300.00")),
+            ("EXPENSE", 3, Decimal("50.00")),
+            ("CARD_PURCHASE", 1, Decimal("25.00")),
+            ("TRANSFER", 2, Decimal("400.00")),
+            ("CARD_PAYMENT", 1, Decimal("100.00")),
+        ]
+    )
+
+    assert summary.transaction_count == 9
+    assert summary.expenses_total == Decimal("75.00")
+    assert summary.transfer_total == Decimal("400.00")
+    assert summary.card_payment_total == Decimal("100.00")
+    assert summary.result_total == Decimal("225.00")

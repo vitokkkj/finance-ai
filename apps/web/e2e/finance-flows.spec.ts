@@ -42,6 +42,21 @@ test("uma seção financeira pode ser aberta por URL direta", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Receitas, despesas e movimentos", exact: true })).toBeVisible();
 });
 
+test("os filtros de lançamentos mostram os totais de todos os resultados", async ({ page }) => {
+  const state = await mockFinanceApi(page, { largeLists: true });
+  await page.goto("/?view=finance&section=transactions");
+
+  const filters = page.locator(".filter-form");
+  await filters.getByLabel("Tipo").selectOption("EXPENSE");
+  await filters.getByRole("button", { name: "Filtrar" }).click();
+
+  const summary = page.getByRole("region", { name: "Resumo dos lançamentos filtrados" });
+  await expect(summary).toContainText("24 lançamentos correspondentes, em todas as páginas");
+  await expect(summary).toContainText("Despesas");
+  await expect(summary).toContainText("R$ 288,00");
+  expect(state.transactionQueries.some((query) => query.includes("type=EXPENSE"))).toBe(true);
+});
+
 test("o indicador de pensamento continua animado com movimento reduzido no sistema", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mockFinanceApi(page);

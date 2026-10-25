@@ -5,6 +5,7 @@
 - PostgreSQL guarda os dados financeiros e o Finance Engine é a fonte dos saldos e resumos calculados.
 - A IA explica resultados estruturados do Finance Engine; não soma transações nem calcula valores que o sistema pode calcular.
 - Dinheiro usa `NUMERIC`/`DECIMAL` no banco e `Decimal` no backend. Valores são serializados como texto decimal. Não usar `float` para dinheiro.
+- Resumos aplicados aos filtros de lançamentos cobrem todos os resultados, não somente a página exibida. `INCOME` compõe receitas; `EXPENSE` e `CARD_PURCHASE` compõem despesas; `TRANSFER` e `CARD_PAYMENT` são totalizados à parte. O resultado é receitas menos despesas.
 - Datas financeiras seguem `America/Sao_Paulo`; valores e textos da aplicação usam BRL e `pt-BR`.
 - Registros financeiros pertencem explicitamente ao `users.id` da sessão. Não existem IDs de usuário fixos no código.
 - Integrações bancárias futuras serão somente leitura. Senhas bancárias nunca são armazenadas.

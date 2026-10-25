@@ -66,6 +66,7 @@ class GetTransactionsInput(ToolInput):
     end_date: date | None = None
     account_id: UUID | None = None
     category_id: UUID | None = None
+    query: str | None = Field(default=None, min_length=2, max_length=100)
     movement_type: (
         Literal["INCOME", "EXPENSE", "TRANSFER", "CARD_PURCHASE", "CARD_PAYMENT"] | None
     ) = None
@@ -423,9 +424,10 @@ def _transactions(db: Session, user: User, args: BaseModel) -> tuple[object, str
         account_id=payload.account_id,
         category_id=payload.category_id,
         type=payload.movement_type,
+        q=payload.query,
         limit=payload.limit,
     )
-    return rows.items, "transaction_card"
+    return {"items": rows.items, "summary": rows.summary}, "transaction_card"
 
 
 def _search_transactions(db: Session, user: User, args: BaseModel) -> tuple[object, str]:
@@ -438,7 +440,7 @@ def _search_transactions(db: Session, user: User, args: BaseModel) -> tuple[obje
         q=payload.query,
         limit=payload.limit,
     )
-    return rows.items, "transaction_card"
+    return {"items": rows.items, "summary": rows.summary}, "transaction_card"
 
 
 def _create_transaction(
@@ -1007,13 +1009,23 @@ TOOL_DEFINITIONS = (
     ),
     ToolDefinition(
         "get_transactions",
-        "Lista movimentos no período e filtros informados.",
+        (
+            "Lista movimentos que correspondem ao período e aos filtros, e inclui totais "
+            "calculados pelo Finance Engine para todos os resultados, mesmo quando a lista "
+            "é paginada. Use esses totais para responder perguntas sobre quanto ganhou, gastou "
+            "ou sobre somas; nunca some os valores dos itens manualmente. A consulta pode filtrar "
+            "por texto em descrição, observação, categoria ou cartão."
+        ),
         GetTransactionsInput,
         _transactions,
     ),
     ToolDefinition(
         "search_transactions",
-        "Busca lançamentos por descrição, categoria ou cartão.",
+        (
+            "Busca lançamentos por descrição, categoria ou cartão e inclui totais calculados "
+            "pelo Finance Engine para todos os resultados. Use os totais para perguntas de soma; "
+            "nunca some os itens manualmente."
+        ),
         SearchTransactionsInput,
         _search_transactions,
     ),
@@ -1367,8 +1379,13 @@ def audit_summary(result: ToolResult) -> dict[str, object]:
             count = len(data)
             kind = "lista"
         elif isinstance(data, dict):
-            count = 1
-            kind = "registro"
+            records = data.get("items")
+            if isinstance(records, list):
+                count = len(records)
+                kind = "lista"
+            else:
+                count = 1
+                kind = "registro"
         else:
             count = 0
             kind = "resultado"

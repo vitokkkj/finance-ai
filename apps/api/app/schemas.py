@@ -472,10 +472,34 @@ class TransactionResponse(BaseModel):
         return format(value, ".2f")
 
 
+class TransactionFilterSummary(BaseModel):
+    transaction_count: int
+    income_total: Decimal
+    expense_total: Decimal
+    card_purchase_total: Decimal
+    expenses_total: Decimal
+    transfer_total: Decimal
+    card_payment_total: Decimal
+    result_total: Decimal
+
+    @field_serializer(
+        "income_total",
+        "expense_total",
+        "card_purchase_total",
+        "expenses_total",
+        "transfer_total",
+        "card_payment_total",
+        "result_total",
+    )
+    def serialize_money(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
 class TransactionPageResponse(BaseModel):
     items: list[TransactionResponse]
     next_cursor: str | None
     has_more: bool
+    summary: TransactionFilterSummary
 
 
 class CategoryExpenseSummary(BaseModel):

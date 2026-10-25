@@ -38,6 +38,50 @@ class PeriodSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class TransactionFilterTotals:
+    transaction_count: int = 0
+    income_total: Decimal = ZERO
+    expense_total: Decimal = ZERO
+    card_purchase_total: Decimal = ZERO
+    transfer_total: Decimal = ZERO
+    card_payment_total: Decimal = ZERO
+
+    @property
+    def expenses_total(self) -> Decimal:
+        return self.expense_total + self.card_purchase_total
+
+    @property
+    def result_total(self) -> Decimal:
+        return self.income_total - self.expenses_total
+
+
+def calculate_transaction_filter_totals(
+    grouped_totals: Iterable[tuple[str, int, Decimal]],
+) -> TransactionFilterTotals:
+    """Classify exact database sums without counting transfers or invoice payments as expenses."""
+    totals = {
+        "INCOME": ZERO,
+        "EXPENSE": ZERO,
+        "CARD_PURCHASE": ZERO,
+        "TRANSFER": ZERO,
+        "CARD_PAYMENT": ZERO,
+    }
+    transaction_count = 0
+    for movement_type, count, amount in grouped_totals:
+        transaction_count += count
+        if movement_type in totals:
+            totals[movement_type] = amount
+    return TransactionFilterTotals(
+        transaction_count=transaction_count,
+        income_total=totals["INCOME"],
+        expense_total=totals["EXPENSE"],
+        card_purchase_total=totals["CARD_PURCHASE"],
+        transfer_total=totals["TRANSFER"],
+        card_payment_total=totals["CARD_PAYMENT"],
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class InvoiceAmounts:
     total: Decimal
     paid_amount: Decimal

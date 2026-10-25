@@ -71,10 +71,22 @@ type Transaction = {
   notes: string | null;
 };
 
+type TransactionFilterSummary = {
+  transaction_count: number;
+  income_total: string;
+  expense_total: string;
+  card_purchase_total: string;
+  expenses_total: string;
+  transfer_total: string;
+  card_payment_total: string;
+  result_total: string;
+};
+
 type TransactionPage = {
   items: Transaction[];
   next_cursor: string | null;
   has_more: boolean;
+  summary: TransactionFilterSummary;
 };
 
 type Dashboard = {
@@ -215,6 +227,62 @@ function financialAmountSign(value: FinancialTransactionType): string {
   return "";
 }
 
+function hasMoneyValue(value: string): boolean {
+  return !/^[+-]?0+(?:\.0+)?$/.test(value);
+}
+
+function transactionSummaryMetrics(
+  summary: TransactionFilterSummary,
+  typeFilter: string | null,
+): { label: string; value: string; detail?: string }[] {
+  if (typeFilter === "INCOME") return [{ label: "Receitas", value: summary.income_total }];
+  if (typeFilter === "EXPENSE") return [{ label: "Despesas", value: summary.expense_total }];
+  if (typeFilter === "CARD_PURCHASE") {
+    return [{ label: "Compras no cartão", value: summary.card_purchase_total }];
+  }
+  if (typeFilter === "TRANSFER") {
+    return [{ label: "Transferências próprias", value: summary.transfer_total }];
+  }
+  if (typeFilter === "CARD_PAYMENT") {
+    return [{ label: "Pagamentos de fatura", value: summary.card_payment_total }];
+  }
+
+  const metrics: { label: string; value: string; detail?: string }[] = [];
+  if (hasMoneyValue(summary.income_total)) {
+    metrics.push({ label: "Receitas", value: summary.income_total });
+  }
+  if (hasMoneyValue(summary.expenses_total)) {
+    metrics.push({
+      label: "Despesas",
+      value: summary.expenses_total,
+      detail: hasMoneyValue(summary.card_purchase_total)
+        ? `Inclui ${formatCurrency(summary.card_purchase_total)} em compras no cartão`
+        : undefined,
+    });
+  }
+  if (hasMoneyValue(summary.transfer_total)) {
+    metrics.push({
+      label: "Transferências próprias",
+      value: summary.transfer_total,
+      detail: "Não entram no resultado financeiro",
+    });
+  }
+  if (hasMoneyValue(summary.card_payment_total)) {
+    metrics.push({
+      label: "Pagamentos de fatura",
+      value: summary.card_payment_total,
+      detail: "Não contam como nova despesa",
+    });
+  }
+  if (hasMoneyValue(summary.income_total) && hasMoneyValue(summary.expenses_total)) {
+    metrics.push({ label: "Resultado", value: summary.result_total });
+  }
+  if (metrics.length === 0 && summary.transaction_count > 0) {
+    metrics.push({ label: "Total filtrado", value: "0.00" });
+  }
+  return metrics;
+}
+
 function isEditableTransaction(
   transaction: Transaction,
 ): transaction is Transaction & { type: MovementType } {
@@ -294,6 +362,7 @@ export function FinanceWorkspace({
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionSummary, setTransactionSummary] = useState<TransactionFilterSummary | null>(null);
   const [transactionCursor, setTransactionCursor] = useState<string | null>(null);
   const [transactionCursorHistory, setTransactionCursorHistory] = useState<(string | null)[]>([]);
   const [transactionNextCursor, setTransactionNextCursor] = useState<string | null>(null);
@@ -336,6 +405,7 @@ export function FinanceWorkspace({
     const version = loadVersion.current + 1;
     loadVersion.current = version;
     setLoading(true);
+    setTransactionSummary(null);
     const [year, selectedMonth] = month.split("-").map(Number);
     const transactionQuery = new URLSearchParams(appliedFilters);
     transactionQuery.set("limit", "15");
@@ -353,6 +423,7 @@ export function FinanceWorkspace({
       setAccounts(accountRows);
       setCategories(categoryRows);
       setTransactions(transactionRows.items);
+      setTransactionSummary(transactionRows.summary);
       setTransactionNextCursor(transactionRows.next_cursor);
       setDashboard(summary);
     } catch (error) {
@@ -737,6 +808,10 @@ export function FinanceWorkspace({
   const transactionCategories = activeCategories.filter(
     (category) => category.type === transactionForm.type,
   );
+  const appliedTransactionType = new URLSearchParams(appliedFilters).get("type");
+  const transactionSummaryRows = transactionSummary
+    ? transactionSummaryMetrics(transactionSummary, appliedTransactionType)
+    : [];
   const titleBySection: Record<Section, string> = {
     overview: "Visão geral",
     transactions: "Lançamentos",
@@ -1059,6 +1134,10 @@ export function FinanceWorkspace({
                     <label className="field-label search-field">Buscar<input onChange={(event) => setFilters({ ...filters, q: event.target.value })} placeholder="Descrição, categoria…" value={filters.q} /></label>
                     <div className="filter-actions"><button className="primary-button compact-button" type="submit">Filtrar</button><button className="text-button" onClick={clearTransactionFilters} type="button">Limpar</button></div>
                   </form>
+                  {transactionSummary && transactionSummary.transaction_count > 0 && <section aria-label="Resumo dos lançamentos filtrados" className="transaction-filter-summary">
+                    <div className="transaction-filter-summary-heading"><strong>Resumo dos filtros</strong><span>{transactionSummary.transaction_count} {transactionSummary.transaction_count === 1 ? "lançamento correspondente" : "lançamentos correspondentes"}, em todas as páginas</span></div>
+                    <div className="transaction-filter-summary-grid">{transactionSummaryRows.map((metric) => <div className="transaction-filter-summary-metric" key={metric.label}><span>{metric.label}</span><strong>{formatCurrency(metric.value)}</strong>{metric.detail && <small>{metric.detail}</small>}</div>)}</div>
+                  </section>}
                   {transactions.length === 0 ? <><EmptyState actionLabel={appliedFilters ? "Limpar filtros" : onOpenAssistant ? "Conversar com o assistente" : undefined} message={appliedFilters ? "Nenhum lançamento corresponde aos filtros." : "Ainda não há lançamentos neste período."} onAction={appliedFilters ? clearTransactionFilters : onOpenAssistant ? () => onOpenAssistant("Quero registrar um lançamento financeiro.") : undefined} /><TransactionCursorControls hasPrevious={transactionCursorHistory.length > 0} hasNext={transactionNextCursor !== null} onPrevious={previousTransactionPage} onNext={nextTransactionPage} page={transactionCursorHistory.length + 1} itemCount={transactions.length} /></> : (
                     <><div className="table-wrap"><table className="data-table transaction-table"><thead><tr><th>Lançamento</th><th>Categoria / origem / destino</th><th>Data</th><th>Tipo</th><th>Valor</th><th aria-label="Ações" /></tr></thead><tbody>
                       {transactions.map((transaction) => {

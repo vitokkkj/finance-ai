@@ -29,6 +29,8 @@ O modelo não acessa SQL e não recebe `user_id`. A API injeta o usuário autent
 - resumo financeiro do dashboard.
 - compromissos recorrentes e ocorrências futuras.
 
+`get_transactions` e `search_transactions` retornam o resumo dos valores para todos os registros correspondentes, independentemente do limite da lista. `get_transactions` aceita período, conta, categoria, tipo e busca textual; `search_transactions` procura texto em descrição, observação, categoria ou cartão e aceita período. O assistente usa esses totais quando perguntam quanto foi recebido, gasto ou quando pedem uma soma; não soma itens manualmente. O resumo separa receitas, despesas comuns, compras no cartão, transferências e pagamentos de fatura. Despesas incluem compras no cartão; transferências e pagamentos de fatura não são novas despesas. A tela **Lançamentos** apresenta os mesmos totais para todos os resultados dos filtros, junto à quantidade total encontrada.
+
 Uma conta sem saldo inicial ou data-base conhecidos retorna `balance: null`. A SophIA deve informar que o saldo daquela conta ainda é desconhecido, sem tratá-lo como zero. O resumo principal inclui somente contas correntes; saldos de poupança, dinheiro e outros tipos ficam separados. A incompletude de uma conta afeta apenas o total daquele tipo.
 
 `get_dashboard_summary` também consulta “A pagar” no mês financeiro atual: compromissos recorrentes, itens avulsos e faturas abertas, com totais vencidos, dos próximos sete dias e do restante do mês. Receitas previstas e saldos projetados são apresentados à parte dos valores realizados. Faturas sem conta pagadora associada não são atribuídas a uma conta projetada.

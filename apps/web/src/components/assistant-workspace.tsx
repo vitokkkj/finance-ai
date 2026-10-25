@@ -284,6 +284,10 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function hasMoneyValue(value: string | null): value is string {
+  return value !== null && !/^[+-]?0+(?:\.0+)?$/.test(value);
+}
+
 function renderAssistantText(value: string) {
   const parts: ReactNode[] = [];
   const emphasis = /\*\*([^*\n]+)\*\*/g;
@@ -1831,11 +1835,42 @@ function StructuredCard({
     );
   }
   if (item.type === "transaction_card" || item.type === "transfer_card") {
-    const transactions = Array.isArray(item.data) ? item.data : data ? [data] : [];
-    const isSingleTransfer = item.type === "transfer_card" || (transactions.length === 1 && stringValue(record(transactions[0])?.type) === "TRANSFER");
+    const transactions = Array.isArray(item.data)
+      ? item.data
+      : Array.isArray(data?.items)
+        ? data.items
+        : data
+          ? [data]
+          : [];
+    const summary = record(data?.summary);
+    const income = stringValue(summary?.income_total);
+    const expenses = stringValue(summary?.expenses_total);
+    const transfers = stringValue(summary?.transfer_total);
+    const cardPayments = stringValue(summary?.card_payment_total);
+    const summaryCount = typeof summary?.transaction_count === "number"
+      ? summary.transaction_count
+      : null;
+    const summaryMetrics = [
+      ...(hasMoneyValue(income) ? [{ label: "Receitas", value: income }] : []),
+      ...(hasMoneyValue(expenses)
+        ? [{ label: "Despesas · inclui compras no cartão", value: expenses }]
+        : []),
+      ...(hasMoneyValue(transfers)
+        ? [{ label: "Transferências · fora do resultado", value: transfers }]
+        : []),
+      ...(hasMoneyValue(cardPayments)
+        ? [{ label: "Pagamentos de fatura · sem nova despesa", value: cardPayments }]
+        : []),
+      ...(hasMoneyValue(income) && hasMoneyValue(expenses) && stringValue(summary?.result_total)
+        ? [{ label: "Resultado", value: stringValue(summary?.result_total) ?? "0.00" }]
+        : []),
+    ];
+    const resultCount = summaryCount ?? transactions.length;
+    const isSingleTransfer = item.type === "transfer_card" || (resultCount === 1 && stringValue(record(transactions[0])?.type) === "TRANSFER");
     return (
       <section className="assistant-data-card">
-        <div className="assistant-data-card-heading"><span>{isSingleTransfer ? "Transferência" : transactions.length === 1 ? "Lançamento" : "Lançamentos"}</span></div>
+        <div className="assistant-data-card-heading"><span>{isSingleTransfer ? "Transferência" : resultCount === 1 ? "Lançamento" : "Lançamentos"}</span>{summaryCount !== null && <small>{summaryCount} {summaryCount === 1 ? "resultado" : "resultados"} no filtro</small>}</div>
+        {summaryMetrics.length > 0 && <div className="assistant-transaction-summary">{summaryMetrics.map((metric) => <div key={metric.label}><span>{metric.label}</span><strong>{formatCurrency(metric.value)}</strong></div>)}</div>}
         <div className="assistant-transaction-list">
           {transactions.slice(0, 8).map((entry, index) => {
             const transaction = record(entry);

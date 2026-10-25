@@ -21,6 +21,26 @@ export type E2EApiState = {
   }[];
 };
 
+function mockMoneyFromCents(cents: bigint): string {
+  const sign = cents < 0n ? "-" : "";
+  const absolute = cents < 0n ? -cents : cents;
+  return `${sign}${absolute / 100n}.${String(absolute % 100n).padStart(2, "0")}`;
+}
+
+function mockSumCents(
+  transactions: { amount: string; type: string }[],
+  matches: (type: string) => boolean,
+): bigint {
+  return transactions.reduce((total, transaction) => {
+    if (!matches(transaction.type)) return total;
+    const isNegative = transaction.amount.startsWith("-");
+    const unsigned = isNegative ? transaction.amount.slice(1) : transaction.amount;
+    const [units, fraction = "00"] = unsigned.split(".");
+    const absolute = BigInt(units) * 100n + BigInt(fraction.padEnd(2, "0").slice(0, 2));
+    return total + (isNegative ? -absolute : absolute);
+  }, 0n);
+}
+
 const cards = [
   {
     id: CARD_IDS.inter,
@@ -597,15 +617,43 @@ export async function mockFinanceApi(
         return;
       }
       const categoryId = url.searchParams.get("category_id");
-      const filtered = categoryId
-        ? mockTransactions.filter((transaction) => transaction.category_id === categoryId)
-        : mockTransactions;
+      const accountId = url.searchParams.get("account_id");
+      const type = url.searchParams.get("type");
+      const query = url.searchParams.get("q")?.trim().toLocaleLowerCase("pt-BR");
+      const startDate = url.searchParams.get("start_date");
+      const endDate = url.searchParams.get("end_date");
+      const filtered = mockTransactions.filter((transaction) => {
+        if (categoryId && transaction.category_id !== categoryId) return false;
+        if (accountId && transaction.account_id !== accountId && transaction.source_account_id !== accountId && transaction.destination_account_id !== accountId) return false;
+        if (type && transaction.type !== type) return false;
+        if (startDate && transaction.occurred_at < startDate) return false;
+        if (endDate && transaction.occurred_at > endDate) return false;
+        if (query) {
+          const searchable = `${transaction.description} ${transaction.notes ?? ""} ${transaction.category_name ?? ""} ${transaction.credit_card_name ?? ""}`.toLocaleLowerCase("pt-BR");
+          if (!searchable.includes(query)) return false;
+        }
+        return true;
+      });
+      const incomeCents = mockSumCents(filtered, (movementType) => movementType === "INCOME");
+      const expenseCents = mockSumCents(filtered, (movementType) => movementType === "EXPENSE");
+      const cardPurchaseCents = mockSumCents(filtered, (movementType) => movementType === "CARD_PURCHASE");
+      const expensesCents = expenseCents + cardPurchaseCents;
+      const summary = {
+        transaction_count: filtered.length,
+        income_total: mockMoneyFromCents(incomeCents),
+        expense_total: mockMoneyFromCents(expenseCents),
+        card_purchase_total: mockMoneyFromCents(cardPurchaseCents),
+        expenses_total: mockMoneyFromCents(expensesCents),
+        transfer_total: mockMoneyFromCents(mockSumCents(filtered, (movementType) => movementType === "TRANSFER")),
+        card_payment_total: mockMoneyFromCents(mockSumCents(filtered, (movementType) => movementType === "CARD_PAYMENT")),
+        result_total: mockMoneyFromCents(incomeCents - expensesCents),
+      };
       const limit = Number(url.searchParams.get("limit") ?? "15");
       const cursorOffset = Number(url.searchParams.get("cursor") ?? "0");
       const items = filtered.slice(cursorOffset, cursorOffset + limit);
       const nextOffset = cursorOffset + items.length;
       const nextCursor = nextOffset < filtered.length ? String(nextOffset) : null;
-      await json(route, { items, next_cursor: nextCursor, has_more: nextCursor !== null });
+      await json(route, { items, next_cursor: nextCursor, has_more: nextCursor !== null, summary });
       return;
     }
     if (
