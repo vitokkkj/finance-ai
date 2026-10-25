@@ -57,6 +57,101 @@ test("os filtros de lançamentos mostram os totais de todos os resultados", asyn
   expect(state.transactionQueries.some((query) => query.includes("type=EXPENSE"))).toBe(true);
 });
 
+test("o chat mostra ganhos por dia e desdobra cards de lançamentos aninhados", async ({ page }) => {
+  await mockFinanceApi(page);
+  const structuredItem = {
+    type: "transaction_card",
+    data: {
+      data: {
+        items: [
+          {
+            id: "earning-20261006",
+            type: "INCOME",
+            description: "Salário Entregas",
+            amount: "70.00",
+            occurred_at: "2026-10-06",
+            category_name: "Entregas",
+          },
+        ],
+        summary: {
+          transaction_count: 3,
+          income_total: "170.00",
+          expense_total: "0.00",
+          card_purchase_total: "0.00",
+          expenses_total: "0.00",
+          transfer_total: "0.00",
+          card_payment_total: "0.00",
+          result_total: "170.00",
+          daily_totals: [
+            {
+              occurred_on: "2026-10-05",
+              income_total: "100.00",
+              expenses_total: "0.00",
+              transfer_total: "0.00",
+              card_payment_total: "0.00",
+            },
+            {
+              occurred_on: "2026-10-06",
+              income_total: "70.00",
+              expenses_total: "0.00",
+              transfer_total: "0.00",
+              card_payment_total: "0.00",
+            },
+          ],
+        },
+      },
+    },
+  };
+  await page.route("**/api/ai/conversations/*/messages", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: `event: text_delta\ndata: ${JSON.stringify({ text: "Você ganhou R$ 170,00 no período." })}\n\nevent: structured\ndata: ${JSON.stringify({ items: [structuredItem] })}\n\nevent: done\ndata: {}\n\n`,
+    });
+  });
+  await page.route("**/api/ai/conversations/synthetic-conversation", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "synthetic-conversation",
+        title: "Ganhos por período",
+        created_at: "2026-10-12T12:00:00-03:00",
+        updated_at: "2026-10-12T12:00:00-03:00",
+        messages: [
+          { id: "income-question", role: "USER", content: "Quanto ganhei no período?" },
+          {
+            id: "income-answer",
+            role: "ASSISTANT",
+            content: "Você ganhou R$ 170,00 no período.",
+            structured_content: [structuredItem],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Nova conversa" }).click();
+  await page.getByRole("textbox", { name: "Mensagem para o assistente" }).fill(
+    "Quanto ganhei de entregas de 01/10 a 06/10?",
+  );
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+
+  const card = page.locator(".assistant-data-card").filter({ hasText: "Ganhos por dia" });
+  await expect(card).toContainText("R$ 170,00");
+  await expect(card.locator(".assistant-transaction-row")).toHaveCount(1);
+  expect(await card.textContent()).toContain("Salário Entregas");
+  await expect(card.locator(".assistant-daily-row")).toHaveCount(2);
+  await expect(card).toContainText("R$ 100,00");
+  await expect(card).toContainText("R$ 70,00");
+  await expect(card).not.toContainText("Movimento");
+});
+
 test("o indicador de pensamento continua animado com movimento reduzido no sistema", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mockFinanceApi(page);

@@ -54,6 +54,7 @@ from app.schemas import (
     DashboardSummary,
     ForecastItem,
     TransactionCreate,
+    TransactionDailyTotal,
     TransactionFilterSummary,
     TransactionPageResponse,
     TransactionResponse,
@@ -199,6 +200,8 @@ def _filtered_transaction_statement(
 def _summarize_transaction_statement(
     db: Session,
     statement: Select[Transaction, str, UUID, str],
+    *,
+    include_daily_totals: bool = False,
 ) -> TransactionFilterSummary:
     grouped_rows = db.execute(
         statement.with_only_columns(
@@ -213,6 +216,40 @@ def _summarize_transaction_statement(
     totals = calculate_transaction_filter_totals(
         [(str(row[0]), int(row[1]), Decimal(row[2])) for row in grouped_rows]
     )
+    daily_totals: list[TransactionDailyTotal] = []
+    if include_daily_totals:
+        grouped_daily_rows = db.execute(
+            statement.with_only_columns(
+                Transaction.type,
+                Transaction.occurred_at,
+                func.count(Transaction.id),
+                func.coalesce(func.sum(Transaction.amount), ZERO),
+                maintain_column_froms=True,
+            )
+            .group_by(Transaction.type, Transaction.occurred_at)
+            .order_by(None)
+        ).all()
+        rows_by_financial_date: dict[date, list[tuple[str, int, Decimal]]] = {}
+        for movement_type, occurred_at, count, amount in grouped_daily_rows:
+            day = financial_date(occurred_at)
+            rows_by_financial_date.setdefault(day, []).append(
+                (str(movement_type), int(count), Decimal(amount))
+            )
+        for day, daily_rows in sorted(rows_by_financial_date.items()):
+            day_totals = calculate_transaction_filter_totals(daily_rows)
+            daily_totals.append(
+                TransactionDailyTotal(
+                    occurred_on=day,
+                    transaction_count=day_totals.transaction_count,
+                    income_total=day_totals.income_total,
+                    expense_total=day_totals.expense_total,
+                    card_purchase_total=day_totals.card_purchase_total,
+                    expenses_total=day_totals.expenses_total,
+                    transfer_total=day_totals.transfer_total,
+                    card_payment_total=day_totals.card_payment_total,
+                    result_total=day_totals.result_total,
+                )
+            )
     return TransactionFilterSummary(
         transaction_count=totals.transaction_count,
         income_total=totals.income_total,
@@ -222,6 +259,7 @@ def _summarize_transaction_statement(
         transfer_total=totals.transfer_total,
         card_payment_total=totals.card_payment_total,
         result_total=totals.result_total,
+        daily_totals=daily_totals,
     )
 
 
@@ -237,13 +275,16 @@ def list_transactions(
     q: Annotated[str | None, Query(max_length=100)] = None,
     cursor: Annotated[str | None, Query(max_length=512)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_TRANSACTION_PAGE_SIZE)] = TRANSACTION_PAGE_SIZE,
+    include_daily_totals: bool = False,
 ) -> TransactionPageResponse:
     if start_date is not None and end_date is not None and end_date < start_date:
         raise HTTPException(status_code=422, detail="O período informado é inválido.")
     statement = _filtered_transaction_statement(
         user.id, start_date, end_date, account_id, category_id, type, q
     )
-    summary = _summarize_transaction_statement(db, statement)
+    summary = _summarize_transaction_statement(
+        db, statement, include_daily_totals=include_daily_totals
+    )
     if cursor is not None:
         occurred_at, created_at, transaction_id = _decode_transaction_cursor(cursor)
         statement = statement.where(

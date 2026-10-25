@@ -236,6 +236,7 @@ def test_transaction_filter_summary_covers_all_pages_and_respects_every_filter(
         "transfer_total": "0.00",
         "card_payment_total": "0.00",
         "result_total": "-127.80",
+        "daily_totals": [],
     }
 
     all_october = client.get(
@@ -247,6 +248,66 @@ def test_transaction_filter_summary_covers_all_pages_and_respects_every_filter(
     assert all_october.json()["summary"]["income_total"] == "450.00"
     assert all_october.json()["summary"]["expenses_total"] == "127.80"
     assert all_october.json()["summary"]["result_total"] == "322.20"
+
+
+def test_transaction_filter_summary_can_group_exact_totals_by_financial_day(
+    client: TestClient,
+) -> None:
+    account_id, _expense_category_id, income_category_id = setup_finances(client)
+    for occurred_at, amount, description in [
+        ("2026-10-02", "20.35", "Entrega manhã"),
+        ("2026-10-02", "14.65", "Entrega tarde"),
+        ("2026-10-03", "75.00", "Entrega"),
+    ]:
+        created = client.post(
+            "/api/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": income_category_id,
+                "type": "INCOME",
+                "description": description,
+                "amount": amount,
+                "occurred_at": occurred_at,
+            },
+        )
+        assert created.status_code == 201
+
+    response = client.get(
+        "/api/transactions",
+        params={
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-05",
+            "type": "INCOME",
+            "include_daily_totals": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["income_total"] == "110.00"
+    assert response.json()["summary"]["daily_totals"] == [
+        {
+            "occurred_on": "2026-10-02",
+            "transaction_count": 2,
+            "income_total": "35.00",
+            "expense_total": "0.00",
+            "card_purchase_total": "0.00",
+            "expenses_total": "0.00",
+            "transfer_total": "0.00",
+            "card_payment_total": "0.00",
+            "result_total": "35.00",
+        },
+        {
+            "occurred_on": "2026-10-03",
+            "transaction_count": 1,
+            "income_total": "75.00",
+            "expense_total": "0.00",
+            "card_purchase_total": "0.00",
+            "expenses_total": "0.00",
+            "transfer_total": "0.00",
+            "card_payment_total": "0.00",
+            "result_total": "75.00",
+        },
+    ]
 
 
 def test_transaction_filter_totals_keep_transfers_and_card_payments_out_of_expenses() -> None:

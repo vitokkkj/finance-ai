@@ -284,6 +284,39 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function transactionCardPayload(value: unknown): {
+  items: unknown[];
+  summary: Record<string, unknown> | null;
+} {
+  let current = value;
+  let summary: Record<string, unknown> | null = null;
+
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (Array.isArray(current)) return { items: current, summary };
+    const payload = record(current);
+    if (!payload) break;
+
+    const nestedSummary = record(payload.summary);
+    if (nestedSummary) summary = nestedSummary;
+    if (Array.isArray(payload.items)) return { items: payload.items, summary };
+    if (Array.isArray(payload.data)) return { items: payload.data, summary };
+
+    const transactionType = stringValue(payload.type);
+    if (
+      stringValue(payload.id) &&
+      ["INCOME", "EXPENSE", "TRANSFER", "CARD_PURCHASE", "CARD_PAYMENT"].includes(transactionType ?? "")
+    ) {
+      return { items: [payload], summary };
+    }
+
+    const nested = payload.data ?? payload.result ?? payload.output;
+    if (nested === undefined || nested === current) break;
+    current = nested;
+  }
+
+  return { items: [], summary };
+}
+
 function hasMoneyValue(value: string | null): value is string {
   return value !== null && !/^[+-]?0+(?:\.0+)?$/.test(value);
 }
@@ -1835,14 +1868,9 @@ function StructuredCard({
     );
   }
   if (item.type === "transaction_card" || item.type === "transfer_card") {
-    const transactions = Array.isArray(item.data)
-      ? item.data
-      : Array.isArray(data?.items)
-        ? data.items
-        : data
-          ? [data]
-          : [];
-    const summary = record(data?.summary);
+    const transactionPayload = transactionCardPayload(item.data);
+    const transactions = transactionPayload.items;
+    const summary = transactionPayload.summary;
     const income = stringValue(summary?.income_total);
     const expenses = stringValue(summary?.expenses_total);
     const transfers = stringValue(summary?.transfer_total);
@@ -1867,10 +1895,37 @@ function StructuredCard({
     ];
     const resultCount = summaryCount ?? transactions.length;
     const isSingleTransfer = item.type === "transfer_card" || (resultCount === 1 && stringValue(record(transactions[0])?.type) === "TRANSFER");
+    const dailyTotals = Array.isArray(summary?.daily_totals)
+      ? summary.daily_totals.map(record).filter((entry): entry is Record<string, unknown> => entry !== null)
+      : [];
+    const dailyIncomeOnly = dailyTotals.length > 0 && dailyTotals.every((entry) =>
+      hasMoneyValue(stringValue(entry.income_total)) &&
+      !hasMoneyValue(stringValue(entry.expenses_total)) &&
+      !hasMoneyValue(stringValue(entry.transfer_total)) &&
+      !hasMoneyValue(stringValue(entry.card_payment_total)),
+    );
     return (
       <section className="assistant-data-card">
         <div className="assistant-data-card-heading"><span>{isSingleTransfer ? "Transferência" : resultCount === 1 ? "Lançamento" : "Lançamentos"}</span>{summaryCount !== null && <small>{summaryCount} {summaryCount === 1 ? "resultado" : "resultados"} no filtro</small>}</div>
         {summaryMetrics.length > 0 && <div className="assistant-transaction-summary">{summaryMetrics.map((metric) => <div key={metric.label}><span>{metric.label}</span><strong>{formatCurrency(metric.value)}</strong></div>)}</div>}
+        {dailyTotals.length > 0 && <div className="assistant-daily-breakdown">
+          <div className="assistant-daily-breakdown-heading">{dailyIncomeOnly ? "Ganhos por dia" : "Totais por dia"}</div>
+          <div className="assistant-daily-breakdown-list">
+            {dailyTotals.map((entry, index) => {
+              const day = stringValue(entry.occurred_on);
+              const dailyMetrics = [
+                ...(hasMoneyValue(stringValue(entry.income_total)) ? [{ label: "Receitas", value: stringValue(entry.income_total) ?? "0.00" }] : []),
+                ...(hasMoneyValue(stringValue(entry.expenses_total)) ? [{ label: "Despesas", value: stringValue(entry.expenses_total) ?? "0.00" }] : []),
+                ...(hasMoneyValue(stringValue(entry.transfer_total)) ? [{ label: "Transferências", value: stringValue(entry.transfer_total) ?? "0.00" }] : []),
+                ...(hasMoneyValue(stringValue(entry.card_payment_total)) ? [{ label: "Pagamentos de fatura", value: stringValue(entry.card_payment_total) ?? "0.00" }] : []),
+              ];
+              return <div className="assistant-daily-row" key={day ?? index}>
+                <strong>{day ? displayDate(day) : "Data"}</strong>
+                <div>{dailyMetrics.map((metric) => <span key={metric.label}><small>{metric.label}</small><b>{formatCurrency(metric.value)}</b></span>)}</div>
+              </div>;
+            })}
+          </div>
+        </div>}
         <div className="assistant-transaction-list">
           {transactions.slice(0, 8).map((entry, index) => {
             const transaction = record(entry);
@@ -1880,7 +1935,7 @@ function StructuredCard({
             const kindLabel = kind === "TRANSFER" ? "Transferência entre contas" : kind === "CARD_PAYMENT" ? "Pagamento de fatura" : kind === "CARD_PURCHASE" ? "Compra no cartão" : kind === "INCOME" ? "Receita" : kind === "EXPENSE" ? "Despesa" : null;
             return (
               <div className="assistant-transaction-row" key={stringValue(transaction.id) ?? index}>
-                <span><strong>{stringValue(transaction.description) ?? (kind === "TRANSFER" ? "Transferência entre contas" : "Movimento")}</strong><small>{kindLabel ? `${kindLabel} · ` : ""}{stringValue(transaction.occurred_at) ? displayDate(stringValue(transaction.occurred_at) ?? "") : ""}{stringValue(transaction.category_name) ? ` · ${stringValue(transaction.category_name)}` : ""}</small></span>
+                <span><strong>{stringValue(transaction.description) ?? (kind === "TRANSFER" ? "Transferência entre contas" : "Lançamento")}</strong><small>{kindLabel ? `${kindLabel} · ` : ""}{stringValue(transaction.occurred_at) ? displayDate(stringValue(transaction.occurred_at) ?? "") : ""}{stringValue(transaction.category_name) ? ` · ${stringValue(transaction.category_name)}` : ""}</small></span>
                 {amount && <b>{formatCurrency(amount)}</b>}
               </div>
             );

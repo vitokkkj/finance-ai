@@ -594,6 +594,67 @@ button {
   padding: 6px 17px;
 }
 
+.assistant-daily-breakdown {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.assistant-daily-breakdown-heading {
+  padding: 10px 17px 5px;
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.assistant-daily-breakdown-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 0 17px 7px;
+}
+
+.assistant-daily-row {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: minmax(70px, 0.55fr) minmax(0, 2fr);
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.assistant-daily-row:last-child {
+  border-bottom: 0;
+}
+
+.assistant-daily-row > strong {
+  color: var(--color-ink-soft);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.assistant-daily-row > div {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+}
+
+.assistant-daily-row span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.assistant-daily-row small {
+  color: var(--color-muted);
+  font-size: 9px;
+}
+
+.assistant-daily-row b {
+  color: var(--color-ink);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .assistant-category-list > div,
 .assistant-transaction-row {
   min-height: 48px;
@@ -1958,6 +2019,30 @@ button {
 .assistant-category-list,
 .assistant-transaction-list {
   padding: 3px 12px;
+}
+
+.assistant-daily-breakdown-heading {
+  padding: 8px 12px 4px;
+  font-size: 9px;
+}
+
+.assistant-daily-breakdown-list {
+  max-height: 300px;
+  padding: 0 12px 5px;
+}
+
+.assistant-daily-row {
+  min-height: 34px;
+  gap: 8px;
+}
+
+.assistant-daily-row > strong,
+.assistant-daily-row b {
+  font-size: 9px;
+}
+
+.assistant-daily-row small {
+  font-size: 8px;
 }
 
 .assistant-category-list > div,
