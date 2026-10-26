@@ -886,14 +886,16 @@ test("o proprietário pode criar e excluir contas de acesso sem dados", async ({
   await expect(page.getByText("richard@example.com")).toHaveCount(0);
 });
 
-test("o histórico mostra 10 conversas e carrega mais ao rolar até o fim", async ({ page }) => {
+test("o histórico preenche o espaço livre e carrega mais 10 ao rolar até o fim", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1400 });
   await mockFinanceApi(page, { largeLists: true });
   await page.goto("/");
 
   const history = page.locator(".assistant-history");
-  await expect(history.locator(".history-row")).toHaveCount(10);
-  await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 10 de 32 conversas exibidas.");
+  await expect.poll(() => history.locator(".history-row").count()).toBeGreaterThan(10);
+  const initialCount = await history.locator(".history-row").count();
+  expect(initialCount).toBeLessThan(32);
+  await expect(history.locator('[aria-live="polite"]')).toHaveText(`Histórico: ${initialCount} de 32 conversas exibidas.`);
   const historyAndNavigationGap = await page.evaluate(() => {
     const historyElement = document.querySelector(".assistant-history");
     const navigationElement = document.querySelector(".assistant-nav");
@@ -902,11 +904,13 @@ test("o histórico mostra 10 conversas e carrega mais ao rolar até o fim", asyn
   });
   expect(historyAndNavigationGap).toBeLessThanOrEqual(2);
   await loadNextHistoryBatch(history, "wheel");
-  await expect(history.locator(".history-row")).toHaveCount(20);
-  await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 20 de 32 conversas exibidas.");
+  const afterFirstLoad = Math.min(initialCount + 10, 32);
+  await expect(history.locator(".history-row")).toHaveCount(afterFirstLoad);
+  await expect(history.locator('[aria-live="polite"]')).toHaveText(`Histórico: ${afterFirstLoad} de 32 conversas exibidas.`);
   await loadNextHistoryBatch(history, "wheel");
-  await expect(history.locator(".history-row")).toHaveCount(30);
-  await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 30 de 32 conversas exibidas.");
+  const afterSecondLoad = Math.min(afterFirstLoad + 10, 32);
+  await expect(history.locator(".history-row")).toHaveCount(afterSecondLoad);
+  await expect(history.locator('[aria-live="polite"]')).toHaveText(`Histórico: ${afterSecondLoad} de 32 conversas exibidas.`);
   await loadNextHistoryBatch(history, "wheel");
   await expect(history.locator(".history-row")).toHaveCount(32);
   await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 32 de 32 conversas exibidas.");
@@ -919,7 +923,8 @@ test("o histórico mobile rola no próprio menu e carrega mais conversas automat
   await page.getByRole("button", { name: "Abrir menu de navegação" }).click();
 
   const history = page.locator(".assistant-sidebar.mobile-open .assistant-history");
-  await expect(history.locator(".history-row")).toHaveCount(10);
+  await expect.poll(() => history.locator(".history-row").count()).toBeGreaterThan(10);
+  const initialCount = await history.locator(".history-row").count();
   const mobileHistoryAndNavigationGap = await page.evaluate(() => {
     const historyElement = document.querySelector(".assistant-sidebar.mobile-open .assistant-history");
     const navigationElement = document.querySelector(".assistant-sidebar.mobile-open .assistant-nav");
@@ -928,11 +933,39 @@ test("o histórico mobile rola no próprio menu e carrega mais conversas automat
   });
   expect(mobileHistoryAndNavigationGap).toBeLessThanOrEqual(2);
   await loadNextHistoryBatch(history, "touch");
-  await expect(history.locator(".history-row")).toHaveCount(20);
-  await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 20 de 32 conversas exibidas.");
+  const afterFirstLoad = Math.min(initialCount + 10, 32);
+  await expect(history.locator(".history-row")).toHaveCount(afterFirstLoad);
+  await expect(history.locator('[aria-live="polite"]')).toHaveText(`Histórico: ${afterFirstLoad} de 32 conversas exibidas.`);
 
-  await loadNextHistoryBatch(history, "touch");
-  await expect(history.locator(".history-row")).toHaveCount(30);
+  if (afterFirstLoad < 32) {
+    await loadNextHistoryBatch(history, "touch");
+    await expect(history.locator(".history-row")).toHaveCount(Math.min(afterFirstLoad + 10, 32));
+  }
+});
+
+test("resumo inicial tem respiro interno e ícones das sugestões centralizados", async ({ page }) => {
+  await mockFinanceApi(page);
+  await page.goto("/");
+
+  const summary = page.locator(".assistant-home-summary");
+  await expect(summary).toBeVisible();
+  const horizontalPadding = await summary.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingLeft));
+  expect(horizontalPadding).toBeGreaterThanOrEqual(14);
+
+  const icon = page.locator(".assistant-suggestions .suggestion-index").first();
+  await expect(icon).toBeVisible();
+  const alignment = await icon.evaluate((element) => {
+    const iconBox = element.getBoundingClientRect();
+    const svg = element.querySelector("svg")?.getBoundingClientRect();
+    return {
+      display: getComputedStyle(element).display,
+      horizontalOffset: svg ? Math.abs((iconBox.left + iconBox.width / 2) - (svg.left + svg.width / 2)) : Number.POSITIVE_INFINITY,
+      verticalOffset: svg ? Math.abs((iconBox.top + iconBox.height / 2) - (svg.top + svg.height / 2)) : Number.POSITIVE_INFINITY,
+    };
+  });
+  expect(alignment.display).toBe("grid");
+  expect(alignment.horizontalOffset).toBeLessThanOrEqual(1);
+  expect(alignment.verticalOffset).toBeLessThanOrEqual(1);
 });
 
 test("conversas antigas mantêm acesso ao contexto financeiro", async ({ page }) => {

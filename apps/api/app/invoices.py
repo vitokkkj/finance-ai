@@ -1,9 +1,10 @@
+from datetime import date
 from decimal import Decimal
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,9 +13,11 @@ from app.database import get_db
 from app.finance_deletion import delete_invoice_record
 from app.finance_engine import (
     BillingCycle,
+    billing_cycle_for_closing_month,
     billing_cycle_for_due_month,
     billing_cycle_for_purchase,
     current_financial_date,
+    financial_date,
     financial_day_start,
 )
 from app.finance_views import (
@@ -34,6 +37,11 @@ from app.schemas import (
     CardInvoiceResponse,
     CardPaymentCreate,
     CardPurchaseCreate,
+    CardPurchaseInstallmentPreview,
+    CardPurchaseInstallmentResponse,
+    CardPurchasePlanCreate,
+    CardPurchasePlanPreview,
+    CardPurchasePlanResponse,
     TransactionResponse,
 )
 
@@ -254,6 +262,281 @@ def create_card_purchase(
         return transaction_response(existing, category.name, card.id, card.name)
     db.refresh(purchase)
     return transaction_response(purchase, category.name, card.id, card.name)
+
+
+def _resolve_card_purchase_plan(
+    payload: CardPurchasePlanCreate,
+    user: User,
+    db: Session,
+    *,
+    lock_card: bool = False,
+) -> tuple[CreditCard, Category, list[BillingCycle], list[Decimal]]:
+    if payload.occurred_at > current_financial_date():
+        raise HTTPException(status_code=422, detail="A data da compra não pode estar no futuro.")
+
+    card_statement = select(CreditCard).where(
+        CreditCard.id == payload.credit_card_id,
+        CreditCard.user_id == user.id,
+        CreditCard.is_active.is_(True),
+    )
+    if lock_card:
+        card_statement = card_statement.with_for_update()
+    card = db.scalar(card_statement)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Cartão ativo não encontrado.")
+
+    category = db.scalar(
+        select(Category).where(
+            Category.id == payload.category_id,
+            Category.user_id == user.id,
+        )
+    )
+    if category is None:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+    if category.archived_at is not None:
+        raise HTTPException(status_code=409, detail="A categoria está arquivada.")
+    if category.type != "EXPENSE":
+        raise HTTPException(status_code=422, detail="Compra no cartão exige categoria de despesa.")
+
+    total_cents = int(payload.total_amount * 100)
+    base_cents, extra_cents = divmod(total_cents, payload.installment_count)
+    amounts = [
+        Decimal(base_cents + (1 if index < extra_cents else 0)).scaleb(-2)
+        for index in range(payload.installment_count)
+    ]
+
+    first_cycle = billing_cycle_for_purchase(
+        payload.occurred_at, card.closing_day, card.due_day
+    )
+    cycles = [first_cycle]
+    year, month = first_cycle.closing_date.year, first_cycle.closing_date.month
+    for _ in range(1, payload.installment_count):
+        if month == 12:
+            year, month = year + 1, 1
+        else:
+            month += 1
+        cycles.append(
+            billing_cycle_for_closing_month(year, month, card.closing_day, card.due_day)
+        )
+    return card, category, cycles, amounts
+
+
+def preview_card_purchase_plan(
+    payload: CardPurchasePlanCreate,
+    user: User,
+    db: Session,
+) -> CardPurchasePlanPreview:
+    """Validate and calculate installments without persisting invoices or transactions."""
+    card, category, cycles, amounts = _resolve_card_purchase_plan(payload, user, db)
+    return CardPurchasePlanPreview(
+        credit_card_id=card.id,
+        credit_card_name=card.name,
+        category_id=category.id,
+        category_name=category.name,
+        description=payload.description,
+        occurred_at=payload.occurred_at,
+        total_amount=payload.total_amount,
+        installment_count=payload.installment_count,
+        installments=[
+            CardPurchaseInstallmentPreview(
+                number=index,
+                amount=amount,
+                closing_date=cycle.closing_date,
+                due_date=cycle.due_date,
+            )
+            for index, (amount, cycle) in enumerate(zip(amounts, cycles, strict=True), start=1)
+        ],
+    )
+
+
+def _card_purchase_plan_response(
+    db: Session,
+    user_id: UUID,
+    group_id: UUID,
+) -> CardPurchasePlanResponse:
+    rows = db.execute(
+        select(
+            Transaction,
+            CardInvoice.closing_date,
+            CardInvoice.due_date,
+            Category.name,
+            CreditCard.id,
+            CreditCard.name,
+        )
+        .join(
+            CardInvoice,
+            and_(
+                Transaction.card_invoice_id == CardInvoice.id,
+                Transaction.user_id == CardInvoice.user_id,
+            ),
+        )
+        .join(
+            Category,
+            and_(
+                Transaction.category_id == Category.id,
+                Transaction.user_id == Category.user_id,
+            ),
+        )
+        .join(
+            CreditCard,
+            and_(
+                CardInvoice.credit_card_id == CreditCard.id,
+                CardInvoice.user_id == CreditCard.user_id,
+            ),
+        )
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.installment_group_id == group_id,
+            Transaction.type == "CARD_PURCHASE",
+        )
+        .order_by(Transaction.installment_number)
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=410, detail="As parcelas desta compra foram removidas.")
+
+    first = rows[0]
+    planned_count = first[0].installment_count
+    if planned_count is None or len(rows) != planned_count or any(
+        row[0].installment_number != index for index, row in enumerate(rows, start=1)
+    ):
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Uma ou mais parcelas desta compra foram removidas; "
+                "a operação não pode ser repetida."
+            ),
+        )
+
+    total_amount = sum((row[0].amount for row in rows), Decimal("0.00"))
+    return CardPurchasePlanResponse(
+        id=group_id,
+        credit_card_id=first[4],
+        credit_card_name=first[5],
+        category_id=first[0].category_id,
+        category_name=first[3],
+        description=first[0].description,
+        occurred_at=financial_date(first[0].occurred_at),
+        notes=first[0].notes,
+        total_amount=total_amount,
+        installment_count=planned_count,
+        installments=[
+            CardPurchaseInstallmentResponse(
+                number=row[0].installment_number,
+                amount=row[0].amount,
+                closing_date=row[1],
+                due_date=row[2],
+                transaction_id=row[0].id,
+                invoice_id=row[0].card_invoice_id,
+            )
+            for row in rows
+        ],
+    )
+
+
+def create_card_purchase_plan(
+    payload: CardPurchasePlanCreate,
+    user: User,
+    db: Session,
+    *,
+    idempotency_key: str | None = None,
+) -> CardPurchasePlanResponse:
+    """Create installment transactions, each assigned to its own monthly card invoice."""
+    user_id = user.id
+    existing, fingerprint = find_idempotent_transaction(
+        db, user_id, "card_purchase_plan", idempotency_key, payload
+    )
+    if existing is not None:
+        if existing.installment_group_id is None:
+            raise HTTPException(
+                status_code=410,
+                detail=(
+                    "Esta operação já foi registrada, mas as parcelas originais foram removidas."
+                ),
+            )
+        return _card_purchase_plan_response(db, user_id, existing.installment_group_id)
+
+    card, category, cycles, amounts = _resolve_card_purchase_plan(
+        payload, user, db, lock_card=True
+    )
+    group_id = uuid4()
+    invoices_by_closing_date: dict[date, CardInvoice] = {}
+    for cycle in cycles:
+        invoice = db.scalar(
+            select(CardInvoice)
+            .where(
+                CardInvoice.credit_card_id == card.id,
+                CardInvoice.user_id == user_id,
+                CardInvoice.closing_date == cycle.closing_date,
+            )
+            .with_for_update()
+        )
+        if invoice is None:
+            invoice = CardInvoice(
+                user_id=user_id,
+                credit_card_id=card.id,
+                period_start=cycle.period_start,
+                period_end=cycle.period_end,
+                closing_date=cycle.closing_date,
+                due_date=cycle.due_date,
+            )
+            db.add(invoice)
+            db.flush()
+        invoices_by_closing_date[cycle.closing_date] = invoice
+
+    purchases: list[Transaction] = []
+    occurred_at = financial_day_start(payload.occurred_at)
+    for index, (amount, cycle) in enumerate(zip(amounts, cycles, strict=True), start=1):
+        purchase = Transaction(
+            user_id=user_id,
+            type="CARD_PURCHASE",
+            source="MANUAL",
+            status="CONFIRMED",
+            category_id=category.id,
+            card_invoice_id=invoices_by_closing_date[cycle.closing_date].id,
+            installment_group_id=group_id,
+            installment_number=index,
+            installment_count=payload.installment_count,
+            description=payload.description,
+            amount=amount,
+            occurred_at=occurred_at,
+            notes=payload.notes,
+        )
+        db.add(purchase)
+        purchases.append(purchase)
+
+    try:
+        store_idempotency(db, purchases[0], "card_purchase_plan", idempotency_key, fingerprint)
+        db.commit()
+    except IntegrityError:
+        existing = recover_concurrent_idempotency(
+            db, user_id, "card_purchase_plan", idempotency_key, fingerprint
+        )
+        if existing is None:
+            raise
+        if existing.installment_group_id is None:
+            raise HTTPException(
+                status_code=410,
+                detail=(
+                    "Esta operação já foi registrada, mas as parcelas originais foram removidas."
+                ),
+            ) from None
+        return _card_purchase_plan_response(db, user_id, existing.installment_group_id)
+
+    return _card_purchase_plan_response(db, user_id, group_id)
+
+
+@router.post(
+    "/api/card-purchase-plans",
+    response_model=CardPurchasePlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_card_purchase_plan_route(
+    payload: CardPurchasePlanCreate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> CardPurchasePlanResponse:
+    return create_card_purchase_plan(payload, user, db, idempotency_key=idempotency_key)
 
 
 @router.put(

@@ -19,6 +19,23 @@ export type E2EApiState = {
     confirmed: boolean;
     decisions: { row_number: number; action: string }[];
   }[];
+  cardPurchasePlanRequests: {
+    credit_card_id: string;
+    category_id: string;
+    description: string;
+    total_amount: string;
+    installment_count: number;
+    occurred_at: string;
+    notes: string | null;
+  }[];
+  cardPurchaseRequests: {
+    credit_card_id: string;
+    category_id: string;
+    description: string;
+    amount: string;
+    occurred_at: string;
+    notes: string | null;
+  }[];
 };
 
 function mockMoneyFromCents(cents: bigint): string {
@@ -244,6 +261,8 @@ export async function mockFinanceApi(
     mfaRotationStartRequests: 0,
     mfaRotationConfirmRequests: 0,
     importConfirmRequests: [],
+    cardPurchasePlanRequests: [],
+    cardPurchaseRequests: [],
   };
   let conversationCreated = false;
   let transactionFailuresRemaining = options.failTransactionsRequests ?? 0;
@@ -689,12 +708,26 @@ export async function mockFinanceApi(
       await json(route, mockUpcomingInvoices);
       return;
     }
+    if (url.pathname === "/api/card-purchases" && route.request().method() === "POST") {
+      state.cardPurchaseRequests.push(route.request().postDataJSON() as E2EApiState["cardPurchaseRequests"][number]);
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "synthetic-card-purchase" }) });
+      return;
+    }
     if (
       url.pathname.startsWith("/api/cards/") &&
       url.pathname.endsWith("/invoices")
     ) {
       const cardId = url.pathname.split("/")[3];
       await json(route, mockInvoices(cardId));
+      return;
+    }
+    if (url.pathname === "/api/card-purchase-plans" && route.request().method() === "POST") {
+      state.cardPurchasePlanRequests.push(route.request().postDataJSON() as E2EApiState["cardPurchasePlanRequests"][number]);
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ id: "synthetic-purchase-plan", installment_count: 5 }),
+      });
       return;
     }
     if (

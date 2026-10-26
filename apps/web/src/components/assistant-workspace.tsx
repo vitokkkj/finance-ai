@@ -606,6 +606,7 @@ export function AssistantWorkspace({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [visibleConversationCount, setVisibleConversationCount] = useState(CONVERSATION_HISTORY_BATCH_SIZE);
   const lastHistoryAutoLoadHeightRef = useRef(0);
+  const historyRef = useRef<HTMLElement>(null);
   const historyTouchStartYRef = useRef<number | null>(null);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [status, setStatus] = useState<AIStatus | null>(null);
@@ -691,6 +692,28 @@ export function AssistantWorkspace({
       requestMoreConversations(event.currentTarget, true);
     }
   }, [requestMoreConversations]);
+
+  useEffect(() => {
+    const history = historyRef.current;
+    if (!history || conversations.length === 0) return;
+
+    const fillAvailableHistorySpace = () => {
+      const heading = history.querySelector<HTMLElement>(":scope > p");
+      if (!heading) return;
+      const firstRow = history.querySelector<HTMLElement>(":scope > .history-row");
+      const rowHeight = firstRow?.getBoundingClientRect().height || 32;
+      const bottomPadding = Number.parseFloat(window.getComputedStyle(history).paddingBottom) || 0;
+      const headingGap = Number.parseFloat(window.getComputedStyle(heading).marginBottom) || 0;
+      const availableHeight = history.getBoundingClientRect().bottom - bottomPadding - heading.getBoundingClientRect().bottom - headingGap;
+      const rowsThatFit = Math.max(CONVERSATION_HISTORY_BATCH_SIZE, Math.floor((availableHeight + 1) / rowHeight));
+      setVisibleConversationCount((count) => Math.min(conversations.length, Math.max(count, rowsThatFit)));
+    };
+
+    fillAvailableHistorySpace();
+    const observer = new ResizeObserver(fillAvailableHistorySpace);
+    observer.observe(history);
+    return () => observer.disconnect();
+  }, [conversations.length]);
 
   useEffect(() => {
     if (view !== "chat" || !conversationId) return;
@@ -1526,6 +1549,7 @@ export function AssistantWorkspace({
         <section
           aria-label="Conversas recentes"
           className="assistant-history"
+          ref={historyRef}
           onScroll={loadMoreConversationsOnScroll}
           onTouchEnd={loadMoreConversationsOnTouchEnd}
           onTouchStart={rememberHistoryTouchStart}
@@ -1771,12 +1795,16 @@ function toolLabel(name: string): string {
     create_transaction: "seu lançamento",
     create_transfer: "a transferência",
     create_card_purchase: "a compra no cartão",
+    create_card_purchase_plan: "a compra parcelada no cartão",
   };
   return labels[name] ?? "seus dados financeiros";
 }
 
 function pendingLabelFor(content: string): string {
   const normalized = normalizeForMatch(content);
+  if (/(parcel|vezes|prestacoes)/.test(normalized) && /(cartao|credito|compra|pneus)/.test(normalized)) {
+    return "Preparando o parcelamento no cartão…";
+  }
   if (/(gasto|gastei|despesa|categoria|combustivel|alimentacao|mercado)/.test(normalized)) {
     return "Preparando a consulta dos seus gastos…";
   }
@@ -1967,9 +1995,14 @@ function StructuredCard({
             const amount = stringValue(transaction.amount);
             const kind = stringValue(transaction.type);
             const kindLabel = kind === "TRANSFER" ? "Transferência entre contas" : kind === "CARD_PAYMENT" ? "Pagamento de fatura" : kind === "CARD_PURCHASE" ? "Compra no cartão" : kind === "INCOME" ? "Receita" : kind === "EXPENSE" ? "Despesa" : null;
+            const installmentNumber = typeof transaction.installment_number === "number" ? transaction.installment_number : null;
+            const installmentCount = typeof transaction.installment_count === "number" ? transaction.installment_count : null;
+            const installmentLabel = installmentNumber !== null && installmentCount !== null
+              ? ` · Parcela ${installmentNumber} de ${installmentCount}`
+              : "";
             return (
               <div className="assistant-transaction-row" key={stringValue(transaction.id) ?? index}>
-                <span><strong>{stringValue(transaction.description) ?? (kind === "TRANSFER" ? "Transferência entre contas" : "Lançamento")}</strong><small>{kindLabel ? `${kindLabel} · ` : ""}{stringValue(transaction.occurred_at) ? displayDate(stringValue(transaction.occurred_at) ?? "") : ""}{stringValue(transaction.category_name) ? ` · ${stringValue(transaction.category_name)}` : ""}</small></span>
+                <span><strong>{stringValue(transaction.description) ?? (kind === "TRANSFER" ? "Transferência entre contas" : "Lançamento")}</strong><small>{kindLabel ? `${kindLabel} · ` : ""}{stringValue(transaction.occurred_at) ? displayDate(stringValue(transaction.occurred_at) ?? "") : ""}{stringValue(transaction.category_name) ? ` · ${stringValue(transaction.category_name)}` : ""}{installmentLabel}</small></span>
                 {amount && <b>{formatCurrency(amount)}</b>}
               </div>
             );
@@ -2028,6 +2061,25 @@ function StructuredCard({
       </section>
     );
   }
+  if (item.type === "card_purchase_plan" && data && Array.isArray(data.installments)) {
+    const installments = data.installments.map((entry, index) => {
+      const installment = record(entry);
+      if (!installment) return null;
+      const dueDate = stringValue(installment.due_date);
+      const closingDate = stringValue(installment.closing_date);
+      const number = typeof installment.number === "number" ? installment.number : index + 1;
+      return <div className="assistant-transaction-row" key={stringValue(installment.transaction_id) ?? index}>
+        <span><strong>Parcela {number}</strong><small>{dueDate ? `Vence ${displayDate(dueDate)}` : "Fatura futura"}{closingDate ? ` · fecha ${displayDate(closingDate)}` : ""}</small></span>
+        <b>{formatCurrency(stringValue(installment.amount) ?? "0.00")}</b>
+      </div>;
+    });
+    return <section className="assistant-data-card">
+      <div className="assistant-data-card-heading"><span>Compra parcelada registrada</span><small>{stringValue(data.credit_card_name) ?? "Cartão"}</small></div>
+      <div className="assistant-summary-values"><div><span>Valor total</span><strong>{formatCurrency(stringValue(data.total_amount) ?? "0.00")}</strong></div><div><span>Parcelas</span><strong>{String(data.installment_count ?? installments.length)}</strong></div></div>
+      <div className="assistant-transaction-list">{installments}</div>
+      <p className="assistant-card-note">Cada parcela entrou como compra no cartão da respectiva fatura.</p>
+    </section>;
+  }
   if (item.type === "confirmation" && data) {
     const changes = record(data.changes);
     const pending = item.status === "pending" && Boolean(item.tool_call_id);
@@ -2065,6 +2117,8 @@ function fieldLabel(value: string): string {
     transaction_id: "Lançamento",
     description: "Descrição",
     amount: "Valor",
+    total_amount: "Valor total",
+    installment_count: "Parcelas",
     occurred_at: "Data",
     account_id: "Conta",
     category_id: "Categoria",

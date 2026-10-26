@@ -27,6 +27,9 @@
 
 - Uma transferência própria é uma única transação `TRANSFER` com origem, destino, valor e data. Ela reduz a conta de origem e aumenta a conta de destino pelo mesmo `Decimal`; não compõe receitas, despesas ou resultado mensal. Uma tarifa, quando registrada, é uma despesa separada.
 - Uma compra `CARD_PURCHASE` conta como despesa na data da compra e na sua categoria. Ela fica vinculada a uma fatura e não muda saldos de contas bancárias.
+- Uma compra parcelada informada pelo valor total cria de 2 a 36 transações `CARD_PURCHASE`, uma por parcela e cada uma ligada à fatura de seu ciclo mensal. Todas preservam a data da compra e a categoria; o Finance Engine soma as parcelas como despesa realizada uma única vez pelo valor total e o limite considera os saldos das faturas futuras.
+- O total é dividido em centavos inteiros: cada parcela recebe a divisão-base e os centavos restantes são distribuídos, um por um, nas primeiras parcelas. Assim, a soma das parcelas sempre é igual ao total informado. O chat mostra a prévia dos valores e vencimentos e só cria as transações após confirmação explícita; o fluxo de Cartões registra diretamente o valor e o número escolhidos.
+- `installment_group_id`, `installment_number` e `installment_count` agrupam as transações da compra e permitem identificar cada parcela no histórico e na fatura. Não há uma tabela financeira redundante para o plano; as parcelas em `transactions` são a fonte da verdade.
 - Uma fatura é identificada pelo cartão e pela data de fechamento. O período inclui o dia de fechamento. Compra até e inclusive o fechamento vai para esse ciclo; compra posterior vai para o próximo ciclo.
 - Se o dia configurado não existir no mês, fechamento e vencimento usam o último dia válido. O vencimento fica no mesmo mês somente quando a data configurada é posterior ao fechamento; nos demais casos, fica no mês seguinte.
 - Ao informar o mês de uma fatura existente, o mês significa o do vencimento. O ciclo é derivado pelos dias de fechamento e vencimento do cartão; por exemplo, fechamento dia 26 e vencimento dia 10 produzem, para vencimento em novembro, o ciclo de 27/09 a 26/10.
@@ -57,7 +60,7 @@
 
 ## Fora do escopo da Fase 2C.1
 
-Parcelamentos, cálculo de amortização de financiamentos, investimentos reais, reembolsos, previsões de longo prazo, orçamento, juros rotativos, notificações push/e-mail e sincronização bancária seguem fora desta fatia. A projeção mensal de obrigações e os avisos internos da aplicação descritos abaixo estão implementados na Fase 2C.2. Cada fluxo futuro terá semântica própria e testes de valor, data, timezone, idempotência e reconciliação.
+Parcelamentos que não sejam compras no cartão, cálculo de amortização de financiamentos, investimentos reais, reembolsos, previsões de longo prazo, orçamento, juros rotativos, notificações push/e-mail e sincronização bancária seguem fora desta fatia. Compras parceladas no cartão estão descritas na Fase 2B. A projeção mensal de obrigações e os avisos internos da aplicação descritos abaixo estão implementados na Fase 2C.2. Cada fluxo futuro terá semântica própria e testes de valor, data, timezone, idempotência e reconciliação.
 
 ## Fase 2C.2 — compromissos e projeção mensal
 

@@ -36,6 +36,8 @@ Uma compra no cartão continua sendo uma única linha `CARD_PURCHASE` em `transa
 
 O banco aplica chaves estrangeiras compostas para que contas, categorias e faturas referenciadas pertençam ao mesmo `user_id`. Restrições condicionais de tipo exigem as referências corretas para cada movimento e impedem uma transferência para a mesma conta. A migration incremental `0005_transfers_cards` não apaga nem reescreve transações anteriores. Seu downgrade é bloqueado quando já existem movimentos 2B, para não perder dados ao remover o schema que os representa.
 
+Compras parceladas são representadas por várias linhas `CARD_PURCHASE`, uma em cada fatura mensal. `installment_group_id` agrupa as linhas; `installment_number` e `installment_count` identificam sua posição. A migration `0023_card_purchase_installments` adiciona os campos opcionais, valida que sejam preenchidos em conjunto somente para compras no cartão e limita os grupos a 2–36 parcelas, com número único por usuário e grupo. A compra à vista continua com esses campos nulos e usa o mesmo modelo existente. Não há uma tabela separada para o plano: as próprias transações são a fonte da verdade.
+
 O saldo inicial de fatura é adicionado de forma incremental por `0010_card_invoice_open_balance`, com valor padrão zero e restrição não negativa. A migration impede downgrade quando há saldo inicial positivo, para não descartar dívida importada.
 
 A migration `0016_totp_replay` acrescenta em `users` o contador mais recente de TOTP consumido. O login, pareamento MFA e reautenticação atualizam o contador com uma condição atômica; códigos antigos ou já usados não podem ser repetidos.
@@ -75,4 +77,4 @@ A `0018` é forward-only: seu downgrade é bloqueado porque o schema anterior n�
 
 ### Conceitos futuros, ainda sem tabelas
 
-Parcelamentos, financiamentos, investimentos, orçamentos, metas, notificações, integrações do Pluggy, embeddings e agentes continuam sem tabelas. A presença nesta lista não significa que façam parte do schema atual.
+Financiamentos, investimentos, orçamentos, metas, notificações, integrações do Pluggy, embeddings e agentes continuam sem tabelas. Compras parceladas no cartão usam os campos de agrupamento das transações descritos na Fase 2B; a presença de outros conceitos nesta lista não significa que façam parte do schema atual.

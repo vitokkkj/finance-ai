@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import transactions as transactions_module
@@ -146,6 +147,165 @@ def test_card_purchase_creates_one_expense_and_does_not_change_bank_balance(
     assert cards[0]["used_limit"] == "100.00"
     assert cards[0]["available_limit"] == "9900.00"
     assert account["id"] in {item["id"] for item in client.get("/api/accounts").json()}
+
+
+def test_card_purchase_plan_splits_amount_across_future_invoices_and_replays_idempotently(
+    client: TestClient,
+    test_session_factory: sessionmaker[Session],
+) -> None:
+    setup_user(client)
+    account = create_account(client, "Sicredi", "5000.00")
+    card = create_card(client, closing_day=13)
+    category_id = create_expense_category(client)
+    payload = {
+        "credit_card_id": card["id"],
+        "category_id": category_id,
+        "description": "Pneus Twister",
+        "total_amount": "905.05",
+        "installment_count": 5,
+        "occurred_at": "2026-10-26",
+    }
+    headers = {"Idempotency-Key": "card-plan-retry-0001"}
+
+    plan = client.post("/api/card-purchase-plans", json=payload, headers=headers)
+    replay = client.post("/api/card-purchase-plans", json=payload, headers=headers)
+
+    assert plan.status_code == replay.status_code == 201
+    assert plan.json() == replay.json()
+    plan_data = plan.json()
+    assert plan_data["total_amount"] == "905.05"
+    assert plan_data["installment_count"] == 5
+    assert [item["amount"] for item in plan_data["installments"]] == [
+        "181.01",
+        "181.01",
+        "181.01",
+        "181.01",
+        "181.01",
+    ]
+    assert [item["due_date"] for item in plan_data["installments"]] == [
+        "2026-11-20",
+        "2026-12-20",
+        "2027-01-20",
+        "2027-02-20",
+        "2027-03-20",
+    ]
+    assert [item["number"] for item in plan_data["installments"]] == [1, 2, 3, 4, 5]
+
+    invoices = client.get(f"/api/cards/{card['id']}/invoices").json()
+    assert len(invoices) == 5
+    assert [invoice["total"] for invoice in invoices] == ["181.01"] * 5
+    assert [invoice["purchases"][0]["installment_number"] for invoice in invoices] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert [invoice["purchases"][0]["installment_count"] for invoice in invoices] == [5] * 5
+    assert client.get("/api/accounts").json()[0]["balance"] == "5000.00"
+    assert client.get("/api/cards").json()[0]["used_limit"] == "905.05"
+    assert client.get("/api/dashboard/summary?year=2026&month=10").json()[
+        "monthly_expenses"
+    ] == "905.05"
+
+    with test_session_factory() as db:
+        first_installment = db.scalar(
+            select(Transaction).where(
+                Transaction.installment_group_id == UUID(plan_data["id"]),
+                Transaction.installment_number == 1,
+            )
+        )
+        assert first_installment is not None
+        first_installment.installment_number = None
+        with pytest.raises(IntegrityError):
+            db.flush()
+
+    changed_payload = {**payload, "total_amount": "905.10"}
+    conflict = client.post("/api/card-purchase-plans", json=changed_payload, headers=headers)
+    assert conflict.status_code == 409
+
+    first_invoice_id = plan_data["installments"][0]["invoice_id"]
+    payment = client.post(
+        f"/api/invoices/{first_invoice_id}/payments",
+        json={"account_id": account["id"], "amount": "181.01", "occurred_at": TODAY},
+    )
+    assert payment.status_code == 201
+    first_invoice = client.get(f"/api/invoices/{first_invoice_id}").json()
+    assert first_invoice["total"] == first_invoice["paid_amount"] == "181.01"
+    assert first_invoice["outstanding"] == "0.00"
+    assert client.get("/api/cards").json()[0]["used_limit"] == "724.04"
+    assert client.get("/api/dashboard/summary?year=2026&month=10").json()[
+        "monthly_expenses"
+    ] == "905.05"
+
+
+def test_card_purchase_plan_handles_remainder_and_short_billing_months(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    card_response = client.post(
+        "/api/cards",
+        json={
+            "name": "Cartão 31",
+            "credit_limit": "1000.00",
+            "closing_day": 31,
+            "due_day": 3,
+        },
+    )
+    assert card_response.status_code == 201
+    card = card_response.json()
+    category_id = create_expense_category(client)
+
+    plan = client.post(
+        "/api/card-purchase-plans",
+        json={
+            "credit_card_id": card["id"],
+            "category_id": category_id,
+            "description": "Compra com resto de centavos",
+            "total_amount": "100.00",
+            "installment_count": 3,
+            "occurred_at": "2026-01-31",
+        },
+    )
+
+    assert plan.status_code == 201
+    installments = plan.json()["installments"]
+    assert [item["amount"] for item in installments] == ["33.34", "33.33", "33.33"]
+    assert [item["closing_date"] for item in installments] == [
+        "2026-01-31",
+        "2026-02-28",
+        "2026-03-31",
+    ]
+    assert [item["due_date"] for item in installments] == [
+        "2026-02-03",
+        "2026-03-03",
+        "2026-04-03",
+    ]
+
+
+def test_card_purchase_plan_rejects_unaffordable_precision_and_bad_counts(
+    client: TestClient,
+) -> None:
+    setup_user(client)
+    card = create_card(client)
+    category_id = create_expense_category(client)
+    base = {
+        "credit_card_id": card["id"],
+        "category_id": category_id,
+        "description": "Compra parcelada",
+        "total_amount": "0.02",
+        "occurred_at": TODAY,
+    }
+
+    too_many = client.post(
+        "/api/card-purchase-plans", json={**base, "installment_count": 3}
+    )
+    too_few = client.post(
+        "/api/card-purchase-plans", json={**base, "installment_count": 1}
+    )
+
+    assert too_many.status_code == too_few.status_code == 422
+    assert client.get(f"/api/cards/{card['id']}/invoices").json() == []
 
 
 def test_card_read_endpoints_batch_invoice_queries(

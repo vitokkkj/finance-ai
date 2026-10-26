@@ -69,6 +69,9 @@ type Transaction = {
   amount: string;
   occurred_at: string;
   notes: string | null;
+  installment_group_id?: string | null;
+  installment_number?: number | null;
+  installment_count?: number | null;
 };
 
 type TransactionFilterSummary = {
@@ -1142,7 +1145,7 @@ export function FinanceWorkspace({
                     <><div className="table-wrap"><table className="data-table transaction-table"><thead><tr><th>Lançamento</th><th>Categoria / origem / destino</th><th>Data</th><th>Tipo</th><th>Valor</th><th aria-label="Ações" /></tr></thead><tbody>
                       {transactions.map((transaction) => {
                         const tone = transaction.type === "INCOME" ? "income" : transaction.type === "EXPENSE" || transaction.type === "CARD_PURCHASE" ? "expense" : "neutral";
-                        return <tr key={transaction.id}><td data-label="Lançamento"><strong className="cell-primary">{transaction.description}</strong>{transaction.notes && <small className="cell-secondary">{transaction.notes}</small>}</td><td data-label="Categoria / origem / destino">{transactionContext(transaction, accounts)}</td><td data-label="Data">{displayDate(transaction.occurred_at)}</td><td data-label="Tipo"><span className={`type-text ${tone}`}>{financialTransactionLabel(transaction.type)}</span></td><td className="table-money" data-label="Valor">{financialAmountSign(transaction.type)}{formatCurrency(transaction.amount)}</td><td className="row-actions" data-label="Ações">{isEditableTransaction(transaction) && <button className="table-action" onClick={() => editTransaction(transaction)} type="button">Editar</button>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteTransaction(transaction)} type="button">Excluir</button></td></tr>;
+                        return <tr key={transaction.id}><td data-label="Lançamento"><strong className="cell-primary">{transaction.description}</strong>{transaction.installment_number && transaction.installment_count && <small className="cell-secondary">Parcela {transaction.installment_number} de {transaction.installment_count}</small>}{transaction.notes && <small className="cell-secondary">{transaction.notes}</small>}</td><td data-label="Categoria / origem / destino">{transactionContext(transaction, accounts)}</td><td data-label="Data">{displayDate(transaction.occurred_at)}</td><td data-label="Tipo"><span className={`type-text ${tone}`}>{financialTransactionLabel(transaction.type)}</span></td><td className="table-money" data-label="Valor">{financialAmountSign(transaction.type)}{formatCurrency(transaction.amount)}</td><td className="row-actions" data-label="Ações">{isEditableTransaction(transaction) && <button className="table-action" onClick={() => editTransaction(transaction)} type="button">Editar</button>}<button className="table-action danger-action" disabled={busy} onClick={() => void deleteTransaction(transaction)} type="button">Excluir</button></td></tr>;
                       })}
                     </tbody></table></div><TransactionCursorControls hasPrevious={transactionCursorHistory.length > 0} hasNext={transactionNextCursor !== null} onPrevious={previousTransactionPage} onNext={nextTransactionPage} page={transactionCursorHistory.length + 1} itemCount={transactions.length} /></>
                   )}

@@ -1,6 +1,6 @@
 # Identidade visual e experiência
 
-A SophIA — sua assistente financeira — começa pela conversa: ao entrar, a pessoa vê uma saudação curta, sugestões relacionadas às contas e cartões cadastrados e o campo para perguntar. A conversa anterior não abre automaticamente; fica disponível em **Conversas recentes**. Uma nova conversa só é persistida quando a primeira mensagem é enviada.
+A SophIA — sua assistente financeira — começa pela conversa: ao entrar, a pessoa vê uma saudação curta, sugestões relacionadas às contas e cartões cadastrados e o campo para perguntar. O resumo de saldo e gastos mantém recuo interno em todos os lados, e cada ícone de sugestão fica centralizado em um quadrado de tamanho fixo. A conversa anterior não abre automaticamente; fica disponível em **Conversas recentes**. Uma nova conversa só é persistida quando a primeira mensagem é enviada.
 
 A visão geral financeira permanece como uma área própria. Na conversa, o painel lateral acompanha o assunto quando ele é identificável. Em conversas antigas sem um assunto reconhecido, o botão continua disponível quando há dados do resumo financeiro e abre o contexto geral; assim, uma frase curta como “8,98 em Farmácia” não faz o painel desaparecer. O painel pode ser recolhido quando está aberto. Os controles de navegação e de contexto mantêm rótulos explícitos em seus respectivos lugares no menu e no cabeçalho. Quando existe contexto, muda conforme o assunto:
 
@@ -17,7 +17,7 @@ Quando uma ação de uma lista abre um formulário de edição fora da área vis
 - gastos: total, categorias e comparação com o mês anterior; quando a conversa pede outro período, o painel segue esse período;
 - sem assunto identificável: o painel mostra o resumo geral quando há dados financeiros disponíveis.
 
-Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta. O histórico começa com 10 conversas e sua área de rolagem ocupa o espaço até a divisória da navegação. Ao chegar perto do fim, carrega mais 10 em desktop e no drawer móvel; se os itens iniciais couberem inteiros, uma rolagem para baixo com mouse ou gesto de arrastar para cima no celular solicita o próximo lote. Títulos ficam em uma linha com reticências, o marcador fica alinhado ao texto e o estado selecionado permanece visível nos temas claro e escuro. O menu mantém rótulos à direita dos ícones. A conta pode receber uma foto circular, redimensionada no navegador e normalizada no servidor.
+Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta. O histórico mostra no mínimo 10 conversas e amplia o lote inicial para ocupar o espaço livre até a divisória da navegação. Ao chegar perto do fim, carrega mais 10 em desktop e no drawer móvel; se os itens iniciais couberem inteiros, uma rolagem para baixo com mouse ou gesto de arrastar para cima no celular solicita o próximo lote. Títulos ficam em uma linha com reticências, o marcador fica alinhado ao texto e o estado selecionado permanece visível nos temas claro e escuro. O menu mantém rótulos à direita dos ícones. A conta pode receber uma foto circular, redimensionada no navegador e normalizada no servidor.
 
 O painel de contexto financeiro usa blocos separados para saldo, indicadores, contas, previsões e movimentos recentes. O painel lateral do desktop tem largura mínima de 360 px; rótulos e valores têm hierarquia tipográfica própria e linhas com espaço suficiente para distinguir os grupos. Em telas menores, a mesma estrutura aparece em uma sheet rolável sem alterar os dados exibidos.
 
@@ -45,6 +45,8 @@ Seletores nativos estilizados mantêm a seta customizada com `background-image`,
 
 Claro e escuro são definidos por variáveis CSS em `sophia-redesign.css`. No tema claro, o conteúdo usa fundo `#F2F6F3`, superfícies brancas, texto `#16251B`, verde principal `#315E49` e navegação `#14221A`. No tema escuro, usa fundo `#141C16`, superfícies `#1C261F`, texto `#F1F6F1`, verde de ação `#A4CDA8` e navegação `#101712`. O seletor em Preferências e no cabeçalho mantém a escolha em `localStorage` no navegador pela chave `finance-ai-theme`; a escolha não é sincronizada com o backend.
 
+No celular, o seletor de mês do overview abre uma grade fixa junto à borda inferior, dentro dos recortes seguros do iPhone. Os doze meses e os controles de ano permanecem visíveis e com área de toque de pelo menos 44 px, mesmo durante a rolagem do conteúdo.
+
 Foco visível, contraste, responsividade e a preferência `prefers-reduced-motion` permanecem parte dos estilos comuns. Em telas estreitas, o menu continua como drawer; as páginas financeiras mantêm seu fluxo responsivo e as áreas respeitam os recortes seguros do iPhone. Campos de entrada preservam fonte mínima de 16 px em celular para evitar zoom automático do Safari.
 
 ## Personalização explícita
@@ -62,7 +64,7 @@ As telas autenticadas e de acesso compartilham a mesma identidade visual, com hi
 - Conferir o contexto para cartões, contas e gastos; verificar que transferência não aparece como despesa.
 - Abrir e fechar o painel contextual no desktop e no sheet em viewport móvel.
 - Conferir que o contexto específico segue o assunto identificado e que conversas antigas mantêm acesso ao resumo geral quando não há assunto reconhecido.
-- Conferir que o histórico mostra 10 conversas e carrega mais 10 ao rolar até o fim em telas altas de desktop e no drawer móvel.
+- Conferir que o histórico mostra no mínimo 10 conversas, usa o espaço vertical livre e carrega mais 10 ao rolar até o fim em telas altas de desktop e no drawer móvel.
 - Conferir que a área rolável do histórico termina junto à divisória da navegação; se os 10 itens couberem sem rolagem, testar rolagem descendente do mouse e gesto ascendente no drawer móvel.
 - Conferir que o contexto financeiro mantém grupos visualmente separados e textos legíveis no painel lateral do desktop e na sheet móvel.
 - Conferir a hierarquia de saldo e fluxo mensal na Visão Geral, os estados vazios e as ações de renomear/arquivar conversa.

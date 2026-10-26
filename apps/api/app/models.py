@@ -417,6 +417,12 @@ class Transaction(Base):
         Index("ix_transactions_user_invoice_type", "user_id", "card_invoice_id", "type"),
         UniqueConstraint("id", "user_id", name="uq_transactions_id_user_id"),
         UniqueConstraint(
+            "user_id",
+            "installment_group_id",
+            "installment_number",
+            name="uq_transactions_installment_group_number",
+        ),
+        UniqueConstraint(
             "user_id", "idempotency_operation", "idempotency_key",
             name="uq_transactions_user_idempotency_operation_key",
         ),
@@ -434,6 +440,15 @@ class Transaction(Base):
         CheckConstraint("source = 'MANUAL'", name="ck_transactions_source_manual"),
         CheckConstraint("status = 'CONFIRMED'", name="ck_transactions_status_confirmed"),
         CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),
+        CheckConstraint(
+            "(installment_group_id IS NULL AND installment_number IS NULL "
+            "AND installment_count IS NULL) OR "
+            "(installment_group_id IS NOT NULL AND type = 'CARD_PURCHASE' "
+            "AND installment_number IS NOT NULL AND installment_count IS NOT NULL "
+            "AND installment_number BETWEEN 1 AND installment_count "
+            "AND installment_count BETWEEN 2 AND 36)",
+            name="ck_transactions_installment_fields",
+        ),
         CheckConstraint(
             "(type IN ('INCOME', 'EXPENSE') AND account_id IS NOT NULL "
             "AND category_id IS NOT NULL AND source_account_id IS NULL "
@@ -490,6 +505,9 @@ class Transaction(Base):
     source_account_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     destination_account_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     card_invoice_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    installment_group_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    installment_number: Mapped[int | None] = mapped_column(nullable=True)
+    installment_count: Mapped[int | None] = mapped_column(nullable=True)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     source: Mapped[str] = mapped_column(String(10), nullable=False, default="MANUAL")
     status: Mapped[str] = mapped_column(String(10), nullable=False, default="CONFIRMED")

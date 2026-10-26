@@ -23,8 +23,10 @@ from app.finance_engine import billing_cycle_for_due_month, current_financial_da
 from app.finance_views import credit_card_response
 from app.invoices import (
     create_card_purchase,
+    create_card_purchase_plan,
     get_invoice,
     invoice_opening_balance_from_total,
+    preview_card_purchase_plan,
     set_invoice_opening_balances,
 )
 from app.models import Account, AIMemory, CardInvoice, Category, CreditCard, Transaction, User
@@ -32,6 +34,7 @@ from app.recurrences import create_recurrence_for_user, validate_recurrence
 from app.schemas import (
     CardInvoiceOpeningBalanceSet,
     CardPurchaseCreate,
+    CardPurchasePlanCreate,
     CategoryCreate,
     CreditCardCreate,
     RecurrenceCreate,
@@ -213,6 +216,20 @@ class CreateCardPurchaseInput(ToolInput):
         return normalize_money(value)
 
 
+class CreateCardPurchasePlanInput(ToolInput):
+    credit_card_id: UUID
+    category_id: UUID
+    description: str = Field(min_length=1, max_length=200)
+    total_amount: str
+    installment_count: int = Field(ge=2, le=36)
+    occurred_at: date
+
+    @field_validator("total_amount")
+    @classmethod
+    def validate_money(cls, value: str) -> str:
+        return normalize_money(value)
+
+
 class InvoiceOpeningBalanceInput(ToolInput):
     due_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     amount: str = Field(min_length=1, max_length=32)
@@ -346,7 +363,12 @@ def _model_args(model: BaseModel) -> dict[str, object]:
 
 def financial_tool_call_fingerprint(name: str, arguments: object) -> str | None:
     """Return a stable signature for a validated financial creation tool call."""
-    if name not in {"create_transaction", "create_transfer", "create_card_purchase"}:
+    if name not in {
+        "create_transaction",
+        "create_transfer",
+        "create_card_purchase",
+        "create_card_purchase_plan",
+    }:
         return None
     if not isinstance(arguments, dict):
         return None
@@ -787,6 +809,58 @@ def _create_card_purchase(
     )
 
 
+def _card_purchase_plan_request(args: BaseModel) -> CardPurchasePlanCreate:
+    payload = cast(CreateCardPurchasePlanInput, args)
+    return CardPurchasePlanCreate(
+        credit_card_id=payload.credit_card_id,
+        category_id=payload.category_id,
+        description=payload.description,
+        total_amount=Decimal(payload.total_amount),
+        installment_count=payload.installment_count,
+        occurred_at=payload.occurred_at,
+    )
+
+
+def _preview_card_purchase_plan(
+    db: Session, user: User, args: BaseModel
+) -> tuple[object, str]:
+    request = _card_purchase_plan_request(args)
+    preview = preview_card_purchase_plan(request, user, db)
+    changes = {
+        "Cartão": preview.credit_card_name,
+        "Descrição": preview.description,
+        "Data da compra": preview.occurred_at.strftime("%d/%m/%Y"),
+        "Valor total": format_brl(preview.total_amount),
+        "Parcelas": str(preview.installment_count),
+    }
+    for installment in preview.installments:
+        changes[f"Parcela {installment.number}/{preview.installment_count}"] = (
+            f"{format_brl(installment.amount)} · vence {installment.due_date.strftime('%d/%m/%Y')}"
+        )
+    return {
+        "title": "Confirme a compra parcelada",
+        "changes": changes,
+        "message": (
+            "Cada parcela será registrada como despesa na fatura do respectivo ciclo. "
+            "O pagamento da fatura não criará outra despesa."
+        ),
+    }, "confirmation"
+
+
+def _create_card_purchase_plan(
+    db: Session,
+    user: User,
+    args: BaseModel,
+    *,
+    idempotency_key: str | None = None,
+) -> tuple[object, str]:
+    request = _card_purchase_plan_request(args)
+    return (
+        create_card_purchase_plan(request, user, db, idempotency_key=idempotency_key),
+        "card_purchase_plan",
+    )
+
+
 def _card_invoice_opening_balance_preview(
     db: Session, user: User, args: BaseModel
 ) -> tuple[object, str]:
@@ -1150,6 +1224,19 @@ TOOL_DEFINITIONS = (
         _create_card_purchase,
     ),
     ToolDefinition(
+        "create_card_purchase_plan",
+        (
+            "Prepara uma compra já feita no cartão em 2 a 36 parcelas. Use quando a pessoa "
+            "informar quantidade de parcelas e valor total. Nunca registre o total como uma "
+            "compra única para simular parcelamento. O sistema calcula cada valor e ciclo de "
+            "fatura; sempre mostre a prévia completa e aguarde confirmação explícita."
+        ),
+        CreateCardPurchasePlanInput,
+        _preview_card_purchase_plan,
+        requires_confirmation=True,
+        confirmed_handler=_create_card_purchase_plan,
+    ),
+    ToolDefinition(
         "set_card_invoice_opening_balances",
         (
             "Importa o total atual de uma ou mais faturas que já existem. Converte o total em "
@@ -1342,7 +1429,12 @@ def execute_finance_tool(
                         previous_account_ids.add(previous_account_id)
         handler = definition.confirmed_handler if confirmed else None
         selected_handler = handler or definition.handler
-        if name in {"create_transaction", "create_transfer", "create_card_purchase"}:
+        if name in {
+            "create_transaction",
+            "create_transfer",
+            "create_card_purchase",
+            "create_card_purchase_plan",
+        }:
             idempotent_handler = cast(Callable[..., tuple[object, str | None]], selected_handler)
             result, card_type = idempotent_handler(
                 db, user, payload, idempotency_key=idempotency_key
