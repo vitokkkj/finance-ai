@@ -1,6 +1,31 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { mockFinanceApi } from "./api-mocks";
+
+async function loadNextHistoryBatch(history: Locator, input: "wheel" | "touch") {
+  const scrollable = await history.evaluate((element) => element.scrollHeight - element.clientHeight > 1);
+  if (scrollable) {
+    await history.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    return;
+  }
+
+  if (input === "wheel") {
+    await history.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true }));
+    });
+    return;
+  }
+
+  await history.evaluate((element) => {
+    const start = new Touch({ identifier: 1, target: element, clientX: 40, clientY: 180 });
+    const end = new Touch({ identifier: 1, target: element, clientX: 40, clientY: 140 });
+    element.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [start], changedTouches: [start] }));
+    element.dispatchEvent(new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: [end] }));
+  });
+}
 
 test.beforeEach(async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-12T12:00:00-03:00") });
@@ -852,20 +877,27 @@ test("o proprietário pode criar e excluir contas de acesso sem dados", async ({
 });
 
 test("o histórico mostra 10 conversas e carrega mais ao rolar até o fim", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.setViewportSize({ width: 1440, height: 1400 });
   await mockFinanceApi(page, { largeLists: true });
   await page.goto("/");
 
   const history = page.locator(".assistant-history");
   await expect(history.locator(".history-row")).toHaveCount(10);
   await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 10 de 32 conversas exibidas.");
-  await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  const historyAndNavigationGap = await page.evaluate(() => {
+    const historyElement = document.querySelector(".assistant-history");
+    const navigationElement = document.querySelector(".assistant-nav");
+    if (!historyElement || !navigationElement) return Number.POSITIVE_INFINITY;
+    return navigationElement.getBoundingClientRect().top - historyElement.getBoundingClientRect().bottom;
+  });
+  expect(historyAndNavigationGap).toBeLessThanOrEqual(2);
+  await loadNextHistoryBatch(history, "wheel");
   await expect(history.locator(".history-row")).toHaveCount(20);
   await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 20 de 32 conversas exibidas.");
-  await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await loadNextHistoryBatch(history, "wheel");
   await expect(history.locator(".history-row")).toHaveCount(30);
   await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 30 de 32 conversas exibidas.");
-  await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await loadNextHistoryBatch(history, "wheel");
   await expect(history.locator(".history-row")).toHaveCount(32);
   await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 32 de 32 conversas exibidas.");
 });
@@ -878,13 +910,18 @@ test("o histórico mobile rola no próprio menu e carrega mais conversas automat
 
   const history = page.locator(".assistant-sidebar.mobile-open .assistant-history");
   await expect(history.locator(".history-row")).toHaveCount(10);
-  await expect.poll(() => history.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
-
-  await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  const mobileHistoryAndNavigationGap = await page.evaluate(() => {
+    const historyElement = document.querySelector(".assistant-sidebar.mobile-open .assistant-history");
+    const navigationElement = document.querySelector(".assistant-sidebar.mobile-open .assistant-nav");
+    if (!historyElement || !navigationElement) return Number.POSITIVE_INFINITY;
+    return navigationElement.getBoundingClientRect().top - historyElement.getBoundingClientRect().bottom;
+  });
+  expect(mobileHistoryAndNavigationGap).toBeLessThanOrEqual(2);
+  await loadNextHistoryBatch(history, "touch");
   await expect(history.locator(".history-row")).toHaveCount(20);
   await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 20 de 32 conversas exibidas.");
 
-  await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await loadNextHistoryBatch(history, "touch");
   await expect(history.locator(".history-row")).toHaveCount(30);
 });
 
@@ -919,6 +956,9 @@ test("conversas antigas mantêm acesso ao contexto financeiro", async ({ page })
   await contextToggle.click();
   const contextPanel = page.getByRole("complementary", { name: "Contexto financeiro" });
   await expect(contextPanel).toContainText("Saldos por conta");
+  await expect.poll(() => contextPanel.evaluate((element) => Number.parseFloat(getComputedStyle(element).gap))).toBeGreaterThanOrEqual(12);
+  await expect.poll(() => contextPanel.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(360);
+  await expect(contextPanel.locator(".context-metrics strong").first()).toHaveCSS("font-size", "14px");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: "Abrir contexto financeiro" })).toBeVisible();
