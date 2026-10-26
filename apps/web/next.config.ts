@@ -8,6 +8,8 @@ const allowedDevOrigins = (process.env.WEB_ALLOWED_DEV_ORIGINS ?? "127.0.0.1")
 
 const nextConfig: NextConfig = {
   distDir: process.env.NODE_ENV === "production" ? ".next-production" : ".next",
+  // Keep the dev-only Next.js overlay from covering the app's mobile edge controls.
+  devIndicators: false,
   allowedDevOrigins,
   async rewrites() {
     return [

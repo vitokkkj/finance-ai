@@ -13,6 +13,16 @@ type LoginStep = "credentials" | "mfa";
 type Theme = "light" | "dark";
 
 const THEME_STORAGE_KEY = "finance-ai-theme";
+const THEME_COLORS: Record<Theme, string> = {
+  light: "#f2f6f3",
+  dark: "#141c16",
+};
+
+function applyTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[theme]);
+}
 
 export function AppShell() {
   const [gate, setGate] = useState<Gate>("loading");
@@ -43,8 +53,7 @@ export function AppShell() {
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
     const initialTheme: Theme = savedTheme === "dark" ? "dark" : "light";
-    document.documentElement.dataset.theme = initialTheme;
-    document.documentElement.style.colorScheme = initialTheme;
+    applyTheme(initialTheme);
     setTheme(initialTheme);
   }, []);
 
@@ -247,8 +256,7 @@ export function AppShell() {
 
   function changeTheme(nextTheme: Theme) {
     setTheme(nextTheme);
-    document.documentElement.dataset.theme = nextTheme;
-    document.documentElement.style.colorScheme = nextTheme;
+    applyTheme(nextTheme);
     window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
   }
 

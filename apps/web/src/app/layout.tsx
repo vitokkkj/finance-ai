@@ -4,6 +4,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import "./design-system.css";
 import "./editorial-design.css";
+import "./sophia-redesign.css";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#173b2c",
+  themeColor: "#f2f6f3",
   width: "device-width",
   initialScale: 1,
 };

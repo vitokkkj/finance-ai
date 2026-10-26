@@ -152,8 +152,8 @@ test("o chat mostra ganhos por dia e desdobra cards de lançamentos aninhados", 
   await expect(card).not.toContainText("Movimento");
 });
 
-test("o indicador de pensamento continua animado com movimento reduzido no sistema", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
+test("o orbe de pensamento anima e respeita movimento reduzido", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await mockFinanceApi(page);
 
   let releaseResponse: (() => void) | undefined;
@@ -172,12 +172,19 @@ test("o indicador de pensamento continua animado com movimento reduzido no siste
   await page.getByRole("textbox", { name: "Mensagem para o assistente" }).fill("Como está meu mês?");
   await page.getByRole("button", { name: "Enviar mensagem" }).click();
 
-  const spinner = page.locator(".assistant-pending-icon");
-  await expect(spinner).toBeVisible();
-  await expect.poll(() => spinner.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return [style.animationName, style.animationDuration, style.animationIterationCount];
-  })).toEqual(["assistant-status-rotate", "1.2s", "infinite"]);
+  const orb = page.locator(".assistant-pending-icon");
+  await expect(orb).toBeVisible();
+  await expect.poll(() => orb.evaluate((element) => {
+    const ring = getComputedStyle(element, "::before");
+    const core = getComputedStyle(element, "::after");
+    return [ring.animationName, ring.animationDuration, core.animationName, core.animationDuration];
+  })).toEqual(["sophia-orb-rotate", "2.2s", "sophia-orb-breathe", "1.9s"]);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => orb.evaluate((element) => [
+    getComputedStyle(element, "::before").animationName,
+    getComputedStyle(element, "::after").animationName,
+  ])).toEqual(["none", "none"]);
 
   releaseResponse?.();
   await expect(page.locator(".assistant-pending-card")).toHaveCount(0);
@@ -304,6 +311,11 @@ test("a consulta financeira oferece retry quando o carregamento falha", async ({
   // Next's development Strict Mode starts the mount effect twice.
   await mockFinanceApi(page, { largeLists: true, failTransactionsRequests: 2 });
   await page.goto("/");
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#f2f6f3");
+  await page.getByRole("button", { name: "Ativar tema escuro" }).click();
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#141c16");
+  await page.getByRole("button", { name: "Ativar tema claro" }).click();
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#f2f6f3");
   await page.getByRole("button", { name: "Lançamentos", exact: true }).click();
 
   const financeLoadError = page.locator(".workspace-notice[role='alert']");
