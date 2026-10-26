@@ -32,6 +32,9 @@ type InvoiceItem = {
   amount: string;
   occurred_at: string;
   notes: string | null;
+  installment_group_id?: string | null;
+  installment_number?: number | null;
+  installment_count?: number | null;
 };
 type CardInvoice = {
   id: string;
@@ -158,6 +161,7 @@ export function CreditCardWorkspace({
     category_id: "",
     description: "",
     amount: "",
+    installment_count: "1",
     occurred_at: localDate(),
     notes: "",
   });
@@ -475,17 +479,37 @@ export function CreditCardWorkspace({
     event.preventDefault();
     setBusy(true);
     try {
-      await apiRequest("/api/card-purchases", {
-        method: "POST",
-        body: JSON.stringify({
-          ...purchaseForm,
-          amount: toDecimalString(purchaseForm.amount),
-          notes: purchaseForm.notes || null,
-        }),
-      });
-      setPurchaseForm({ ...purchaseForm, description: "", amount: "", notes: "" });
+      const installmentCount = Number(purchaseForm.installment_count);
+      const commonPayload = {
+        credit_card_id: purchaseForm.credit_card_id,
+        category_id: purchaseForm.category_id,
+        description: purchaseForm.description,
+        occurred_at: purchaseForm.occurred_at,
+        notes: purchaseForm.notes || null,
+      };
+      if (installmentCount > 1) {
+        await apiRequest("/api/card-purchase-plans", {
+          method: "POST",
+          body: JSON.stringify({
+            ...commonPayload,
+            total_amount: toDecimalString(purchaseForm.amount),
+            installment_count: installmentCount,
+          }),
+        });
+      } else {
+        await apiRequest("/api/card-purchases", {
+          method: "POST",
+          body: JSON.stringify({
+            ...commonPayload,
+            amount: toDecimalString(purchaseForm.amount),
+          }),
+        });
+      }
+      setPurchaseForm({ ...purchaseForm, description: "", amount: "", installment_count: "1", notes: "" });
       setPurchaseFormOpen(false);
-      await refresh("Compra registrada na fatura. O saldo das contas não mudou.");
+      await refresh(installmentCount > 1
+        ? `Compra parcelada em ${installmentCount} vezes registrada nas faturas correspondentes. O saldo das contas não mudou.`
+        : "Compra registrada na fatura. O saldo das contas não mudou.");
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível registrar a compra." });
     } finally {
@@ -589,7 +613,9 @@ export function CreditCardWorkspace({
               <div className="field-label"><label htmlFor="card-purchase-date">Data</label><CalendarDateInput id="card-purchase-date" onChange={(value) => setPurchaseForm({ ...purchaseForm, occurred_at: value })} required value={purchaseForm.occurred_at} /></div>
               <label className="field-label">Categoria<select onChange={(event) => setPurchaseForm({ ...purchaseForm, category_id: event.target.value })} required value={purchaseForm.category_id}><option value="">Selecione</option>{expenseCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
               <label className="field-label">Descrição<input maxLength={200} onChange={(event) => setPurchaseForm({ ...purchaseForm, description: event.target.value })} required value={purchaseForm.description} /></label>
-              <div className="field-label"><label htmlFor="card-purchase-amount">Valor</label><CurrencyInput id="card-purchase-amount" onChange={(value) => setPurchaseForm({ ...purchaseForm, amount: value })} placeholder="0,00" required value={purchaseForm.amount} /></div>
+              <div className="field-label"><label htmlFor="card-purchase-amount">{Number(purchaseForm.installment_count) > 1 ? "Valor total" : "Valor"}</label><CurrencyInput id="card-purchase-amount" onChange={(value) => setPurchaseForm({ ...purchaseForm, amount: value })} placeholder="0,00" required value={purchaseForm.amount} /></div>
+              <label className="field-label">Parcelas<select onChange={(event) => setPurchaseForm({ ...purchaseForm, installment_count: event.target.value })} required value={purchaseForm.installment_count}>{Array.from({ length: 36 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count === 1 ? "À vista" : `${count} parcelas`}</option>)}</select></label>
+              {Number(purchaseForm.installment_count) > 1 && <p className="form-note full-width-field">O total será distribuído entre as faturas seguintes; os centavos restantes ficam nas primeiras parcelas.</p>}
               <label className="field-label full-width-field">Observações<textarea maxLength={2000} onChange={(event) => setPurchaseForm({ ...purchaseForm, notes: event.target.value })} rows={2} value={purchaseForm.notes} /></label>
             </div>
             {(activeCards.length === 0 || expenseCategories.length === 0) && <p className="form-helper">Cadastre um cartão ativo e uma categoria de despesa antes de registrar compras.</p>}
@@ -689,7 +715,7 @@ export function CreditCardWorkspace({
               <section className="invoice-detail-group">
                 <h4>Compras registradas</h4>
                 {selectedInvoice.purchases.length > 0
-                  ? <>{purchasePagination.items.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)}<PaginationControls end={purchasePagination.end} label="Paginação das compras da fatura" onPageChange={purchasePagination.setPage} page={purchasePagination.page} pageCount={purchasePagination.pageCount} start={purchasePagination.start} total={purchasePagination.total} /></>
+                  ? <>{purchasePagination.items.map((item) => <div className="invoice-line" key={item.id}><span>{item.description}<small>{displayDate(item.occurred_at)}{item.installment_number && item.installment_count ? ` · Parcela ${item.installment_number} de ${item.installment_count}` : ""}</small></span><strong>{formatCurrency(item.amount)}</strong></div>)}<PaginationControls end={purchasePagination.end} label="Paginação das compras da fatura" onPageChange={purchasePagination.setPage} page={purchasePagination.page} pageCount={purchasePagination.pageCount} start={purchasePagination.start} total={purchasePagination.total} /></>
                   : <p className="invoice-detail-empty">Nenhuma compra detalhada neste ciclo.</p>}
               </section>
               <section className="invoice-detail-group">

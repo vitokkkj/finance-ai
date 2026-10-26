@@ -1778,6 +1778,94 @@ def test_chat_retry_keeps_financial_idempotency_when_provider_reorders_tools(
     assert all(transaction["amount"] == "12.34" for transaction in transactions)
 
 
+def test_chat_previews_and_confirms_card_installment_plan(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    _, category_id = _create_assistant_basics(client)
+    today = _today()
+    card = client.post(
+        "/api/cards",
+        json={
+            "name": "Nubank",
+            "institution": "Nubank",
+            "credit_limit": "5000.00",
+            "closing_day": 4,
+            "due_day": 11,
+        },
+    ).json()
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    function_call = FunctionCall(
+        "call_installment_plan",
+        "create_card_purchase_plan",
+        json.dumps(
+            {
+                "credit_card_id": card["id"],
+                "category_id": category_id,
+                "description": "Pneus Twister",
+                "total_amount": "905.05",
+                "installment_count": 5,
+                "occurred_at": today.isoformat(),
+            }
+        ),
+    )
+    _set_fake_provider(
+        client,
+        FakeAIProvider(
+            [[ProviderEvent(type="function_call", function_call=function_call), _completed()]]
+        ),
+    )
+
+    prepared = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "Registre Pneus Twister por R$ 905,05 em 5 parcelas no Nubank."},
+    )
+
+    assert prepared.status_code == 200
+    assert "R$ 905,05" in prepared.text
+    assert "Parcela 1/5" in prepared.text
+    assert client.get("/api/transactions").json()["items"] == []
+    assert client.get(f"/api/cards/{card['id']}/invoices").json() == []
+
+    detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    confirmation = next(
+        item
+        for message in detail["messages"]
+        for item in message["structured_content"] or []
+        if item.get("type") == "confirmation" and item.get("status") == "pending"
+    )
+    confirmed = client.post(
+        f"/api/ai/conversations/{conversation['id']}/tool-calls/"
+        f"{confirmation['tool_call_id']}/confirm"
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "SUCCEEDED"
+    transactions = client.get("/api/transactions").json()["items"]
+    assert len(transactions) == 5
+    assert all(transaction["type"] == "CARD_PURCHASE" for transaction in transactions)
+    assert sorted(transaction["installment_number"] for transaction in transactions) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert all(transaction["installment_count"] == 5 for transaction in transactions)
+    transaction_total = sum(
+        (Decimal(transaction["amount"]) for transaction in transactions), Decimal("0.00")
+    )
+    assert transaction_total == Decimal("905.05")
+    invoices = client.get(f"/api/cards/{card['id']}/invoices").json()
+    assert len(invoices) == 5
+    assert all(len(invoice["purchases"]) == 1 for invoice in invoices)
+    assert sorted(
+        purchase["installment_number"]
+        for invoice in invoices
+        for purchase in invoice["purchases"]
+    ) == [1, 2, 3, 4, 5]
+
+
 def test_category_answer_resolves_pending_expense_without_calling_model(
     client: TestClient, test_session_factory: sessionmaker[Session]
 ) -> None:

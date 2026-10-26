@@ -19,6 +19,7 @@ async function financialIdempotency(path: string, init?: RequestInit): Promise<{
     path === "/api/transactions" ||
     path === "/api/transfers" ||
     path === "/api/card-purchases" ||
+    path === "/api/card-purchase-plans" ||
     /^\/api\/invoices\/[^/]+\/payments$/.test(path);
   const body = init?.body;
   if (!isFinancialCreate || typeof body !== "string") return null;

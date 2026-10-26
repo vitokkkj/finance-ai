@@ -45,6 +45,8 @@ Seletores nativos estilizados mantêm a seta customizada com `background-image`,
 
 Claro e escuro são definidos por variáveis CSS em `sophia-redesign.css`. No tema claro, o conteúdo usa fundo `#F2F6F3`, superfícies brancas, texto `#16251B`, verde principal `#315E49` e navegação `#14221A`. No tema escuro, usa fundo `#141C16`, superfícies `#1C261F`, texto `#F1F6F1`, verde de ação `#A4CDA8` e navegação `#101712`. O seletor em Preferências e no cabeçalho mantém a escolha em `localStorage` no navegador pela chave `finance-ai-theme`; a escolha não é sincronizada com o backend.
 
+No celular, o seletor de mês do overview abre uma grade fixa junto à borda inferior, dentro dos recortes seguros do iPhone. Os doze meses e os controles de ano permanecem visíveis e com área de toque de pelo menos 44 px, mesmo durante a rolagem do conteúdo.
+
 Foco visível, contraste, responsividade e a preferência `prefers-reduced-motion` permanecem parte dos estilos comuns. Em telas estreitas, o menu continua como drawer; as páginas financeiras mantêm seu fluxo responsivo e as áreas respeitam os recortes seguros do iPhone. Campos de entrada preservam fonte mínima de 16 px em celular para evitar zoom automático do Safari.
 
 ## Personalização explícita

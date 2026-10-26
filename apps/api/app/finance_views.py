@@ -88,6 +88,9 @@ def transaction_response(
         amount=transaction.amount,
         occurred_at=financial_date(transaction.occurred_at),
         notes=transaction.notes,
+        installment_group_id=transaction.installment_group_id,
+        installment_number=transaction.installment_number,
+        installment_count=transaction.installment_count,
         created_at=transaction.created_at,
         updated_at=transaction.updated_at,
     )

@@ -360,6 +360,93 @@ class CardPurchaseCreate(BaseModel):
         return value.strip() or None if value is not None else None
 
 
+class CardPurchasePlanCreate(BaseModel):
+    credit_card_id: UUID
+    category_id: UUID
+    description: str = Field(min_length=1, max_length=200)
+    total_amount: Decimal = Field(gt=Decimal("0"), max_digits=14, decimal_places=2)
+    installment_count: int = Field(ge=2, le=36)
+    occurred_at: date
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Informe a descrição da compra.")
+        return normalized
+
+    @field_validator("total_amount", mode="before")
+    @classmethod
+    def require_exact_money_string(cls, value: object) -> object:
+        if not isinstance(value, (str, Decimal)):
+            raise ValueError("Informe valores monetários como texto decimal.")
+        return value
+
+    @model_validator(mode="after")
+    def every_installment_is_at_least_one_cent(self) -> CardPurchasePlanCreate:
+        cents = int(self.total_amount * 100)
+        if cents < self.installment_count:
+            raise ValueError("O valor total precisa ser de pelo menos R$ 0,01 por parcela.")
+        return self
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+
+class CardPurchaseInstallmentPreview(BaseModel):
+    number: int
+    amount: Decimal
+    closing_date: date
+    due_date: date
+
+    @field_serializer("amount")
+    def serialize_amount(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
+class CardPurchasePlanPreview(BaseModel):
+    credit_card_id: UUID
+    credit_card_name: str
+    category_id: UUID
+    category_name: str
+    description: str
+    occurred_at: date
+    total_amount: Decimal
+    installment_count: int
+    installments: list[CardPurchaseInstallmentPreview]
+
+    @field_serializer("total_amount")
+    def serialize_total_amount(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
+class CardPurchaseInstallmentResponse(CardPurchaseInstallmentPreview):
+    transaction_id: UUID
+    invoice_id: UUID
+
+
+class CardPurchasePlanResponse(BaseModel):
+    id: UUID
+    credit_card_id: UUID
+    credit_card_name: str
+    category_id: UUID
+    category_name: str
+    description: str
+    occurred_at: date
+    total_amount: Decimal
+    installment_count: int
+    notes: str | None
+    installments: list[CardPurchaseInstallmentResponse]
+
+    @field_serializer("total_amount")
+    def serialize_total_amount(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
 class CardPaymentCreate(BaseModel):
     account_id: UUID
     amount: Decimal = Field(gt=Decimal("0"), max_digits=14, decimal_places=2)
@@ -464,6 +551,9 @@ class TransactionResponse(BaseModel):
     amount: Decimal
     occurred_at: date
     notes: str | None
+    installment_group_id: UUID | None = None
+    installment_number: int | None = None
+    installment_count: int | None = None
     created_at: datetime
     updated_at: datetime
 

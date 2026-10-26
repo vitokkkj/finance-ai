@@ -656,6 +656,24 @@ textarea:focus-visible,
   color: var(--color-ink);
 }
 
+@media (max-width: 760px) {
+  .sophia-month-popover {
+    position: fixed;
+    inset-inline: 12px;
+    top: auto;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: auto;
+    max-width: none;
+    padding: 14px;
+  }
+
+  .sophia-month-heading button,
+  .sophia-month-grid button {
+    height: 44px;
+    min-height: 44px;
+  }
+}
+
 .overview-primary-grid {
   gap: 12px;
   border: 0;
