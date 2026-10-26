@@ -2083,9 +2083,18 @@ function StructuredCard({
   if (item.type === "confirmation" && data) {
     const changes = record(data.changes);
     const pending = item.status === "pending" && Boolean(item.tool_call_id);
+    const statusLabel = item.status === "pending"
+      ? "Revisão necessária"
+      : item.status === "succeeded"
+        ? "Confirmada"
+        : item.status === "cancelled"
+          ? "Cancelada"
+          : item.status === "failed"
+            ? "Não concluída"
+            : "Ação encerrada";
     return (
       <section className="assistant-data-card assistant-confirmation">
-        <div className="assistant-data-card-heading"><span>{stringValue(data.title) ?? "Confirme a alteração"}</span><small>Revisão necessária</small></div>
+        <div className="assistant-data-card-heading"><span>{stringValue(data.title) ?? "Confirme a alteração"}</span><small>{statusLabel}</small></div>
         {changes && <ul>{Object.entries(changes).map(([key, value]) => <li key={key}><span>{fieldLabel(key)}</span><strong>{String(value ?? "—")}</strong></li>)}</ul>}
         {stringValue(data.message) && <p className="assistant-card-note">{stringValue(data.message)}</p>}
         {pending && <div className="assistant-confirm-actions"><button className="assistant-confirm-button" disabled={pendingAction?.id === item.tool_call_id} onClick={() => onPendingAction(item.tool_call_id ?? "", "confirm")} type="button">{pendingAction?.id === item.tool_call_id && pendingAction?.action === "confirm" ? "Aplicando…" : "Confirmar"}</button><button className="assistant-cancel-button" disabled={pendingAction?.id === item.tool_call_id} onClick={() => onPendingAction(item.tool_call_id ?? "", "cancel")} type="button">Cancelar</button></div>}

@@ -95,6 +95,7 @@ test("o chat apresenta a prévia e o resultado de uma compra parcelada", async (
       })),
     },
   };
+  const completedConfirmation = { ...pendingItem, status: "succeeded" };
 
   await page.route("**/api/ai/conversations/synthetic-conversation", async (route) => {
     if (route.request().method() !== "GET") {
@@ -115,7 +116,7 @@ test("o chat apresenta a prévia e o resultado de uma compra parcelada", async (
             id: "installment-assistant",
             role: "ASSISTANT",
             content: confirmed ? "Compra parcelada registrada." : "Revise o parcelamento antes de confirmar.",
-            structured_content: [confirmed ? planItem : pendingItem],
+            structured_content: confirmed ? [completedConfirmation, planItem] : [pendingItem],
           },
         ],
       }),
@@ -144,6 +145,8 @@ test("o chat apresenta a prévia e o resultado de uma compra parcelada", async (
   await expect(confirmation).toContainText("Confirme a compra parcelada");
   await expect(confirmation).toContainText("Parcela 1/5");
   await confirmation.getByRole("button", { name: "Confirmar" }).click();
+  await expect(confirmation).toContainText("Confirmada");
+  await expect(confirmation.getByRole("button")).toHaveCount(0);
 
   const result = page.locator(".assistant-data-card").filter({ hasText: "Compra parcelada registrada" });
   await expect(result).toContainText("R$ 905,05");

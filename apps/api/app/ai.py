@@ -174,16 +174,56 @@ def _conversation_messages(
         )
         .order_by(AIMessage.created_at, AIMessage.id)
     ).all()
-    return [
-        AIMessageResponse(
-            id=row.id,
-            role=cast(Literal["USER", "ASSISTANT"], row.role),
-            content=row.content,
-            structured_content=cast(list[dict[str, object]] | None, row.structured_content),
-            created_at=row.created_at,
+
+    tool_call_statuses = {
+        str(tool_call_id): tool_call_status
+        for tool_call_id, tool_call_status in db.execute(
+            select(AIToolCall.id, AIToolCall.status).where(
+                AIToolCall.user_id == user.id,
+                AIToolCall.conversation_id == conversation.id,
+            )
+        ).all()
+    }
+    messages: list[AIMessageResponse] = []
+    for row in rows:
+        structured_content = cast(list[dict[str, object]] | None, row.structured_content)
+        message_content = row.content
+        if structured_content:
+            current_cards: list[dict[str, object]] = []
+            has_pending_confirmation = False
+            has_processed_confirmation = False
+            for original_card in structured_content:
+                card = original_card
+                if card.get("type") == "confirmation":
+                    tool_call_id = card.get("tool_call_id")
+                    status = (
+                        tool_call_statuses.get(tool_call_id)
+                        if isinstance(tool_call_id, str)
+                        else None
+                    )
+                    if status:
+                        card = dict(card)
+                        card["status"] = (
+                            "pending" if status == "PENDING_CONFIRMATION" else status.casefold()
+                        )
+                        if status == "PENDING_CONFIRMATION":
+                            has_pending_confirmation = True
+                        else:
+                            has_processed_confirmation = True
+                current_cards.append(card)
+            structured_content = current_cards
+            if has_processed_confirmation and not has_pending_confirmation:
+                message_content = "Esta ação já foi processada. Consulte o status abaixo."
+        messages.append(
+            AIMessageResponse(
+                id=row.id,
+                role=cast(Literal["USER", "ASSISTANT"], row.role),
+                content=message_content,
+                structured_content=structured_content,
+                created_at=row.created_at,
+            )
         )
-        for row in rows
-    ]
+    return messages
 
 
 def _conversation_title_context(db: Session, user: User, conversation: AIConversation) -> str:

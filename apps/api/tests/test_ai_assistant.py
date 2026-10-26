@@ -2287,12 +2287,40 @@ def test_correcting_recent_expense_updates_same_transaction_after_confirmation(
         for line in corrected.text.splitlines()
         if line.startswith("data: ") and '"tool_call_id"' in line
     )
+    conversation_detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    pending_confirmation = next(
+        card
+        for message in conversation_detail["messages"]
+        for card in message["structured_content"] or []
+        if card.get("type") == "confirmation"
+    )
+    assert pending_confirmation["status"] == "pending"
+
     confirmed = client.post(
         f"/api/ai/conversations/{conversation['id']}/tool-calls/{confirmation_id}/confirm"
     )
 
+    conversation_detail = client.get(f"/api/ai/conversations/{conversation['id']}").json()
+    completed_confirmation = next(
+        card
+        for message in conversation_detail["messages"]
+        for card in message["structured_content"] or []
+        if card.get("tool_call_id") == confirmation_id
+    )
+    confirmation_message = next(
+        message
+        for message in conversation_detail["messages"]
+        if any(
+            card.get("tool_call_id") == confirmation_id
+            for card in message["structured_content"] or []
+        )
+    )
     final_transactions = client.get("/api/transactions").json()["items"]
     assert confirmed.status_code == 200
+    assert completed_confirmation["status"] == "succeeded"
+    assert confirmation_message["content"] == (
+        "Esta ação já foi processada. Consulte o status abaixo."
+    )
     assert len(final_transactions) == 1
     assert final_transactions[0]["amount"] == "120.00"
 
