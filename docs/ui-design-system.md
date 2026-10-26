@@ -27,7 +27,7 @@ O sino **Avisos** no cabeçalho abre uma lista de pagamentos atrasados e vencime
 
 Respostas estruturadas usam um conjunto compacto de componentes para resumo financeiro, categorias, lançamentos, transferências, saldo de contas, cartões, faturas, confirmação, erro e sucesso. As informações são apresentadas a partir dos dados estruturados enviados pela API; o frontend não recalcula totais nem altera a semântica de transferências, compras ou pagamentos de fatura.
 
-O indicador durante a resposta usa um orbe leve em CSS, com movimento compatível com `prefers-reduced-motion`. O texto do estado continua vindo do andamento real da solicitação e das ferramentas financeiras da API. O campo de mensagem e o histórico permanecem na tela; não existe atraso mínimo artificial nem substituição do fluxo de mensagens por uma resposta demonstrativa.
+O indicador durante a resposta usa um orbe leve em CSS. O aro externo tem arco de contraste e rotação visível de 1,05 s; um ponto percorre o aro e o núcleo pulsa. Com `prefers-reduced-motion: reduce`, as animações param. O texto do estado continua vindo do andamento real da solicitação e das ferramentas financeiras da API. O campo de mensagem e o histórico permanecem na tela; não existe atraso mínimo artificial nem substituição do fluxo de mensagens por uma resposta demonstrativa.
 
 ## Direção visual
 
@@ -62,3 +62,5 @@ As telas autenticadas e de acesso compartilham a mesma identidade visual, com hi
 - Conferir os cinco controles explícitos de **Como a SophIA trabalha com você** sem salvar durante a revisão visual.
 - Conferir respostas estruturadas, confirmações, estados de erro e sucesso nos temas claro e escuro.
 - Conferir navegação por teclado, foco visível, contraste e `prefers-reduced-motion`.
+- Conferir o aro girando com movimento normal e estático com movimento reduzido.
+- A regressão móvel em Playwright percorre chat, Visão geral, Lançamentos, Contas, Cartões, Programados, Categorias e Preferências em 360, 390 e 430 px; verifica estouro horizontal, posição do compositor e drawer, densidade do histórico, marcador da conversa ativa e quebra de mensagens longas. Safari/iPhone físico ainda exige validação manual.

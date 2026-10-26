@@ -66,6 +66,8 @@ As referências consultadas mostram padrões úteis: [Organizze — alertas de c
 
 | Verificação | Resultado |
 |---|---|
+| Varredura de UX móvel, 26/10/2026 | O E2E percorreu chat, Visão geral, Lançamentos, Contas, Cartões, Programados, Categorias e Preferências em 360, 390 e 430 px. Não encontrou overflow horizontal; composer, drawer, histórico e mensagem longa ficaram dentro da viewport. O teste cobre Chromium móvel simulado, não substitui inspeção em Safari/iPhone físico. |
+| Indicador de pensamento e navegação, 26/10/2026 | O E2E compara transformações do aro externo em instantes distintos para comprovar rotação, e confirma que aro, núcleo e ponto param com movimento reduzido. O histórico ativo mantém ícone vazado e linhas compactas; o controle desktop do menu não quebra o rótulo. |
 | API — CI PostgreSQL 17 | **Histórico:** 193 passaram; 2 avisos não bloqueantes no [workflow 38312160754](https://github.com/vitokkkj/finance-ai/actions/runs/38312160754), associado à publicação anterior. Depois, `38317703475` e o CI do SHA implantado `9079acc` (`38327681278`) passaram com migrations PostgreSQL 17, suíte de API e `pip-audit`; localmente, a auditoria registrou 196 testes aprovados e 3 ignorados por limitações de plataforma/concorrência antes das últimas regressões. |
 | API — execução local no Windows | **Histórico:** 191 passaram; 2 foram ignorados por dependerem de permissões POSIX indisponíveis no Windows. A contagem posterior registrada para o SHA implantado é 196 aprovados e 3 ignorados. |
 | Ruff | Passou. |

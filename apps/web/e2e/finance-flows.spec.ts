@@ -178,13 +178,19 @@ test("o orbe de pensamento anima e respeita movimento reduzido", async ({ page }
     const ring = getComputedStyle(element, "::before");
     const core = getComputedStyle(element, "::after");
     return [ring.animationName, ring.animationDuration, core.animationName, core.animationDuration];
-  })).toEqual(["sophia-orb-rotate", "2.2s", "sophia-orb-breathe", "1.9s"]);
+  })).toEqual(["sophia-orb-rotate", "1.05s", "sophia-orb-breathe", "1.9s"]);
+
+  const firstRingTransform = await orb.evaluate((element) => getComputedStyle(element, "::before").transform);
+  await page.waitForTimeout(180);
+  const nextRingTransform = await orb.evaluate((element) => getComputedStyle(element, "::before").transform);
+  expect(nextRingTransform).not.toBe(firstRingTransform);
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(() => orb.evaluate((element) => [
     getComputedStyle(element, "::before").animationName,
     getComputedStyle(element, "::after").animationName,
-  ])).toEqual(["none", "none"]);
+    getComputedStyle(element, "i").animationName,
+  ])).toEqual(["none", "none", "none"]);
 
   releaseResponse?.();
   await expect(page.locator(".assistant-pending-card")).toHaveCount(0);
@@ -210,6 +216,131 @@ test("os campos de login mantêm fonte de 16 px em uma tela de iPhone", async ({
     expect(fontSize).toBeGreaterThanOrEqual(16);
   }
   await context.close();
+});
+
+test("as telas principais permanecem dentro da viewport em larguras móveis", async ({ browser }) => {
+  const routes = [
+    "/",
+    "/?view=finance&section=overview",
+    "/?view=finance&section=transactions",
+    "/?view=finance&section=accounts",
+    "/?view=finance&section=cards",
+    "/?view=finance&section=recurrences",
+    "/?view=finance&section=categories",
+    "/?view=settings",
+  ];
+
+  for (const width of [360, 390, 430]) {
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      timezoneId: "America/Sao_Paulo",
+    });
+    const page = await context.newPage();
+    await page.clock.install({ time: new Date("2026-10-12T12:00:00-03:00") });
+    await mockFinanceApi(page, { largeLists: true });
+
+    for (const route of routes) {
+      await page.goto(route);
+      if (route === "/") {
+        await expect(page.getByRole("textbox", { name: "Mensagem para o assistente" })).toBeVisible();
+      } else {
+        await expect(page.locator(".workspace-heading h1, .assistant-settings-heading h1").first()).toBeVisible();
+      }
+
+      const dimensions = await page.evaluate(() => ({
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+        mainRight: document.querySelector(".assistant-main")?.getBoundingClientRect().right ?? 0,
+      }));
+      expect(dimensions.documentWidth, `${route} excedeu ${width}px`).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+      expect(dimensions.mainRight, `${route} saiu da viewport de ${width}px`).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+    }
+
+    await page.goto("/");
+    const composer = page.locator(".assistant-composer");
+    const composerBox = await composer.boundingBox();
+    if (!composerBox) throw new Error("O compositor do chat não está visível no celular.");
+    expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(844 + 1);
+
+    await page.getByRole("button", { name: "Abrir menu de navegação" }).click();
+    const drawer = page.locator(".assistant-sidebar.mobile-open");
+    await expect(drawer).toBeVisible();
+    await expect.poll(async () => (await drawer.boundingBox())?.x ?? Number.NEGATIVE_INFINITY)
+      .toBeGreaterThanOrEqual(-1);
+    const drawerBox = await drawer.boundingBox();
+    if (!drawerBox) throw new Error("O menu móvel não está visível.");
+    expect(drawerBox.x).toBeGreaterThanOrEqual(-1);
+    expect(drawerBox.y).toBeGreaterThanOrEqual(-1);
+    expect(drawerBox.y + drawerBox.height).toBeLessThanOrEqual(844 + 1);
+
+    const firstRows = await drawer.locator(".history-row").evaluateAll((rows) => rows.slice(0, 2).map((row) => {
+      const rect = row.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, height: rect.height };
+    }));
+    if (firstRows.length > 1) {
+      expect(firstRows[0].height).toBeLessThanOrEqual(34);
+      expect(firstRows[1].top - firstRows[0].bottom).toBeLessThanOrEqual(1);
+    }
+
+    const selectedMarker = drawer.locator(".history-row .history-marker").first();
+    if (await selectedMarker.count()) {
+      const selectedBackground = await selectedMarker.evaluate((element) => {
+        element.closest(".history-row")?.classList.add("current");
+        return getComputedStyle(element).backgroundColor;
+      });
+      expect(selectedBackground).toBe("rgba(0, 0, 0, 0)");
+    }
+    await context.close();
+  }
+});
+
+test("a mensagem do usuário quebra linha no celular sem sair do chat", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 360, height: 780 },
+    isMobile: true,
+    hasTouch: true,
+    timezoneId: "America/Sao_Paulo",
+  });
+  const page = await context.newPage();
+  await page.clock.install({ time: new Date("2026-10-12T12:00:00-03:00") });
+  await mockFinanceApi(page);
+  await page.goto("/");
+
+  const prompt = "Quanto eu ganhei com entregas entre 1 e 25 de outubro deste ano? Mostre os valores organizados por dia.";
+  await page.getByRole("textbox", { name: "Mensagem para o assistente" }).fill(prompt);
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+
+  const bubble = page.locator(".user-message .message-text");
+  await expect(bubble).toContainText(prompt);
+  const bubbleBox = await bubble.boundingBox();
+  const composerBox = await page.locator(".assistant-composer").boundingBox();
+  if (!bubbleBox || !composerBox) throw new Error("A mensagem ou o compositor do chat não está visível.");
+  expect(bubbleBox.x).toBeGreaterThanOrEqual(0);
+  expect(bubbleBox.x + bubbleBox.width).toBeLessThanOrEqual(360 + 1);
+  expect(bubbleBox.height).toBeGreaterThan(40);
+  expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(780 + 1);
+  await expect(page.locator("html")).toHaveJSProperty("scrollWidth", 360);
+  await context.close();
+});
+
+test("o controle de recolher o menu não quebra o rótulo em desktop", async ({ page }) => {
+  await mockFinanceApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  const toggle = page.getByRole("button", { name: "Recolher menu lateral" });
+  await expect(toggle).toBeVisible();
+  const label = toggle.locator("span");
+  const labelBox = await label.boundingBox();
+  if (!labelBox) throw new Error("O rótulo do menu lateral não está visível.");
+  expect(labelBox.height).toBeLessThanOrEqual(16);
+  expect(await toggle.evaluate((element) => getComputedStyle(element).width)).not.toBe("34px");
+  await page.getByRole("button", { name: "Recolher menu lateral" }).click();
+  await expect(page.locator(".assistant-layout")).toHaveClass(/sidebar-collapsed/);
+  await page.getByRole("button", { name: "Expandir menu lateral" }).click();
+  await expect(page.locator(".assistant-layout")).not.toHaveClass(/sidebar-collapsed/);
 });
 
 test("tabelas financeiras cabem na largura do celular sem esconder valores", async ({ browser }) => {
