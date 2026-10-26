@@ -606,6 +606,7 @@ export function AssistantWorkspace({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [visibleConversationCount, setVisibleConversationCount] = useState(CONVERSATION_HISTORY_BATCH_SIZE);
   const lastHistoryAutoLoadHeightRef = useRef(0);
+  const historyRef = useRef<HTMLElement>(null);
   const historyTouchStartYRef = useRef<number | null>(null);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [status, setStatus] = useState<AIStatus | null>(null);
@@ -691,6 +692,28 @@ export function AssistantWorkspace({
       requestMoreConversations(event.currentTarget, true);
     }
   }, [requestMoreConversations]);
+
+  useEffect(() => {
+    const history = historyRef.current;
+    if (!history || conversations.length === 0) return;
+
+    const fillAvailableHistorySpace = () => {
+      const heading = history.querySelector<HTMLElement>(":scope > p");
+      if (!heading) return;
+      const firstRow = history.querySelector<HTMLElement>(":scope > .history-row");
+      const rowHeight = firstRow?.getBoundingClientRect().height || 32;
+      const bottomPadding = Number.parseFloat(window.getComputedStyle(history).paddingBottom) || 0;
+      const headingGap = Number.parseFloat(window.getComputedStyle(heading).marginBottom) || 0;
+      const availableHeight = history.getBoundingClientRect().bottom - bottomPadding - heading.getBoundingClientRect().bottom - headingGap;
+      const rowsThatFit = Math.max(CONVERSATION_HISTORY_BATCH_SIZE, Math.floor((availableHeight + 1) / rowHeight));
+      setVisibleConversationCount((count) => Math.min(conversations.length, Math.max(count, rowsThatFit)));
+    };
+
+    fillAvailableHistorySpace();
+    const observer = new ResizeObserver(fillAvailableHistorySpace);
+    observer.observe(history);
+    return () => observer.disconnect();
+  }, [conversations.length]);
 
   useEffect(() => {
     if (view !== "chat" || !conversationId) return;
@@ -1526,6 +1549,7 @@ export function AssistantWorkspace({
         <section
           aria-label="Conversas recentes"
           className="assistant-history"
+          ref={historyRef}
           onScroll={loadMoreConversationsOnScroll}
           onTouchEnd={loadMoreConversationsOnTouchEnd}
           onTouchStart={rememberHistoryTouchStart}

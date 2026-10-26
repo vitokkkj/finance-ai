@@ -380,6 +380,9 @@ textarea:focus-visible,
 }
 
 .assistant-home-summary {
+  box-sizing: border-box;
+  padding: 14px 18px;
+  gap: 12px 22px;
   border-color: var(--color-border);
   border-radius: 12px;
   background: var(--color-surface);
@@ -409,6 +412,8 @@ textarea:focus-visible,
 .assistant-suggestions button {
   min-height: 56px;
   padding-inline: 11px;
+  align-items: center;
+  gap: 12px;
   border-color: var(--color-border);
 }
 
@@ -418,10 +423,25 @@ textarea:focus-visible,
 }
 
 .suggestion-index {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  flex: 0 0 36px;
+  place-items: center;
   border: 1px solid var(--color-border);
   border-radius: 9px;
   background: var(--color-brand-soft);
   color: var(--color-brand);
+}
+
+.suggestion-index > svg {
+  display: block;
+}
+
+.assistant-suggestions .suggestion-copy {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .assistant-composer {
@@ -1136,7 +1156,7 @@ textarea:focus-visible,
   }
 
   .assistant-home-summary {
-    padding: 12px;
+    padding: 13px 14px;
   }
 
   .assistant-data-card {
