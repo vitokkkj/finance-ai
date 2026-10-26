@@ -27,15 +27,21 @@ O sino **Avisos** no cabeçalho abre uma lista de pagamentos atrasados e vencime
 
 Respostas estruturadas usam um conjunto compacto de componentes para resumo financeiro, categorias, lançamentos, transferências, saldo de contas, cartões, faturas, confirmação, erro e sucesso. As informações são apresentadas a partir dos dados estruturados enviados pela API; o frontend não recalcula totais nem altera a semântica de transferências, compras ou pagamentos de fatura.
 
-## Direção editorial
+O indicador durante a resposta usa um orbe leve em CSS, com movimento compatível com `prefers-reduced-motion`. O texto do estado continua vindo do andamento real da solicitação e das ferramentas financeiras da API. O campo de mensagem e o histórico permanecem na tela; não existe atraso mínimo artificial nem substituição do fluxo de mensagens por uma resposta demonstrativa.
 
-A conversa permanece como a home, com o histórico no primeiro plano e sugestões apresentadas como linhas compactas. A direção visual usa fundo de papel quente, verde-floresta para ações, tons de argila para despesas e linhas finas em lugar de painéis decorativos. Geist Sans é usada em toda a interface, inclusive em títulos, controles e valores financeiros; os valores usam também algarismos tabulares para facilitar a comparação.
+## Direção visual
 
-Os tokens dessa direção ficam em `apps/web/src/app/editorial-design.css`, carregado depois das regras base em `globals.css` e `design-system.css`. A paleta oficial usa verde principal `#315E49`, verde escuro `#173B2C`, verde secundário `#4E8068`, creme `#F5F3EB`, branco quente `#FFFEF9` e texto escuro `#08261C`. A marca do símbolo vem da imagem oficial em `apps/web/public/sophia-logo-mark.png`; o favicon e o ícone instalável usam o símbolo em `apps/web/public/icon.svg`. Novas cores, fontes, bordas e estados devem usar os tokens semânticos existentes, com contraste de texto legível em ambos os temas.
+A conversa continua como a home. A direção baseada no template AI Chat da TailGrids agora forma o sistema visual comum do produto: navegação e histórico em uma barra lateral verde-floresta, conteúdo em uma área de trabalho organizada, superfícies com bordas discretas, cantos arredondados e acentos verdes para ações e seleção. O padrão cobre login e primeiro acesso, chat e respostas estruturadas, Visão geral, Lançamentos, Contas, Cartões e faturas, Programados, Categorias, Preferências e Minha conta. Os tipos de movimentação mantêm suas cores semânticas; o verde não substitui os sinais de receita, despesa, alerta ou erro.
 
-## Tema
+Geist Sans é usada em toda a interface. Valores financeiros usam algarismos tabulares. As telas financeiras continuam exibindo valores e datas fornecidos pela API, sem recálculo no frontend.
 
-Claro e escuro são definidos por variáveis CSS. O seletor fica em Preferências e salva a escolha em `localStorage` neste navegador, com a chave `finance-ai-theme`; não há sincronização dessa escolha com o backend. Foco visível, contraste, responsividade e respeito à preferência `prefers-reduced-motion` fazem parte dos estilos comuns.
+Os tokens visuais finais ficam em `apps/web/src/app/sophia-redesign.css`, carregado por último após `globals.css`, `design-system.css` e `editorial-design.css`. A camada editorial anterior continua fornecendo estilos de componentes e a nova camada sobrescreve seus tokens semânticos e tratamentos visuais. A marca usa `apps/web/public/sophia-logo-mark.png`; o favicon e o ícone instalável usam `apps/web/public/icon.svg`.
+
+## Tema e responsividade
+
+Claro e escuro são definidos por variáveis CSS em `sophia-redesign.css`. No tema claro, o conteúdo usa fundo `#F2F6F3`, superfícies brancas, texto `#16251B`, verde principal `#315E49` e navegação `#14221A`. No tema escuro, usa fundo `#141C16`, superfícies `#1C261F`, texto `#F1F6F1`, verde de ação `#A4CDA8` e navegação `#101712`. O seletor em Preferências e no cabeçalho mantém a escolha em `localStorage` no navegador pela chave `finance-ai-theme`; a escolha não é sincronizada com o backend.
+
+Foco visível, contraste, responsividade e a preferência `prefers-reduced-motion` permanecem parte dos estilos comuns. Em telas estreitas, o menu continua como drawer; as páginas financeiras mantêm seu fluxo responsivo e as áreas respeitam os recortes seguros do iPhone. Campos de entrada preservam fonte mínima de 16 px em celular para evitar zoom automático do Safari.
 
 ## Personalização explícita
 
@@ -43,7 +49,7 @@ Em **Preferências da SophIA**, **Como a SophIA trabalha com você** permite con
 
 ## Escopo
 
-A Visão geral, Lançamentos, Contas, Cartões, Categorias e Preferências compartilham a direção editorial, com hierarquia e densidade adequadas a cada tela. O redesign usa componentes e dados existentes; não altera regras de cálculo ou semântica financeira.
+As telas autenticadas e de acesso compartilham a mesma identidade visual, com hierarquia e densidade adequadas a cada fluxo. O redesign usa os componentes e dados existentes; não altera regras de cálculo, autenticação, autorização ou semântica financeira.
 
 ## Revisão manual
 

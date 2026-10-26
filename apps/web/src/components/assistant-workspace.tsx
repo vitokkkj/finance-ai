@@ -16,7 +16,6 @@ import {
   ImagePlus,
   Landmark,
   LayoutDashboard,
-  LoaderCircle,
   LogOut,
   Menu,
   MessageSquare,
@@ -1778,7 +1777,7 @@ function MessageBubble({
         {message.content && <p className="message-text">{userMessage ? message.content : renderAssistantText(message.content)}</p>}
         {message.imagePreviews?.length ? <div className="assistant-message-images">{message.imagePreviews.map((image, index) => <Image alt={`Imagem ${index + 1} enviada para análise`} className="assistant-message-image" height={240} key={image.id} src={image.dataUrl} unoptimized width={420} />)}</div> : userMessage && message.structured_content?.some((item) => item.type === "image_attachment") ? <span className="assistant-image-not-stored">{message.structured_content.filter((item) => item.type === "image_attachment").length} {message.structured_content.filter((item) => item.type === "image_attachment").length === 1 ? "imagem analisada" : "imagens analisadas"} e removidas do armazenamento da conversa.</span> : null}
         {message.pending && <div aria-live="polite" className="assistant-pending-card" role="status">
-          <span aria-hidden="true" className="assistant-pending-icon"><LoaderCircle size={20} strokeWidth={2} /></span>
+          <span aria-hidden="true" className="assistant-pending-icon"><i /></span>
           <span className="assistant-pending-copy"><strong>{pendingLabel || "Preparando sua resposta…"}</strong><small>A SophIA está trabalhando nos seus dados.</small></span>
           <button aria-label="Parar resposta" className="assistant-stop-inline" onClick={onStop} title="Parar a resposta" type="button"><Square aria-hidden="true" fill="currentColor" size={12} /><span>Parar</span></button>
         </div>}
