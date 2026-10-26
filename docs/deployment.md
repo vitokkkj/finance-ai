@@ -296,3 +296,15 @@ Consultas de receitas com intervalo de datas de até 62 dias agora podem incluir
 A VM `/opt/sophia-test` avançou por fast-forward de `d33e25a` para `7f484a9`. `docker compose ... config -q`, a construção separada das imagens e `up -d` passaram. Os seis serviços estão ativos; API, web e PostgreSQL estão saudáveis. Alembic permanece em `0022_ai_latency_diagnostics (head)`, sem migration ou alteração de lançamentos e saldos. `/api/health/live`, `/api/health/ready` e a página principal retornaram `200`; `/api/accounts` sem sessão retornou `401` e `/api/docs` retornou `404`.
 
 Na primeira tentativa de acionamento remoto, a combinação de flags de build/espera foi rejeitada antes da recriação dos serviços. As imagens foram então construídas em etapa separada e o Compose iniciou os serviços; a checagem final confirmou a revisão e a saúde esperadas. Não houve interrupção persistente, migration ou alteração de dados financeiros.
+
+### Redesign visual unificado da SophIA — publicado em 25/10/2026
+
+O PR [#50](https://github.com/vitokkkj/finance-ai/pull/50) foi mesclado no commit `d39bddc`. Os três jobs obrigatórios — API, Frontend e Imagens e perfil público — passaram no workflow [40255150478](https://github.com/vitokkkj/finance-ai/actions/runs/40255150478). A suíte Frontend incluiu E2E integrado, auditoria npm, lint, tipos e build; a imagem web de produção também foi construída no CI.
+
+A interface de login, chat, navegação, telas financeiras, preferências e conta agora compartilha a direção visual verde inspirada no template AI Chat da TailGrids, adaptada aos componentes e fluxos reais da SophIA. O processamento do chat usa um orbe CSS vinculado ao estado real da API, respeita `prefers-reduced-motion` e não introduz espera artificial nem resposta fictícia. O tema da barra do navegador acompanha a opção claro/escuro. A rota de prévia com dados demonstrativos foi removida. Não houve mudança em autenticação, permissões, cálculos financeiros ou API.
+
+A VM `/opt/sophia-test` avançou por fast-forward de `7f484a9` para `d39bddc`, sem alterações locais. `docker compose ... config -q` e `up -d --build --wait` concluíram; os seis serviços ficaram ativos, com API, web e PostgreSQL saudáveis. `/api/health/live` e `/api/health/ready` retornaram `200`; `/api/accounts` sem sessão retornou `401`; `/api/docs` retornou `404`. Alembic permaneceu em `0022_ai_latency_diagnostics (head)`. Não houve migration nem alteração de lançamentos ou saldos.
+
+O primeiro workflow do PR identificou um sufixo CSS inválido (`\n`) na construção da imagem web; ele foi removido e o segundo workflow completo passou. A primeira chamada remota de deploy também terminou antes da ação dos containers porque os finais de linha CRLF anexaram um caractere à opção `--wait`. O script foi normalizado para LF e executado novamente. O serviço anterior permaneceu no ar durante as duas correções; não houve interrupção persistente.
+
+As verificações locais passaram: 31 testes E2E e um teste integrado ignorado por depender do ambiente do CI, lint, typecheck e build. O lint ainda informa quatro avisos `!important` preexistentes em `editorial-design.css`.
