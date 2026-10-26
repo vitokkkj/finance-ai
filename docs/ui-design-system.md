@@ -27,7 +27,7 @@ O sino **Avisos** no cabeçalho abre uma lista de pagamentos atrasados e vencime
 
 ## Componentes de resposta
 
-Respostas estruturadas usam um conjunto compacto de componentes para resumo financeiro, categorias, lançamentos, transferências, saldo de contas, cartões, faturas, confirmação, erro e sucesso. As informações são apresentadas a partir dos dados estruturados enviados pela API; o frontend não recalcula totais nem altera a semântica de transferências, compras ou pagamentos de fatura.
+Respostas estruturadas usam um conjunto compacto de componentes para resumo financeiro, categorias, lançamentos, transferências, saldo de contas, cartões, faturas, confirmação, erro e sucesso. As informações são apresentadas a partir dos dados estruturados enviados pela API; o frontend não recalcula totais nem altera a semântica de transferências, compras ou pagamentos de fatura. Depois de confirmada, cancelada ou recusada, uma ação mantém seu resumo no histórico com o estado final e sem os botões de confirmar/cancelar.
 
 O indicador durante a resposta usa um orbe leve em CSS. O aro externo tem arco de contraste e rotação visível de 1,05 s; um ponto percorre o aro e o núcleo pulsa. Com `prefers-reduced-motion: reduce`, as animações param. O texto do estado continua vindo do andamento real da solicitação e das ferramentas financeiras da API. O campo de mensagem e o histórico permanecem na tela; não existe atraso mínimo artificial nem substituição do fluxo de mensagens por uma resposta demonstrativa.
 
