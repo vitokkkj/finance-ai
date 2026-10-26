@@ -1283,3 +1283,245 @@ textarea:focus-visible,
     max-width: 100%;
   }
 }
+
+/* O histórico acompanha a altura da sidebar até a divisória da navegação. */
+.assistant-sidebar .assistant-history {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 0%;
+  margin-bottom: 0;
+  overscroll-behavior-y: contain;
+}
+
+@media (max-width: 760px) {
+  .assistant-sidebar .assistant-history {
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 0%;
+    margin-bottom: 0;
+  }
+}
+
+/* O resumo financeiro ganha largura, separação entre blocos e texto legível. */
+@media (min-width: 1121px) {
+  .assistant-chat-layout:not(.context-hidden) {
+    grid-template-columns: minmax(0, 1fr) minmax(388px, 388px);
+  }
+}
+
+@media (min-width: 1121px) and (max-width: 1440px) {
+  .assistant-chat-layout:not(.context-hidden) {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 360px);
+  }
+}
+
+.assistant-context-panel {
+  box-sizing: border-box;
+  width: auto;
+  padding: 22px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.context-panel-title {
+  min-width: 0;
+  margin: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.context-panel-title > div {
+  min-width: 0;
+  gap: 4px;
+}
+
+.context-panel-title strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.context-panel-title small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.context-balance {
+  margin: 0;
+  padding: 17px 16px;
+  gap: 8px;
+  border-radius: 12px;
+}
+
+.context-balance > span,
+.context-metrics > div > span {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.context-balance > strong {
+  font-size: 27px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-balance > small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.context-metrics {
+  margin: 0;
+  padding: 5px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 11px;
+}
+
+.context-metrics > div {
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.context-metrics > div > span {
+  min-width: 0;
+}
+
+.context-metrics > div > strong,
+.context-card-row > strong,
+.context-category-row > strong {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-cards {
+  min-width: 0;
+  margin: 0;
+  padding: 13px 15px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.context-section-heading {
+  min-height: 30px;
+  margin: 0 0 5px;
+  padding-bottom: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.context-section-heading span:last-child {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.context-card-row,
+.context-category-row {
+  min-width: 0;
+  min-height: 46px;
+  padding-block: 8px;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.context-card-row > span {
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.context-card-row small,
+.context-card-row > span small + small {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.context-forecast .context-metrics {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.context-forecast .context-metrics > div {
+  min-height: 43px;
+}
+
+.context-transaction-row {
+  min-height: 56px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding-block: 8px;
+}
+
+.context-transaction-copy {
+  min-width: 0;
+  gap: 4px;
+}
+
+.context-transaction-copy strong {
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.context-transaction-copy small {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.context-transaction-amount {
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.context-cards > p,
+.context-empty,
+.forecast-unassigned-note {
+  margin: 8px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.context-truth-note {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1120px) {
+  .assistant-context-panel.mobile-open {
+    width: auto;
+    max-width: min(720px, calc(100vw - 24px));
+    margin-inline: auto;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .assistant-context-panel.mobile-open {
+    width: 100%;
+    max-width: none;
+    padding: 18px 16px max(18px, env(safe-area-inset-bottom));
+  }
+
+  .context-balance > strong {
+    font-size: 24px;
+  }
+}

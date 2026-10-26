@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TouchEvent as ReactTouchEvent, type UIEvent as ReactUIEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TouchEvent as ReactTouchEvent, type UIEvent as ReactUIEvent, type WheelEvent as ReactWheelEvent } from "react";
 import Image from "next/image";
 import {
   Archive,
@@ -606,6 +606,7 @@ export function AssistantWorkspace({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [visibleConversationCount, setVisibleConversationCount] = useState(CONVERSATION_HISTORY_BATCH_SIZE);
   const lastHistoryAutoLoadHeightRef = useRef(0);
+  const historyTouchStartYRef = useRef<number | null>(null);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [status, setStatus] = useState<AIStatus | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -656,13 +657,40 @@ export function AssistantWorkspace({
     layout?.addEventListener("touchstart", preventNativeBackGesture, { capture: true, passive: false });
   }, [preventNativeBackGesture]);
 
-  const loadMoreConversationsOnScroll = useCallback((event: ReactUIEvent<HTMLDivElement>) => {
-    const history = event.currentTarget;
+  const requestMoreConversations = useCallback((history: HTMLDivElement, allowWhenNotScrollable = false) => {
+    const hasMore = visibleConversationCount < conversations.length;
+    const hasOverflow = history.scrollHeight - history.clientHeight > 1;
     const nearEnd = history.scrollHeight - history.scrollTop - history.clientHeight <= 48;
-    if (!nearEnd || lastHistoryAutoLoadHeightRef.current === history.scrollHeight || visibleConversationCount >= conversations.length) return;
-    lastHistoryAutoLoadHeightRef.current = history.scrollHeight;
+    if (!hasMore || (hasOverflow ? !nearEnd : !allowWhenNotScrollable)) return false;
+    if (hasOverflow && lastHistoryAutoLoadHeightRef.current === history.scrollHeight) return false;
+    if (hasOverflow) lastHistoryAutoLoadHeightRef.current = history.scrollHeight;
     setVisibleConversationCount((count) => Math.min(count + CONVERSATION_HISTORY_BATCH_SIZE, conversations.length));
+    return true;
   }, [conversations.length, visibleConversationCount]);
+
+  const loadMoreConversationsOnScroll = useCallback((event: ReactUIEvent<HTMLDivElement>) => {
+    requestMoreConversations(event.currentTarget);
+  }, [requestMoreConversations]);
+
+  const loadMoreConversationsOnWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    if (event.deltaY > 0 && requestMoreConversations(event.currentTarget, true)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, [requestMoreConversations]);
+
+  const rememberHistoryTouchStart = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    historyTouchStartYRef.current = event.touches[0]?.clientY ?? null;
+  }, []);
+
+  const loadMoreConversationsOnTouchEnd = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    const startY = historyTouchStartYRef.current;
+    historyTouchStartYRef.current = null;
+    const endY = event.changedTouches[0]?.clientY;
+    if (startY !== null && endY !== undefined && startY - endY >= 24) {
+      requestMoreConversations(event.currentTarget, true);
+    }
+  }, [requestMoreConversations]);
 
   useEffect(() => {
     if (view !== "chat" || !conversationId) return;
@@ -1495,7 +1523,14 @@ export function AssistantWorkspace({
           <RefreshCw aria-hidden="true" size={15} />
           <span>Atualizar aplicativo</span>
         </button>
-        <div className="assistant-history" onScroll={loadMoreConversationsOnScroll}>
+        <section
+          aria-label="Conversas recentes"
+          className="assistant-history"
+          onScroll={loadMoreConversationsOnScroll}
+          onTouchEnd={loadMoreConversationsOnTouchEnd}
+          onTouchStart={rememberHistoryTouchStart}
+          onWheel={loadMoreConversationsOnWheel}
+        >
           <p>Conversas recentes</p>
           {loading ? <span className="history-placeholder">Carregando…</span> : conversations.length === 0 ? (
             <span className="history-placeholder">Pergunte sobre seus gastos para começar.</span>
@@ -1531,7 +1566,7 @@ export function AssistantWorkspace({
           {!loading && conversations.length > CONVERSATION_HISTORY_BATCH_SIZE && <span aria-atomic="true" aria-live="polite" className="sr-only">
             Histórico: {Math.min(visibleConversationCount, conversations.length)} de {conversations.length} conversas exibidas.
           </span>}
-        </div>
+        </section>
         <nav className="assistant-nav" aria-label="Navegação financeira">
           <div className="assistant-nav-group">
             <p className="assistant-nav-label">Finanças</p>
