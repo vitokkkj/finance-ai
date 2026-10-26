@@ -39,6 +39,8 @@ Geist Sans é usada em toda a interface. Valores financeiros usam algarismos tab
 
 Os tokens visuais finais ficam em `apps/web/src/app/sophia-redesign.css`, carregado por último após `globals.css`, `design-system.css` e `editorial-design.css`. A camada editorial anterior continua fornecendo estilos de componentes e a nova camada sobrescreve seus tokens semânticos e tratamentos visuais. A marca usa `apps/web/public/sophia-logo-mark.png`; o favicon e o ícone instalável usam `apps/web/public/icon.svg`.
 
+Seletores nativos estilizados mantêm a seta customizada com `background-image`, `background-position`, `background-repeat: no-repeat` e `background-size`. Regras compartilhadas de superfície devem alterar apenas `background-color`; o shorthand `background` redefine essas propriedades e pode apagar a seta ou fazê-la repetir.
+
 ## Tema e responsividade
 
 Claro e escuro são definidos por variáveis CSS em `sophia-redesign.css`. No tema claro, o conteúdo usa fundo `#F2F6F3`, superfícies brancas, texto `#16251B`, verde principal `#315E49` e navegação `#14221A`. No tema escuro, usa fundo `#141C16`, superfícies `#1C261F`, texto `#F1F6F1`, verde de ação `#A4CDA8` e navegação `#101712`. O seletor em Preferências e no cabeçalho mantém a escolha em `localStorage` no navegador pela chave `finance-ai-theme`; a escolha não é sincronizada com o backend.
