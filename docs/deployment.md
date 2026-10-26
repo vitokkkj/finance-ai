@@ -347,7 +347,7 @@ Antes da migration, foi criado um dump PostgreSQL custom temporário de 226.364 
 
 ### Estado final das ações de confirmação no chat — publicado em 26/10/2026
 
-O PR [#61](https://github.com/vitokkkj/finance-ai/pull/61) foi mesclado no commit `5791a278be970eda6a51002db983451ee416d6b9`. API/PostgreSQL, Frontend com E2E integrado e imagens/configuração pública passaram no workflow [40378907232](https://github.com/vitokkkj/finance-ai/actions/runs/40378907232). A primeira execução ficou mais de 13 minutos no passo de instalar Chromium e foi cancelada; após alterar o passo para instalar somente o navegador (`npx playwright install chromium`), a repetição completou os E2Es e todos os demais checks.
+O PR [#61](https://github.com/vitokkkj/finance-ai/pull/61) foi mesclado no commit `5791a278be970eda6a51002db983451ee416d6b9`. API/PostgreSQL, Frontend com E2E integrado e imagens/configuração pública passaram no workflow [40378907232](https://github.com/vitokkkj/finance-ai/actions/runs/40378907232). As duas primeiras tentativas ficaram mais de 11 minutos no passo de instalar Chromium com `--with-deps` e foram canceladas. O workflow passou a instalar somente o navegador (`npx playwright install chromium`); na tentativa seguinte os E2Es e todos os demais checks passaram.
 
 O detalhe da conversa agora lê o estado atual do `AIToolCall` e apresenta esse estado no cartão original. Ações concluídas, canceladas ou falhas deixam de mostrar **Confirmar** e **Cancelar**, e a mensagem antiga de revisão é substituída por um aviso de que a ação já foi processada. A correção cobre também conversas reabertas. O resumo financeiro e o resultado final permanecem no histórico; não houve mudança no schema nem nos dados financeiros.
 
