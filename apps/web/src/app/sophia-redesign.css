@@ -124,9 +124,17 @@ textarea:focus-visible,
 }
 
 .assistant-sidebar-toggle {
-  width: 34px;
-  height: 34px;
-  margin-top: 5px;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  height: auto;
+  margin: 5px 0 0;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  white-space: nowrap;
   border-color: rgb(212 234 216 / 13%);
   border-radius: 9px;
   background: rgb(255 255 255 / 3%);
@@ -183,8 +191,8 @@ textarea:focus-visible,
 }
 
 .assistant-sidebar .history-row {
-  min-height: 36px;
-  margin: 2px 0;
+  min-height: 32px;
+  margin: 0;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -196,7 +204,8 @@ textarea:focus-visible,
 }
 
 .assistant-sidebar .history-item {
-  min-height: 35px;
+  min-height: 32px;
+  gap: 7px;
   color: #b0beb3;
   font-size: 11px;
 }
@@ -212,7 +221,7 @@ textarea:focus-visible,
 
 .assistant-sidebar .history-row.current .history-marker {
   border-color: var(--color-sidebar-brand);
-  background: var(--color-sidebar-brand);
+  background: transparent;
 }
 
 .assistant-sidebar .history-action-toggle {
@@ -453,9 +462,16 @@ textarea:focus-visible,
 }
 
 .user-message .message-body {
-  border-color: var(--color-border);
-  border-radius: 14px 14px 4px;
-  background: var(--color-brand-soft);
+  width: fit-content;
+  min-width: 0;
+  max-width: min(600px, 88%);
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .assistant-data-card,
@@ -1147,12 +1163,13 @@ textarea:focus-visible,
 
 .assistant-pending-icon::before {
   position: absolute;
-  inset: 2px;
-  border: 1px solid color-mix(in srgb, var(--color-brand) 68%, transparent);
+  inset: 1px;
+  border: 2px solid color-mix(in srgb, var(--color-brand) 28%, transparent);
+  border-top-color: var(--color-brand);
   border-right-color: transparent;
   border-radius: 50%;
   content: "";
-  animation: sophia-orb-rotate 2.2s linear infinite;
+  animation: sophia-orb-rotate 1.05s linear infinite;
 }
 
 .assistant-pending-icon::after {
@@ -1167,14 +1184,17 @@ textarea:focus-visible,
 
 .assistant-pending-icon > i {
   position: absolute;
-  top: 3px;
-  right: 4px;
+  top: 0;
+  left: 50%;
   width: 5px;
   height: 5px;
+  margin-left: -2.5px;
   border: 1px solid var(--color-surface);
   border-radius: 50%;
   background: var(--color-brand);
   box-shadow: 0 0 8px color-mix(in srgb, var(--color-brand) 45%, transparent);
+  transform-origin: 50% 17px;
+  animation: sophia-orb-rotate 1.05s linear infinite;
 }
 
 .assistant-pending-copy strong {
@@ -1196,7 +1216,70 @@ textarea:focus-visible,
 
 @media (prefers-reduced-motion: reduce) {
   .assistant-pending-icon::before,
-  .assistant-pending-icon::after {
+  .assistant-pending-icon::after,
+  .assistant-pending-icon > i {
     animation: none;
+  }
+}
+
+/* Alinhamento de mensagens e densidade do histórico. */
+.assistant-sidebar .history-row {
+  min-height: 32px;
+  margin-block: 0;
+}
+
+.assistant-sidebar .assistant-history {
+  gap: 0;
+}
+
+.assistant-sidebar .history-item {
+  min-height: 32px;
+  gap: 7px;
+}
+
+.assistant-sidebar .history-row.current .history-marker {
+  background: transparent;
+}
+
+.assistant-sidebar .history-row.current .history-marker::after {
+  content: none;
+}
+
+.user-message .message-body {
+  max-width: min(600px, 88%);
+}
+
+.user-message .message-author {
+  align-self: flex-end;
+  margin: 2px 4px 7px 0;
+  text-align: right;
+}
+
+.user-message .message-text {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 11px 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .assistant-sidebar-toggle {
+    display: none;
+  }
+
+  .assistant-message-list {
+    min-width: 0;
+    padding-inline: 14px;
+  }
+
+  .user-message .message-body {
+    max-width: 92%;
+  }
+
+  .user-message .message-text {
+    max-width: 100%;
   }
 }
