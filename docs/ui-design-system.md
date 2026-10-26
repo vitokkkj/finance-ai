@@ -2,7 +2,7 @@
 
 A SophIA — sua assistente financeira — começa pela conversa: ao entrar, a pessoa vê uma saudação curta, sugestões relacionadas às contas e cartões cadastrados e o campo para perguntar. A conversa anterior não abre automaticamente; fica disponível em **Conversas recentes**. Uma nova conversa só é persistida quando a primeira mensagem é enviada.
 
-A visão geral financeira permanece como uma área própria. Na conversa, o painel lateral fica oculto quando não há assunto financeiro identificável, e pode ser recolhido quando está aberto. Os controles de recolher a navegação e abrir o contexto financeiro ficam no próprio menu lateral, com rótulos explícitos. Quando existe contexto, muda conforme o assunto:
+A visão geral financeira permanece como uma área própria. Na conversa, o painel lateral acompanha o assunto quando ele é identificável. Em conversas antigas sem um assunto reconhecido, o botão continua disponível quando há dados do resumo financeiro e abre o contexto geral; assim, uma frase curta como “8,98 em Farmácia” não faz o painel desaparecer. O painel pode ser recolhido quando está aberto. Os controles de navegação e de contexto mantêm rótulos explícitos em seus respectivos lugares no menu e no cabeçalho. Quando existe contexto, muda conforme o assunto:
 
 O composer permite anexar até quatro imagens quando o ChatGPT conectado está ativo. Cada anexo tem prévia e ação para remover; a interface informa que os arquivos serão enviados para análise e não serão salvos no histórico. As páginas de Preferências e Minha conta rolam dentro da área principal e mantêm espaço ao final para que o último conteúdo e as ações continuem acessíveis.
 
@@ -15,9 +15,9 @@ Quando uma ação de uma lista abre um formulário de edição fora da área vis
 - cartão: limite, fechamento, vencimento e fatura mais recente;
 - conta: saldo e movimentações associadas;
 - gastos: total, categorias e comparação com o mês anterior; quando a conversa pede outro período, o painel segue esse período;
-- sem assunto identificável: o painel não é exibido; a home mantém apenas um resumo compacto.
+- sem assunto identificável: o painel mostra o resumo geral quando há dados financeiros disponíveis.
 
-Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta. A lista de conversas mantém títulos em uma linha com reticências, marcador próprio alinhado ao texto e estado selecionado visível nos temas claro e escuro. O menu mantém rótulos à direita dos ícones. A conta pode receber uma foto circular, redimensionada no navegador e normalizada no servidor.
+Em telas estreitas, a conversa ocupa a área principal, a navegação vira drawer e o contexto abre como sheet inferior. No estado inicial, o composer fica logo abaixo das sugestões. Depois da primeira mensagem, permanece junto à borda inferior, inclusive com a sheet aberta. O histórico mostra 10 conversas inicialmente; a própria lista tem rolagem limitada e carrega mais 10 ao chegar perto do fim, em desktop e no drawer móvel. Títulos ficam em uma linha com reticências, o marcador fica alinhado ao texto e o estado selecionado permanece visível nos temas claro e escuro. O menu mantém rótulos à direita dos ícones. A conta pode receber uma foto circular, redimensionada no navegador e normalizada no servidor.
 
 A Visão Geral destaca o saldo de contas correntes. Poupança e outros tipos aparecem em grupos separados, com saldo realizado e projetado. A área “A pagar” separa atrasados, próximos sete dias e restante do mês; receitas previstas e projeção não se confundem com valores realizados. Conversas recentes recebem um título curto: o provedor sugere o título quando o modelo atende a primeira mensagem, e o parser local usa um resumo determinístico quando já consegue interpretá-la. A sugestão do modelo usa uma chamada breve da mesma conexão ChatGPT e conta no limite de uso do Plus, sem cobrança da API. O usuário pode renomear ou arquivar conversas pela sidebar; títulos longos ficam em uma linha e são truncados visualmente.
 
@@ -57,10 +57,11 @@ As telas autenticadas e de acesso compartilham a mesma identidade visual, com hi
 - Abrir uma conversa anterior e voltar a **Nova conversa**.
 - Conferir o contexto para cartões, contas e gastos; verificar que transferência não aparece como despesa.
 - Abrir e fechar o painel contextual no desktop e no sheet em viewport móvel.
-- Conferir que o painel some sem contexto identificável e pode ser recolhido quando útil.
+- Conferir que o contexto específico segue o assunto identificado e que conversas antigas mantêm acesso ao resumo geral quando não há assunto reconhecido.
+- Conferir que o histórico mostra 10 conversas e carrega mais 10 ao rolar até o fim em telas altas de desktop e no drawer móvel.
 - Conferir a hierarquia de saldo e fluxo mensal na Visão Geral, os estados vazios e as ações de renomear/arquivar conversa.
 - Conferir os cinco controles explícitos de **Como a SophIA trabalha com você** sem salvar durante a revisão visual.
 - Conferir respostas estruturadas, confirmações, estados de erro e sucesso nos temas claro e escuro.
 - Conferir navegação por teclado, foco visível, contraste e `prefers-reduced-motion`.
 - Conferir o aro girando com movimento normal e estático com movimento reduzido.
-- A regressão móvel em Playwright percorre chat, Visão geral, Lançamentos, Contas, Cartões, Programados, Categorias e Preferências em 360, 390 e 430 px; verifica estouro horizontal, posição do compositor e drawer, densidade do histórico, marcador da conversa ativa e quebra de mensagens longas. Safari/iPhone físico ainda exige validação manual.
+- A regressão móvel em Playwright percorre chat, Visão geral, Lançamentos, Contas, Cartões, Programados, Categorias e Preferências em 360, 390 e 430 px; verifica estouro horizontal, posição do compositor e drawer, densidade do histórico, marcador da conversa ativa e quebra de mensagens longas. Os testes também verificam o carregamento incremental de 10 em 10 em viewports altos e a abertura do resumo financeiro ao voltar para uma conversa antiga, em desktop e celular. Safari/iPhone físico ainda exige validação manual.

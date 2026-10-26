@@ -5685,7 +5685,7 @@ textarea:focus-visible {
 
 .assistant-sidebar .assistant-history {
   min-height: 120px;
-  max-height: none;
+  max-height: min(36dvh, 320px);
   flex: 1 1 auto;
   margin: 0 0 10px;
   padding-top: 11px;
@@ -5765,8 +5765,10 @@ textarea:focus-visible {
 
   .assistant-sidebar .assistant-history {
     min-height: 0;
-    max-height: none;
-    flex: 1 1 auto;
+    max-height: min(32dvh, 260px);
+    flex: 0 1 auto;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   .composer-hint-desktop {
