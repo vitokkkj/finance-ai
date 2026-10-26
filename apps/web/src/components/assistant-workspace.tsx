@@ -1327,7 +1327,7 @@ export function AssistantWorkspace({
     dashboard.monthly_expenses !== "0.00" ||
     dashboard.recent_transactions.length > 0
   ));
-  const contextPanelAvailable = hasUsefulContext || (showWelcome && hasHomeSummary);
+  const contextPanelAvailable = hasUsefulContext || hasHomeSummary;
   useEffect(() => {
     if (window.matchMedia("(max-width: 1120px)").matches) {
       setContextPanelOpen(false);

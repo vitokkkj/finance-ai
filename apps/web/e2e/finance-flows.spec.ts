@@ -852,6 +852,7 @@ test("o proprietário pode criar e excluir contas de acesso sem dados", async ({
 });
 
 test("o histórico mostra 10 conversas e carrega mais ao rolar até o fim", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 960 });
   await mockFinanceApi(page, { largeLists: true });
   await page.goto("/");
 
@@ -867,6 +868,63 @@ test("o histórico mostra 10 conversas e carrega mais ao rolar até o fim", asyn
   await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect(history.locator(".history-row")).toHaveCount(32);
   await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 32 de 32 conversas exibidas.");
+});
+
+test("o histórico mobile rola no próprio menu e carrega mais conversas automaticamente", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await mockFinanceApi(page, { largeLists: true });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Abrir menu de navegação" }).click();
+
+  const history = page.locator(".assistant-sidebar.mobile-open .assistant-history");
+  await expect(history.locator(".history-row")).toHaveCount(10);
+  await expect.poll(() => history.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+
+  await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(history.locator(".history-row")).toHaveCount(20);
+  await expect(history.locator('[aria-live="polite"]')).toHaveText("Histórico: 20 de 32 conversas exibidas.");
+
+  await history.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(history.locator(".history-row")).toHaveCount(30);
+});
+
+test("conversas antigas mantêm acesso ao contexto financeiro", async ({ page }) => {
+  await mockFinanceApi(page, { largeLists: true });
+  await page.route("**/api/ai/conversations/synthetic-conversation-1", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "synthetic-conversation-1",
+        title: "8,98 em Farmácia",
+        created_at: "2026-10-12T12:00:00-03:00",
+        updated_at: "2026-10-12T12:00:00-03:00",
+        messages: [
+          { id: "old-user-message", role: "USER", content: "8,98 em Farmácia" },
+          { id: "old-assistant-message", role: "ASSISTANT", content: "Registrei a despesa de R$ 8,98 em Farmácia." },
+        ],
+      }),
+    });
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Conversa de teste 1", exact: true }).click();
+  await expect(page.getByText("Registrei a despesa de R$ 8,98 em Farmácia.")).toBeVisible();
+  const contextToggle = page.getByRole("button", { name: "Abrir contexto financeiro" });
+  await expect(contextToggle).toBeVisible();
+  await contextToggle.click();
+  const contextPanel = page.getByRole("complementary", { name: "Contexto financeiro" });
+  await expect(contextPanel).toContainText("Saldos por conta");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: "Abrir contexto financeiro" })).toBeVisible();
+  await page.getByRole("button", { name: "Abrir contexto financeiro" }).click();
+  await expect(contextPanel).toHaveClass(/mobile-open/);
+  await expect(contextPanel).toContainText("Saldos por conta");
 });
 
 for (const width of [390, 820]) {
