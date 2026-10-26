@@ -147,7 +147,7 @@ jobs:
 
       - name: Instalar Chromium para Playwright
         working-directory: apps/web
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Executar testes E2E
         working-directory: apps/web
