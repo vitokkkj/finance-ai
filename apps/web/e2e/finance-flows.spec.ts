@@ -72,6 +72,16 @@ test("os filtros de lançamentos mostram os totais de todos os resultados", asyn
   await page.goto("/?view=finance&section=transactions");
 
   const filters = page.locator(".filter-form");
+  const selects = filters.locator("select");
+  await expect(selects).toHaveCount(3);
+  for (const select of await selects.all()) {
+    await expect(select).toHaveCSS("background-repeat", "no-repeat");
+    await expect(select).toHaveCSS("background-size", "14px auto");
+    await expect(select).toHaveCSS("appearance", "none");
+    expect(await select.evaluate((element) => getComputedStyle(element).backgroundImage)).toContain(
+      "data:image/svg+xml",
+    );
+  }
   await filters.getByLabel("Tipo").selectOption("EXPENSE");
   await filters.getByRole("button", { name: "Filtrar" }).click();
 

@@ -833,7 +833,7 @@ textarea:focus-visible,
 .assistant-layout textarea {
   border-color: var(--color-border-strong);
   border-radius: 9px;
-  background: var(--color-surface);
+  background-color: var(--color-surface);
   color: var(--color-ink);
 }
 
