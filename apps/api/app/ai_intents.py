@@ -23,6 +23,11 @@ _EXPLICIT_AMOUNT_FIRST_EXPENSE = re.compile(
     r"(?P<category>[\wÀ-ÿ][\wÀ-ÿ '-]{0,99}?)\s*[.!?]?$",
     re.IGNORECASE,
 )
+_SHORT_AMOUNT_FIRST_EXPENSE = re.compile(
+    r"^(?P<amount>(?:r\$\s*)?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:[,.]\d{1,2})?)"
+    r"\s+(?:em|no|na)\s+(?P<description>[\wÀ-ÿ][\wÀ-ÿ\s'’-]{0,99})\s*[.!]?$",
+    re.IGNORECASE,
+)
 _MONEY = re.compile(
     r"(?<![\w])(?:r\$\s*)?(?P<value>"
     r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:[,.]\d{1,2})?"
@@ -254,10 +259,19 @@ class RecurrenceDecision:
 
 def is_manual_expense_candidate(content: str) -> bool:
     normalized = content.strip()
-    return (
+    if (
         _ENTRY_START.match(normalized) is not None
         or _EXPLICIT_AMOUNT_FIRST_EXPENSE.match(normalized) is not None
-    )
+    ):
+        return True
+    short_match = _SHORT_AMOUNT_FIRST_EXPENSE.match(normalized)
+    if short_match is None:
+        return False
+    amount_text = short_match.group("amount").casefold()
+    if "r$" not in amount_text and re.search(r"[,.]\d{1,2}$", amount_text) is None:
+        return False
+    expense_terms = set().union(*_CATEGORY_SYNONYMS)
+    return _contains_any_alias(_normalize(short_match.group("description")), expense_terms)
 
 
 def parse_manual_expense(
@@ -272,11 +286,21 @@ def parse_manual_expense(
     parse_content = original
     explicit_category: str | None = None
     amount_first_match = _EXPLICIT_AMOUNT_FIRST_EXPENSE.match(original)
+    short_amount_first_match = _SHORT_AMOUNT_FIRST_EXPENSE.match(original)
     if amount_first_match is not None:
         amount_text = amount_first_match.group("amount").strip()
         description_text = amount_first_match.group("description").strip(" ,;.")
         explicit_category = amount_first_match.group("category").strip(" .,!?")
         if not description_text or not explicit_category:
+            return ExpenseDecision("NOT_APPLICABLE")
+        parse_content = f"Gastei {amount_text} em {description_text}"
+    elif short_amount_first_match is not None:
+        amount_text = short_amount_first_match.group("amount").strip()
+        description_text = short_amount_first_match.group("description").strip(" ,;.")
+        if not description_text or (
+            "r$" not in amount_text.casefold()
+            and re.search(r"[,.]\d{1,2}$", amount_text) is None
+        ):
             return ExpenseDecision("NOT_APPLICABLE")
         parse_content = f"Gastei {amount_text} em {description_text}"
 

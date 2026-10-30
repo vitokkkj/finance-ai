@@ -1672,6 +1672,84 @@ def test_amount_first_expense_with_explicit_category_is_registered_without_model
     assert transactions[0]["description"] == "Bolo"
 
 
+def test_short_amount_description_registers_new_expense_with_similar_history(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    account_id, food_category_id = _create_assistant_basics(client)
+    today = _today()
+    previous_transactions = [
+        ("Croissant", "7.70"),
+        ("Croissant", "15.40"),
+        ("Croissant e Toddynho", "19.15"),
+        ("Croissant", "7.70"),
+        ("Croissant", "7.70"),
+        ("Croissant", "15.40"),
+    ]
+    for index, (description, amount) in enumerate(previous_transactions, start=1):
+        created = client.post(
+            "/api/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": food_category_id,
+                "type": "EXPENSE",
+                "description": description,
+                "amount": amount,
+                "occurred_at": date.fromordinal(today.toordinal() - index).isoformat(),
+            },
+        )
+        assert created.status_code == 201
+
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider(
+        [[ProviderEvent(type="text_delta", text="Resposta do modelo."), _completed()]]
+    )
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "7,7 em Croissant"},
+    )
+
+    transactions = client.get("/api/transactions").json()["items"]
+    assert response.status_code == 200
+    assert "Pronto, registrei R$ 7,70 em Croissant" in response.text
+    assert len(transactions) == len(previous_transactions) + 1
+    assert transactions[0]["amount"] == "7.70"
+    assert transactions[0]["description"] == "Croissant"
+    assert fake.requests == []
+
+
+def test_short_amount_expense_asks_for_account_when_multiple_accounts_are_active(
+    client: TestClient,
+) -> None:
+    _sign_up(client)
+    _create_assistant_basics(client)
+    additional_account = client.post(
+        "/api/accounts",
+        json={
+            "name": "Nubank",
+            "type": "CHECKING",
+            "opening_balance": "0.00",
+            "opening_balance_date": _today().isoformat(),
+        },
+    )
+    assert additional_account.status_code == 201
+    conversation = client.post("/api/ai/conversations", json={}).json()
+    fake = FakeAIProvider([])
+    _set_fake_provider(client, fake)
+
+    response = client.post(
+        f"/api/ai/conversations/{conversation['id']}/messages",
+        json={"content": "7,7 em Croissant"},
+    )
+
+    assert response.status_code == 200
+    assert "em qual conta" in response.text.casefold()
+    assert client.get("/api/transactions").json()["items"] == []
+    assert fake.requests == []
+
+
 def test_clear_expense_duplicate_is_not_created_twice_and_missing_category_is_asked(
     client: TestClient,
 ) -> None:
