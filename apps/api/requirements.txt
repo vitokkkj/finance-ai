@@ -3,7 +3,7 @@ argon2-cffi==25.1.0
 fastapi==0.143.0
 cryptography==50.0.2
 httpx==0.28.1
-pydantic-settings==2.15.0
+pydantic-settings==2.16.1
 psycopg[binary]==3.3.6
 SQLAlchemy==2.1.4
 openai==3.26.1
